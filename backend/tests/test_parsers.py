@@ -74,6 +74,39 @@ class TestSdpParser:
         assert sdp is not None
         assert any('c=' in e for e in sdp.errors)
 
+
+    def test_standalone_y_line(self):
+        """国标 y= 可以是独立行，不是 a=y:
+
+        实测 20261118141959.pcap 里 SDP 就是单独一行 y=0600001869，
+        早期只处理 a= 导致 SSRC 全为空、媒体无法归属。
+        """
+        lines = [
+            'v=0',
+            'o=44060453031329016499 0 0 IN IP4 19.130.171.5',
+            's=Play',
+            'c=IN IP4 19.130.171.5',
+            't=0 0',
+            'm=video 8808 TCP/RTP/AVP 96',
+            'a=setup:passive',
+            'y=0600001869',
+        ]
+        sep = chr(13) + chr(10)
+        text = sep.join(lines) + sep
+        sdp = sip_parser.parse_sdp(text)
+        assert sdp is not None
+        assert sdp.y_ssrc == '0600001869'
+
+    def test_y_line_both_forms(self):
+        """独立行与 a=y: 两种写法都要能解析"""
+        sep = chr(13) + chr(10)
+        standalone = sip_parser.parse_sdp(
+            sep.join(['v=0', 'm=video 8808 RTP/AVP 96', 'y=0600001869']) + sep)
+        attr_form = sip_parser.parse_sdp(
+            sep.join(['v=0', 'm=video 8808 RTP/AVP 96', 'a=y:0600001869']) + sep)
+        assert standalone.y_ssrc == '0600001869'
+        assert attr_form.y_ssrc == '0600001869'
+
     def test_not_sdp(self):
         assert sip_parser.parse_sdp('hello world') is None
         assert sip_parser.parse_sdp('') is None

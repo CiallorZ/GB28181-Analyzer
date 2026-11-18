@@ -274,6 +274,14 @@ def parse_sdp(text: str) -> SdpInfo | None:
                 sdp.xstreamtype = val
         elif k == 'b':
             sdp.attributes.setdefault('bandwidth', v)
+        elif k == 'y':
+            # 国标扩展：y= 是**独立行**，不是 a=y:（两种写法厂商都有用）
+            # 实测 20261118141959.pcap 里就是独立行 y=0600001869，
+            # 只处理 a= 会导致 SSRC 解析为空，进而媒体无法归属
+            sdp.y_ssrc = v.strip()
+        elif k == 'f':
+            # 同上，f= 也可能是独立行
+            sdp.f_field = v.strip()
 
     if not sdp.media:
         sdp.errors.append('SDP 中没有 m= 媒体描述行')
