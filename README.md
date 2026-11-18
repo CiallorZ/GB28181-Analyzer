@@ -1,5 +1,11 @@
 # GB28181 Analyzer
 
+[![CI](https://github.com/CiallorZ/gb28181-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/CiallorZ/gb28181-analyzer/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-42%20passed-brightgreen)](backend/tests/)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+[![Vue](https://img.shields.io/badge/vue-3.5-42b883)](https://vuejs.org/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 **网络抓包分析工具 · 协议与流媒体质量诊断**
 
 上传 PCAP/PCAPNG 抓包，自动解析 SIP 信令、SDP 协商、RTP 媒体流与 PS 封装，
