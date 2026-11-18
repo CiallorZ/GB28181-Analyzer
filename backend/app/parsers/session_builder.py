@@ -400,13 +400,20 @@ def _match_score(s: SessionInfo, st: dict) -> int:
     score = 0
     ssrc_hex = '%08x' % (st.get('ssrc') or 0)
 
-    # 1) SSRC
+    # 1) SSRC 精确匹配 —— 唯一强判据，权重必须远超其他项
+    #    否则多会话共享同一端口（国标 TCP 常见）时所有候选同分，
+    #    贪心分配会把所有流都塞给第一个会话。
     for want in (s.sdp_ssrc, s.subject_ssrc):
-        if want and ssrc_hex.lower().endswith(want.lower().lstrip('0')):
-            score += 100
+        if not want:
+            continue
+        w = want.lower().lstrip('0')
+        h = ssrc_hex.lower().lstrip('0')
+        # 兼容三种写法：完整 8 位 / 去前导 0 / 互为后缀
+        if h == w or h.endswith(w) or w.endswith(h):
+            score += 10000
             break
 
-    # 2) 端口
+    # 2) 端口匹配 —— 弱判据（多会话常共享 8808）
     if s.negotiated_port:
         if st.get('dst_port') == s.negotiated_port:
             score += 60
