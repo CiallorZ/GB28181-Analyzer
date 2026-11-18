@@ -398,16 +398,23 @@ def _match_score(s: SessionInfo, st: dict) -> int:
       4. 时间窗重叠
     """
     score = 0
-    ssrc_hex = '%08x' % (st.get('ssrc') or 0)
+    raw_ssrc = st.get('ssrc')
+    ssrc_hex = '%08x' % (raw_ssrc or 0)
 
     # 1) SSRC 精确匹配 —— 唯一强判据，权重必须远超其他项
     #    否则多会话共享同一端口（国标 TCP 常见）时所有候选同分，
     #    贪心分配会把所有流都塞给第一个会话。
+    #
+    #    注意：SSRC 缺失（0 / None）时**不能参与匹配**。
+    #    lstrip('0') 后 h 变成空串，而任何字符串都 endswith('')，
+    #    会让「没有 SSRC 的流」拿到满分，比真实匹配还高。
     for want in (s.sdp_ssrc, s.subject_ssrc):
-        if not want:
+        if not want or not raw_ssrc:
             continue
         w = want.lower().lstrip('0')
         h = ssrc_hex.lower().lstrip('0')
+        if not w or not h:
+            continue
         # 兼容三种写法：完整 8 位 / 去前导 0 / 互为后缀
         if h == w or h.endswith(w) or w.endswith(h):
             score += 10000

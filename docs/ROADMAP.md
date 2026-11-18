@@ -390,7 +390,7 @@ HTTP 状态码: [200, 200, 200]
 
 | 条目 | 改动 | 回归测试 |
 |---|---|---|
-| P0-1 | `sip_parser.parse_sdp` 增加顶层 `k in ('y','f')` 分支；`a=` 分支兼容 `a=y=` 与 `a=y:` | `tests/test_sdp_fields.py`（12 例） |
+| P0-1 | `sip_parser.parse_sdp` 增加顶层 `k in ('y','f')` 分支；`a=` 分支兼容 `a=y=` 与 `a=y:` | `tests/test_sdp_fields.py`（13 例） |
 | P0-5 | `run_analysis` 在 `_run` 之后 `expire_all()` 重读状态，`CANCELLED` 不被覆盖 | `test_cancelled_status_not_overwritten_by_completion` |
 | P0-16 | 删除函数内局部 `import traceback`，统一模块级 `log` | `test_unexpected_error_sets_failed_and_propagates_original` |
 | P0-17 | 破坏性 DELETE 之前校验 `os.path.isfile(stored_path)`；API 层同样前置校验并返回 409 | `test_reanalyze_with_missing_file_keeps_old_results` 等 2 例 |
@@ -400,6 +400,29 @@ HTTP 状态码: [200, 200, 200]
 `db.rollback()` **不会**让已加载对象失效。因此 `_mark_failed` 若只 `rollback()` 再 `get()`，
 会从 identity map 拿到旧状态，把另一个会话刚写的 `CANCELLED` 覆盖成 `FAILED`。
 修复为 `rollback()` + `expire_all()`，并由 `test_failed_status_not_overwritten_when_cancelled` 锁定。
+
+### 与 main 上 `d3ed829` 的合并说明
+
+开工期间 `main` 上多了一个提交 `d3ed829`（17:02），它也修了 `y=` 独立行，并且：
+
+1. `sip_parser.parse_sdp` 加了 `elif k == 'y' / 'f'` 分支 —— 与本分支的
+   `elif k in ('y','f')` **功能重复**，合并后成为死代码（前面的分支已命中），已删除。
+2. `_match_score` 的 SSRC 权重 `100 → 10000`，并放宽为「互为后缀」匹配。
+   这个改动方向是对的（多会话共享 8808 端口时，端口分会让所有候选同分），
+   但**引入了一个新的边界缺陷**：
+
+   ```python
+   w = want.lower().lstrip('0')
+   h = ssrc_hex.lower().lstrip('0')
+   if h == w or h.endswith(w) or w.endswith(h):   # ← w 或 h 为空时恒真
+   ```
+
+   SSRC 缺失时 `raw_ssrc` 为 `0`/`None` → `ssrc_hex = '00000000'` → `h = ''`，
+   而任何字符串都 `endswith('')`，于是**没有 SSRC 的流拿到满分 10000**，
+   比真实匹配还高，会把流静默归到错误的会话。
+
+   已修复为「任一侧为空则不参与匹配」，并由 `tests/test_media_matching.py`（10 例）锁定。
+   端到端复跑确认归属结果不变。
 
 同时新增 `backend/tests/conftest.py`：在 import 任何 `app.*` 之前把 `DATA_DIR` /
 `DATABASE_URL` 指向临时目录，避免测试写真实数据库；`tests/test_e2e_fixtures.py`
@@ -682,7 +705,7 @@ SQLite 外键与 WAL（实测 `foreign_keys=1`、`journal_mode=wal`）。
 
 阶段 2 的收益立竿见影（删一个函数就能省掉 N 次全量扫描），但**必须排在阶段 0 之后**，否则性能优化会把还没修的语义 bug 一起「优化」进更深的抽象层。
 
-### 建议的第一个迭代（1 天，只做三件事）
+### 建议的第一个迭代（1 天，只做三件事）✅ 已完成
 
 如果只能先做一天，按这个顺序：
 
@@ -692,6 +715,25 @@ SQLite 外键与 WAL（实测 `foreign_keys=1`、`journal_mode=wal`）。
 
 这三件事做完，项目从「跑起来能用」变成「失败时能查、数据不会静默丢失」。
 之后再进 P0-1 ~ P0-15 的解析正确性修复。
+
+实际执行（2026-11-18，PR #9）在上面三项之外顺带做了 P0-1（`y=`/`f=` 解析）
+与 P0-5（取消生效），因为它们在同一个文件里、改动同样小。
+测试数 42 → 79，覆盖率 22% → 67%。
+
+### 建议的第二个迭代（2-3 天，输出数值的正确性）
+
+这一批**会改变工具给出的数字**，每一项都必须先有对照样本再改：
+
+1. P0-2 `dialog_key` 排序（INVITE 回填）+ P0-12 `sip_dialog.session_id` 回填 —— 会话时序图的前提。
+2. P0-3 乱序与缺口分离 —— 直接决定丢包率与 `MED-002` 定级，**优先级最高的一项数值修复**。
+3. P0-4 RFC4571 长度上限 65535 + `truncated` 标记 —— 当前大包被静默丢弃，TCP 场景统计数据偏小。
+4. P0-8 PS 帧计数按 AU 边界 —— 帧数/帧率/码率全链路依赖它。
+5. P0-15 诊断列表在 SQL 里排序后再分页 —— 否则第一页可能看不到 critical。
+
+### 建议的第三个迭代（1 天，对外诚实）
+
+P0-10（`RULES` 实现状态）、P0-11（README 已知限制）、P0-6/P0-7（TCP 承载 SIP）、
+P0-13/P0-14（字段回填或删除）。这一批不改变分析能力，但决定用户会不会被误导。
 
 ---
 
