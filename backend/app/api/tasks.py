@@ -175,38 +175,58 @@ def start_analyze(task_id: int, bg: BackgroundTasks,
     if not task:
         raise HTTPException(404, '任务不存在')
 
+    # 源文件不在了就直接拒绝。若放行，worker 会先把上一次的结果全部删掉，
+    # 再因为文件缺失失败 —— 用户等于白丢一份分析结果。
+    if not task.files:
+        raise HTTPException(409, '任务没有关联抓包文件')
+    missing = [cf.filename for cf in task.files
+               if not cf.stored_path or not os.path.isfile(cf.stored_path)]
+    if missing:
+        raise HTTPException(
+            409, '源文件已不存在（可能被保留策略清理）：%s，请重新上传'
+                 % '、'.join(missing))
+
     # 判定是否为"僵尸 analyzing"：状态是 analyzing 但本进程没有对应 worker
     # （典型场景：分析中途服务重启/崩溃，状态留在 analyzing 永远不动）
     with _run_lock:
-        has_worker = bool(_running.get(task_id))
-        stale = (task.status == TaskStatus.ANALYZING and not has_worker)
-
-        if task.status == TaskStatus.ANALYZING and has_worker:
+        # 只要本进程还有该任务的 worker 在跑，就一律拒绝 ——
+        # 不能只看 DB 状态：worker 启动后有一小段时间状态仍是 PENDING，
+        # 此时再点一次会起第二个线程，两个线程同时删同一批结果。
+        if task_id in _running:
             raise HTTPException(409, '任务正在分析中')
+
+        stale = (task.status == TaskStatus.ANALYZING)
 
         running = sum(1 for v in _running.values() if v)
         if running >= settings.MAX_CONCURRENT_TASKS:
             raise HTTPException(429, '同时分析的任务过多（上限 %d）'
                                 % settings.MAX_CONCURRENT_TASKS)
+        # 占位必须与"检查"在同一把锁内完成，否则两个并发请求都能通过检查
         _running[task_id] = True
 
-    if stale:
-        # 清理僵尸状态，允许重新分析
-        with session_scope() as s2:
-            t2 = s2.get(AnalysisTask, task_id)
-            if t2:
-                t2.error_message = '上次分析未正常结束（服务重启），已重置'
-                t2.progress = 0
+    try:
+        if stale:
+            # 清理僵尸状态，允许重新分析
+            with session_scope() as s2:
+                t2 = s2.get(AnalysisTask, task_id)
+                if t2:
+                    t2.error_message = '上次分析未正常结束（服务重启），已重置'
+                    t2.progress = 0
 
-    task.status = TaskStatus.PENDING
-    task.progress = 0
-    task.stage = '排队中'
-    task.error_message = None
-    db.commit()
+        task.status = TaskStatus.PENDING
+        task.progress = 0
+        task.stage = '排队中'
+        task.error_message = None
+        db.commit()
 
-    # 用线程而不是 BackgroundTasks：后者要等 HTTP 响应发出后才执行，
-    # 大文件分析会拖住连接；独立线程可立即返回 task_id 供前端轮询
-    threading.Thread(target=_worker, args=(task_id,), daemon=True).start()
+        # 用线程而不是 BackgroundTasks：后者要等 HTTP 响应发出后才执行，
+        # 大文件分析会拖住连接；独立线程可立即返回 task_id 供前端轮询
+        threading.Thread(target=_worker, args=(task_id,), daemon=True).start()
+    except BaseException:
+        # 线程没起来就必须归还槽位，否则这个任务永远无法再次分析
+        with _run_lock:
+            _running.pop(task_id, None)
+        raise
 
     db.refresh(task)
     return _task_brief(db, task)
@@ -249,6 +269,10 @@ def delete_task(task_id: int, db: Session = Depends(get_db)):
     task = db.get(AnalysisTask, task_id)
     if not task:
         raise HTTPException(404, '任务不存在')
+    # worker 正在跑时删除，会让它写回一堆已不存在的行（外键报错/脏状态）
+    with _run_lock:
+        if task_id in _running:
+            raise HTTPException(409, '任务正在分析中，请先取消再删除')
     # 删除上传文件
     for cf in task.files:
         try:

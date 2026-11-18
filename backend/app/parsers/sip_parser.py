@@ -241,9 +241,20 @@ def parse_sdp(text: str) -> SdpInfo | None:
                     sdp.is_tcp = True
             else:
                 sdp.errors.append('m= 行字段不足：%s' % v[:60])
+        elif k in ('y', 'f'):
+            # GB/T 28181 附录 F：y= / f= 是会话级独立行，不是 a= 属性。
+            # 只处理 a= 分支会漏掉标准写法（实测标准写法解析为 ''）。
+            if k == 'y':
+                sdp.y_ssrc = v.strip()
+            else:
+                sdp.f_field = v.strip()
         elif k == 'a':
             if ':' in v:
                 name, val = v.split(':', 1)
+                name, val = name.strip(), val.strip()
+            elif '=' in v:
+                # 兼容非标准写法 a=y=00001234（现场抓包常见）
+                name, val = v.split('=', 1)
                 name, val = name.strip(), val.strip()
             else:
                 name, val = v.strip(), ''

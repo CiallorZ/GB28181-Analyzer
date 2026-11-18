@@ -20,10 +20,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import time
-import traceback
 from datetime import datetime
 
 from sqlalchemy import delete, select
@@ -37,6 +37,8 @@ from ..models.entities import (
 )
 from ..parsers import capture, rtp_analyzer, session_builder, sip_parser
 from . import diagnosis as diag_engine
+
+log = logging.getLogger('gb28181.analyzer')
 
 
 def _set_progress(db: Session, task: AnalysisTask, stage: str, pct: int):
@@ -54,12 +56,26 @@ def run_analysis(db: Session, task_id: int):
     if not task:
         raise RuntimeError('任务不存在')
 
+    # 清理旧结果（支持重新分析）之前必须先确认源文件还在。
+    # 否则源文件被保留策略清掉后重新分析，会先把上一次的完整结果删掉，
+    # 再因为文件不存在而失败 —— 用户手上就什么都不剩了。
+    files = task.files
+    if not files:
+        _mark_failed(db, task_id, '任务没有关联抓包文件', '解析失败')
+        raise capture.CaptureError('任务没有关联抓包文件')
+    missing = [cf.filename for cf in files
+               if not cf.stored_path or not os.path.isfile(cf.stored_path)]
+    if missing:
+        msg = ('源文件已不存在（可能被保留策略清理）：%s'
+               % '、'.join(missing))
+        _mark_failed(db, task_id, msg, '源文件缺失')
+        raise capture.CaptureError(msg)
+
     task.status = TaskStatus.ANALYZING
     task.started_at = datetime.utcnow()
     task.error_message = None
     db.commit()
 
-    # 清理旧结果（支持重新分析）
     # 注意删除顺序：先删子表再删父表，避免外键约束报错
     stream_ids = [r[0] for r in db.execute(
         select(MediaStream.id).where(MediaStream.task_id == task_id)).all()]
@@ -74,36 +90,61 @@ def run_analysis(db: Session, task_id: int):
 
     try:
         _run(db, task)
+    except capture.CaptureError as e:
+        db.rollback()
+        _mark_failed(db, task_id, str(e), '解析失败')
+        raise
+    except Exception as e:
+        db.rollback()
+        log.exception('任务 #%s 分析异常', task_id)
+        _mark_failed(db, task_id, '%s: %s' % (type(e).__name__, e), '分析异常')
+        raise
+
+    # _run 期间任务可能已被取消（cancel 只置状态，不强杀线程）。
+    # 这里必须重新读状态，不能用内存里的 task 对象无条件写 COMPLETED，
+    # 否则用户点了取消却看到"完成"。
+    db.expire_all()
+    task = db.get(AnalysisTask, task_id)
+    if task is None:
+        return
+    if task.status == TaskStatus.CANCELLED:
+        log.info('任务 #%s 分析完成，但已被取消，保留取消状态', task_id)
+    else:
         task.status = TaskStatus.COMPLETED
         task.completed_at = datetime.utcnow()
         task.progress = 100
         task.stage = '完成'
-        db.commit()
+    db.commit()
 
-        # 按保留策略清理（不阻塞主流程，失败不影响结果）
-        try:
-            from . import retention
-            retention.auto_purge(db)
-        except Exception:
-            import traceback
-            traceback.print_exc()
-    except capture.CaptureError as e:
+    # 按保留策略清理（不阻塞主流程，失败不影响结果）
+    try:
+        from . import retention
+        retention.auto_purge(db)
+    except Exception:
+        log.exception('保留策略清理失败（不影响分析结果）')
+
+
+def _mark_failed(db: Session, task_id: int, message: str, stage: str):
+    """把任务置为失败，且不覆盖已取消状态
+
+    注意：rollback() 不会让已加载的对象失效（本项目的 session 设了
+    expire_on_commit=False），必须显式 expire_all，否则会从 identity map
+    拿到旧状态，把另一个会话刚写的 CANCELLED 覆盖成 FAILED。
+    """
+    try:
         db.rollback()
+        db.expire_all()
         task = db.get(AnalysisTask, task_id)
+        if task is None:
+            return
+        if task.status == TaskStatus.CANCELLED:
+            return
         task.status = TaskStatus.FAILED
-        task.error_message = str(e)
-        task.stage = '解析失败'
+        task.error_message = message
+        task.stage = stage
         db.commit()
-        raise
-    except Exception as e:
-        db.rollback()
-        task = db.get(AnalysisTask, task_id)
-        task.status = TaskStatus.FAILED
-        task.error_message = '%s: %s' % (type(e).__name__, e)
-        task.stage = '分析异常'
-        db.commit()
-        traceback.print_exc()
-        raise
+    except Exception:
+        log.exception('写入任务 #%s 失败状态时出错', task_id)
 
 
 def _run(db: Session, task: AnalysisTask):
@@ -526,8 +567,7 @@ def _analyze_rtp(db: Session, task: AnalysisTask, path: str) -> list[MediaStream
             rb_map = rb_mod.rebuild_streams_parallel(rb_tasks, out_dir,
                                                      max_workers=3)
         except Exception:
-            import traceback
-            traceback.print_exc()
+            log.exception('并行重建媒体流失败（不影响统计结果）')
             rb_map = {}
 
         for tag, pkts, st, key, transport, meta, ps in pending:
@@ -557,10 +597,9 @@ def _run_ps_analysis(pkts, st):
             return None
         times = [p.arrival - (pkts[0].arrival if pkts else 0) for p in pkts]
         return ps_parser.analyze_ps(payloads, times)
-    except Exception as e:
+    except Exception:
         # PS 分析失败不能影响主流程
-        import traceback
-        traceback.print_exc()
+        log.exception('PS/ES 分析失败（不影响主流程）')
         return None
 
 
@@ -578,8 +617,7 @@ def _run_rebuild(pkts, task, tag, st):
         return rebuild.rebuild_stream(pkts, out_dir, tag,
                                       duration_hint=st.duration)
     except Exception:
-        import traceback
-        traceback.print_exc()
+        log.exception('媒体流 %s 重建失败（不影响主流程）', tag)
         return None
 
 
@@ -595,9 +633,7 @@ def _tcp_time_spread(path: str, stream_id: str):
     except Exception as e:
         # 拿不到时间范围时上层会用等间隔估算，属于降级而非失败
         # 但要留痕，否则排查时间戳问题时看不出这里降级过
-        import logging
-        logging.getLogger('gb28181').debug(
-            'TCP 流 %s 时间范围获取失败（%s），将用等间隔估算', stream_id, e)
+        log.debug('TCP 流 %s 时间范围获取失败（%s），将用等间隔估算', stream_id, e)
     return None
 
 

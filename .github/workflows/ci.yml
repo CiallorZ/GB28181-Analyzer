@@ -24,6 +24,14 @@ jobs:
           cd backend
           pip install -r requirements.txt
 
+      - name: 安装外部工具
+        run: |
+          # 端到端用例（tests/test_e2e_fixtures.py）需要 tshark，
+          # 没有时会自动 skip —— 但那样等于没测，所以这里装上。
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tshark
+          tshark --version | head -1
+
       - name: 语法检查
         run: |
           cd backend
