@@ -51,6 +51,7 @@ git push origin vX.Y.Z
 标签推送后 `.github/workflows/release.yml` 会自动：
 
 - 构建前端 `dist` 并打成 `gb28181-analyzer-frontend-vX.Y.Z.zip`；
+- 在 Windows x64 构建便携 ZIP，解包验证 EXE 启动后加入发布；
 - 用 `git archive` 打源码包 `gb28181-analyzer-vX.Y.Z.tar.gz`；
 - 生成 `SHA256SUMS.txt`；
 - 以 tag 创建 GitHub Release（自动汇总 PR 列表）。
@@ -62,7 +63,10 @@ git push origin vX.Y.Z
 - 失败时：先撤 Release，再 `git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z`；
   修复后用新补丁版本重发，不改已发布的 tag。
 
-## 当前发布等级
+本地复现 Windows 构建时，在 Windows x64 使用 Python 3.12、Node.js 20 和 PowerShell 7。
 
-`0.0.1` 定位为**内网可用**：核心链路（上传 → 解析 → 诊断 → 报告）已闭环并有测试护栏；
-未验证项在 README「已知限制」中逐条列出，发布说明里必须保留这些限制，不要写成「生产就绪」。
+```powershell
+python -m pip install -r backend/requirements.txt pyinstaller==6.19.0
+./scripts/build-windows.ps1
+python scripts/smoke-windows.py build/windows/gb28181-analyzer-windows-x64-vX.Y.Z.zip
+```

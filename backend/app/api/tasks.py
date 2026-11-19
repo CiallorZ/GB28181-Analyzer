@@ -13,7 +13,7 @@ import uuid
 from fastapi import (APIRouter, BackgroundTasks, Depends, File, HTTPException,
                      Response, UploadFile)
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from ..core.config import settings
 from ..core.db import SessionLocal, get_db, session_scope
@@ -123,7 +123,8 @@ def list_tasks(page: int = 1, page_size: int = 20,
 
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
     rows = db.scalars(
-        stmt.order_by(AnalysisTask.created_at.desc())
+        stmt.options(selectinload(AnalysisTask.files))
+        .order_by(AnalysisTask.created_at.desc(), AnalysisTask.id.desc())
         .offset((page - 1) * page_size).limit(page_size)
     ).all()
 
@@ -353,36 +354,38 @@ def get_overview(task_id: int, db: Session = Depends(get_db)):
     if not task:
         raise HTTPException(404, '任务不存在')
 
-    sessions = db.scalars(
-        select(BusinessSession).where(BusinessSession.task_id == task_id)
-    ).all()
-    events = db.scalars(
-        select(DiagnosticEvent).where(DiagnosticEvent.task_id == task_id)
-    ).all()
-
-    # 方法分布 / 响应码分布
     from ..models.entities import SipMessage
-    msgs = db.scalars(
-        select(SipMessage).where(SipMessage.task_id == task_id)
-    ).all()
+
+    message_fields = (SipMessage.is_request, SipMessage.method, SipMessage.status_code)
+    message_counts = db.execute(
+        select(*message_fields, func.count())
+        .where(SipMessage.task_id == task_id).group_by(*message_fields)
+    )
     method_dist = {}
     code_dist = {}
-    for m in msgs:
-        if m.method and m.is_request:
-            method_dist[m.method] = method_dist.get(m.method, 0) + 1
-        elif m.status_code:
-            code_dist[str(m.status_code)] = code_dist.get(str(m.status_code), 0) + 1
+    for is_request, method, status_code, count in message_counts:
+        if method and is_request:
+            method_dist[method] = method_dist.get(method, 0) + count
+        elif status_code:
+            code = str(status_code)
+            code_dist[code] = code_dist.get(code, 0) + count
 
-    sev_dist = {}
-    for e in events:
-        sev_dist[e.severity] = sev_dist.get(e.severity, 0) + 1
-
+    sev_dist = dict(db.execute(
+        select(DiagnosticEvent.severity, func.count())
+        .where(DiagnosticEvent.task_id == task_id).group_by(DiagnosticEvent.severity)
+    ).tuples().all())
     sig_dist = {}
-    for s in sessions:
-        sig_dist[s.signal_status] = sig_dist.get(s.signal_status, 0) + 1
     med_dist = {}
-    for s in sessions:
-        med_dist[s.media_status] = med_dist.get(s.media_status, 0) + 1
+    type_dist = {}
+    session_fields = (BusinessSession.signal_status, BusinessSession.media_status,
+                      BusinessSession.session_type)
+    for signal, media, session_type, count in db.execute(
+        select(*session_fields, func.count())
+        .where(BusinessSession.task_id == task_id).group_by(*session_fields)
+    ):
+        sig_dist[signal] = sig_dist.get(signal, 0) + count
+        med_dist[media] = med_dist.get(media, 0) + count
+        type_dist[session_type] = type_dist.get(session_type, 0) + count
 
     return S.Overview(
         task_id=task.id,
@@ -392,15 +395,9 @@ def get_overview(task_id: int, db: Session = Depends(get_db)):
         severity_distribution=sev_dist,
         signal_distribution=sig_dist,
         media_distribution=med_dist,
-        session_types=_session_type_dist(sessions),
+        session_types=type_dist,
     )
 
-
-def _session_type_dist(sessions) -> dict:
-    d = {}
-    for s in sessions:
-        d[s.session_type] = d.get(s.session_type, 0) + 1
-    return d
 
 # ---------------------------------------------------------------
 # 存储管理

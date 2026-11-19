@@ -8,20 +8,27 @@ export const useTaskStore = defineStore('task', () => {
   const task = ref(null)
   const loading = ref(false)
   let pollTimer = null
+  let taskRequest = 0
 
   function setCurrent(id) {
+    if (id === currentTaskId.value) return
+    taskRequest++
+    task.value = null
+    loading.value = false
     currentTaskId.value = id
     if (id) localStorage.setItem('currentTaskId', String(id))
     else localStorage.removeItem('currentTaskId')
   }
 
-  async function loadTask(id) {
+  async function loadTask(id = currentTaskId.value) {
+    const request = ++taskRequest
     loading.value = true
     try {
-      task.value = await api.task(id ?? currentTaskId.value)
-      return task.value
+      const data = await api.task(id)
+      if (request === taskRequest && id === currentTaskId.value) task.value = data
+      return data
     } finally {
-      loading.value = false
+      if (request === taskRequest) loading.value = false
     }
   }
 

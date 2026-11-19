@@ -15,6 +15,7 @@ import { api } from '../api/client'
 import { useTaskStore } from '../stores/task'
 import VideoPlayer from '../components/VideoPlayer.vue'
 import AiSummarySection from '../components/AiSummarySection.vue'
+import CaptureIntake from '../components/CaptureIntake.vue'
 
 const router = useRouter()
 const store = useTaskStore()
@@ -25,20 +26,22 @@ const sessions = ref([])
 const diagnostics = ref([])
 const streams = ref([])
 const mediaStats = ref(null)
-const metrics = {}
+const TREND_LIMIT = 12
+let metrics = {}
+const metricsError = ref(false)
 const packets = ref([])
 const packetTotal = ref(0)
 
 const uploading = ref(false)
 const uploadPct = ref(0)
-const dragging = ref(false)
 const err = ref('')
-const fileInput = ref(null)
+const loadingResults = ref(false)
+const startFailure = ref(null)
 const busyStage = ref('')
 const busyPct = ref(0)
 
 const openSections = ref({
-  hero: true, kpi: true, signal: true, media: true,
+  kpi: true, signal: true, media: true,
   codec: true, diag: true, packet: true
 })
 const activeSection = ref('kpi')
@@ -61,13 +64,17 @@ async function chart(id, opt) {
   // 图表库是异步加载的，等它回来时容器可能已经因切换任务被移除
   const echarts = await loadECharts()
   if (!el.isConnected) return
-  if (!charts[id]) charts[id] = echarts.init(el)
+  if (charts[id]?.getDom() !== el) {
+    charts[id]?.dispose()
+    charts[id] = echarts.init(el)
+  }
   charts[id].setOption(opt, true)
 }
 
 function baseGrid(extra = {}) {
   const t = themeColors()
   return {
+    animation: !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
     backgroundColor: 'transparent',
     textStyle: { color: t.text, fontSize: 11 },
     tooltip: {
@@ -101,70 +108,52 @@ async function loadAll() {
   const seq = ++loadSeq
   const tid = store.currentTaskId
   const stale = () => seq !== loadSeq || tid !== store.currentTaskId
+  loadingResults.value = true
+  err.value = ''
+  metricsError.value = false
   try {
-    const t = await store.loadTask(tid)
-    if (stale()) return          // 期间已切换任务：丢弃旧响应，避免覆盖新任务
-    task.value = t
-    if (task.value.status !== 'completed') return
-    const [ov, ss, dg, pk] = await Promise.all([
-      api.overview(store.currentTaskId),
-      api.sessions(store.currentTaskId, { page_size: 30 }),
-      api.diagnostics(store.currentTaskId, { page_size: 40 }),
-      api.packets(store.currentTaskId, { page_size: 8 })
+    const current = await store.loadTask(tid)
+    if (stale()) return
+    task.value = current
+    if (current.status !== 'completed') return
+    const [ov, ss, dg, pk, media, stats] = await Promise.all([
+      api.overview(tid),
+      api.sessions(tid, { page_size: 30 }),
+      api.diagnostics(tid, { page_size: 40 }),
+      api.packets(tid, { page_size: 8 }),
+      api.taskMedia(tid),
+      api.taskMediaStats(tid).catch(() => null)
     ])
+    if (stale()) return
     overview.value = ov
     sessions.value = ss.items
     diagnostics.value = dg.items
     packets.value = pk.items
     packetTotal.value = pk.total
-
-    // 拉媒体流
-    // 关键：有信令时按会话取（能带设备归属）；无信令时按任务取
-    // —— 纯 RTP 码流包没有 INVITE，session_id 全为空，
-    //    如果只按会话取流就会一条都看不到
-    let allStreams = []
-
-    if (ss.items.length) {
-      const pairs = await Promise.all(
-        ss.items.map(async (s) => {
-          const [media, mt] = await Promise.all([
-            api.sessionMedia(s.id),
-            api.sessionMetrics(s.id)
-          ])
-          return { s, media, mt }
-        })
-      )
-      pairs.forEach(({ s, media, mt }) => {
-        media.items.forEach(st => { st._sid = s.id; st._dev = s.device_id })
-        allStreams.push(...media.items)
-        mt.items.forEach(x => { metrics[x.stream_id] = x })
-      })
-      // 兜底：会话没覆盖到的流（session_id 为空）也要展示
-      const covered = new Set(allStreams.map(x => x.id))
-      const all = await api.taskMedia(store.currentTaskId)
-      all.items.forEach(st => {
-        if (!covered.has(st.id)) {
-          st._sid = null
-          st._orphan = true
-          allStreams.push(st)
-        }
-      })
-    } else {
-      // 无信令：直接取任务下所有流
-      const all = await api.taskMedia(store.currentTaskId)
-      allStreams = all.items.map(st => ({ ...st, _sid: null, _orphan: true }))
-    }
-
-    streams.value = allStreams
-
-    // 媒体统计（无信令时用于概览展示）
-    try {
-      mediaStats.value = await api.taskMediaStats(store.currentTaskId)
-    } catch { mediaStats.value = null }
+    streams.value = media.items
+    mediaStats.value = stats
+    metrics = {}
+    loadingResults.value = false
 
     await nextTick()
+    if (stale()) return
     renderCharts()
-  } catch (e) { err.value = e.message }
+    const ids = media.items.slice(0, TREND_LIMIT).map(stream => stream.id)
+    if (ids.length) {
+      try {
+        const result = await api.taskMetrics(tid, ids)
+        if (stale()) return
+        metrics = Object.fromEntries(result.items.map(item => [item.stream_id, item]))
+        renderMediaCharts()
+      } catch {
+        if (!stale()) metricsError.value = true
+      }
+    }
+  } catch (error) {
+    if (!stale()) err.value = error.message
+  } finally {
+    if (!stale()) loadingResults.value = false
+  }
 }
 
 function renderCharts() {
@@ -241,40 +230,39 @@ function renderCharts() {
   const sigD = ov.signal_distribution || {}
   const medD = ov.media_distribution || {}
   const total = s.session_count || 0
-  if (total > 2) chart('c-state', baseGrid({
+  const statuses = [
+    ['成功 / 已接收', sigD.success, medD.received, C.ok],
+    ['失败 / 无媒体', sigD.failed, medD.no_media, C.crit],
+    ['不完整 / 不可解码', sigD.incomplete, medD.undecodable, C.warn],
+    ['未知', sigD.unknown, medD.unknown, t.dim]
+  ]
+  if (total) chart('c-state', baseGrid({
+    grid: { left: 59, right: 20, top: 32, bottom: 26 },
     tooltip: { ...baseGrid().tooltip, trigger: 'item' },
-    legend: {
-      bottom: 0, itemWidth: 8, itemHeight: 8, itemGap: 14,
-      textStyle: { color: t.text, fontSize: 10.5 }
-    },
-    series: [{
-      type: 'pie', radius: ['48%', '70%'], center: ['50%', '44%'],
-      itemStyle: { borderColor: t.surface, borderWidth: 3 },
-      label: {
-        show: true, position: 'center',
-        formatter: () => `{n|${total}}\n{l|点播会话}`,
-        rich: {
-          n: { fontSize: 24, fontWeight: 700, color: t.tipText, lineHeight: 28 },
-          l: { fontSize: 10.5, color: t.dim }
-        }
-      },
-      data: [
-        { name: '信令成功', value: sigD.success || 0, itemStyle: { color: C.ok } },
-        { name: '无媒体', value: medD.no_media || 0, itemStyle: { color: C.crit } },
-        { name: '信令失败', value: sigD.failed || 0, itemStyle: { color: C.warn } },
-        { name: '其他', value: (sigD.incomplete || 0) + (medD.undecodable || 0),
-          itemStyle: { color: C.dim } }
-      ].filter(d => d.value > 0)
-    }]
+    legend: { top: 0, textStyle: { color: t.text, fontSize: 10.5 } },
+    xAxis: { type: 'value', minInterval: 1, max: total, ...axisCommon(), ...splitCommon() },
+    yAxis: { type: 'category', inverse: true, data: ['信令', '媒体'], ...axisCommon() },
+    series: statuses.map(([name, signal, media, color]) => ({
+      name, type: 'bar', stack: 'status', barMaxWidth: 18,
+      itemStyle: { color }, data: [signal || 0, media || 0]
+    }))
   }))
 
-  /* --- 4. 码率趋势（所有流） --- */
+  renderMediaCharts()
+}
+
+function renderMediaCharts() {
+  if (!streams.value.length) return
+  const t = themeColors()
+  /* --- 4. 码率趋势 --- */
   const PALETTE = [C.ds, C.ok, C.warn, C.info, '#9b59f0', C.brand]
-  const brSeries = streams.value.map((st, i) => {
+  const trendStreams = streams.value.slice(0, TREND_LIMIT)
+  const streamLabel = st => `#${st.id}${st.ssrc == null ? '' : ' · 0x' + st.ssrc.toString(16)}`
+  const brSeries = trendStreams.map((st, i) => {
     const m = metrics[st.id]
     if (!m?.bitrate_series?.length) return null
     return {
-      name: '0x' + (st.ssrc ? st.ssrc.toString(16) : i),
+      name: streamLabel(st),
       type: 'line', smooth: true, showSymbol: false,
       lineStyle: { width: 1.8, color: PALETTE[i % PALETTE.length] },
       // 面积用单层低透明度填充：渐变在暗色下会把网格线压暗，也不承载信息
@@ -303,11 +291,11 @@ function renderCharts() {
   }))
 
   /* --- 5. 抖动趋势 --- */
-  const jSeries = streams.value.map((st, i) => {
+  const jSeries = trendStreams.map((st, i) => {
     const m = metrics[st.id]
     if (!m?.jitter_series?.length) return null
     return {
-      name: '0x' + (st.ssrc ? st.ssrc.toString(16) : i),
+      name: streamLabel(st),
       type: 'line', smooth: true, showSymbol: false,
       lineStyle: { width: 1.8, color: PALETTE[i % PALETTE.length] },
       data: m.jitter_series.map(p => [p.t, p.v])
@@ -336,16 +324,26 @@ function renderCharts() {
 
 /* ---------------- 上传 ---------------- */
 async function handleFile(f) {
-  if (!f) return
+  if (!f || uploading.value) return
+  if (!/\.(pcap|pcapng|cap)$/i.test(f.name) || !f.size) {
+    err.value = '请选择非空的 .pcap、.pcapng 或 .cap 抓包文件。'
+    return
+  }
   err.value = ''
   uploading.value = true
   uploadPct.value = 0
+  const uploadRoute = router.currentRoute.value
   try {
     const res = await api.upload(f, p => { uploadPct.value = p })
-    store.setCurrent(res.task_id)
-    task.value = await store.loadTask(res.task_id)
-    await api.analyze(res.task_id)
-    startPoll()
+    startFailure.value = null
+    try {
+      await api.analyze(res.task_id)
+    } catch (error) {
+      startFailure.value = { id: res.task_id, message: error.message }
+    }
+    if (router.currentRoute.value === uploadRoute) {
+      await router.replace({ name: 'task', params: { id: res.task_id } })
+    }
   } catch (e) {
     err.value = e.message
   } finally {
@@ -353,43 +351,86 @@ async function handleFile(f) {
   }
 }
 
+const loadingSample = ref(false)
+async function loadSample() {
+  if (uploading.value || loadingSample.value) return
+  loadingSample.value = true
+  err.value = ''
+  try {
+    const response = await fetch('/samples/gb28181-demo.pcap')
+    if (!response.ok) throw new Error('示例抓包暂时无法读取。')
+    await handleFile(new File([await response.blob()], 'gb28181-demo.pcap'))
+  } catch (error) {
+    err.value = error.message
+  } finally {
+    loadingSample.value = false
+  }
+}
+
 let pollTimer = null
+let pollGeneration = 0
 let unbindResize = null
 function startPoll() {
   stopPoll()
-  pollTimer = setInterval(async () => {
+  const generation = pollGeneration
+  const tid = store.currentTaskId
+  const active = () => generation === pollGeneration && tid === store.currentTaskId
+  async function poll() {
     try {
-      task.value = await store.loadTask()
+      const current = await store.loadTask(tid)
+      if (!active()) return
+      if (err.value.startsWith('暂时无法读取分析进度')) err.value = ''
+      task.value = current
       busyStage.value = task.value.stage || ''
       busyPct.value = task.value.progress || 0
       if (!['pending', 'analyzing'].includes(task.value.status)) {
         stopPoll()
         if (task.value.status === 'completed') await loadAll()
       }
-    } catch { /* 忽略 */ }
-  }, 1000)
+    } catch {
+      if (active()) err.value = '暂时无法读取分析进度，正在重试…'
+    }
+    if (active()) pollTimer = setTimeout(poll, 1000)
+  }
+  pollTimer = setTimeout(poll, 750)
 }
-function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null } }
-
-function onDrop(e) {
-  dragging.value = false
-  const f = e.dataTransfer?.files?.[0]
-  if (f) handleFile(f)
-}
-function onPick(e) {
-  handleFile(e.target.files?.[0])
-  e.target.value = ''
+function stopPoll() {
+  pollGeneration++
+  clearTimeout(pollTimer)
+  pollTimer = null
 }
 
 const reanalyzing = ref(false)
+const cancelling = ref(false)
+async function cancelAnalysis() {
+  if (cancelling.value) return
+  const tid = task.value.id
+  cancelling.value = true
+  err.value = ''
+  try {
+    await api.cancel(tid)
+    if (tid === store.currentTaskId) await loadAll()
+  } catch (error) {
+    err.value = error.message
+  } finally {
+    cancelling.value = false
+  }
+}
+
 async function reanalyze() {
   if (!store.currentTaskId || reanalyzing.value) return
+  const tid = store.currentTaskId
   reanalyzing.value = true
   err.value = ''
   try {
-    await api.analyze(store.currentTaskId)
-    task.value = await store.loadTask()
-    startPoll()
+    await api.analyze(tid)
+    if (tid !== store.currentTaskId) return
+    startFailure.value = null
+    const updated = await store.loadTask(tid)
+    if (tid !== store.currentTaskId) return
+    task.value = updated
+    if (updated.status === 'completed') await loadAll()
+    else startPoll()
   } catch (e) {
     err.value = e.message
   } finally {
@@ -397,16 +438,32 @@ async function reanalyze() {
   }
 }
 
-function reset() {
+function clearResults() {
   stopPoll()
-  store.setCurrent(null)
-  loadSeq++                     // 作废在途的加载请求
+  loadSeq++
   task.value = null
   overview.value = null
   sessions.value = []
   diagnostics.value = []
   streams.value = []
   packets.value = []
+  packetTotal.value = 0
+  mediaStats.value = null
+  busyStage.value = ''
+  busyPct.value = 0
+  metrics = {}
+  err.value = ''
+  loadingResults.value = false
+  activeSection.value = 'kpi'
+  for (const id of Object.keys(charts)) {
+    charts[id].dispose()
+    delete charts[id]
+  }
+}
+
+function reset() {
+  clearResults()
+  store.setCurrent(null)
   // 若停留在 /tasks/:id，回到工作台首页，避免 URL 与页面状态不一致
   if (router.currentRoute.value.name === 'task') router.replace('/')
 }
@@ -498,28 +555,31 @@ const secNums = computed(() => {
   const map = {}
   let n = 1
   map.kpi = n++
-  map.ai = n++          // AI 概览固定第 2 位
   if (hasSignal.value) map.signal = n++
   if (hasMedia.value) map.media = n++
   if (hasCodec.value) map.codec = n++
   if (hasDiag.value) map.diag = n++
   if (hasPacket.value) map.packet = n++
+  map.ai = n
   return map
 })
 
 const spyList = computed(() => {
-  const out = [{ k: 'kpi', l: '总览' }, { k: 'ai', l: 'AI 分析' }]
+  const out = [{ k: 'kpi', l: '总览' }]
   if (hasSignal.value) out.push({ k: 'signal', l: '信令' })
   if (hasMedia.value) out.push({ k: 'media', l: '媒体' })
   if (hasCodec.value) out.push({ k: 'codec', l: '编码' })
   if (hasDiag.value) out.push({ k: 'diag', l: '诊断' })
   if (hasPacket.value) out.push({ k: 'packet', l: '报文' })
+  out.push({ k: 'ai', l: 'AI 分析' })
   return out
 })
 
 const EV = { confirmed: '已确认', suspected: '疑似', insufficient: '证据不足' }
 const EV_CLS = { confirmed: 'ok', suspected: 'warning', insufficient: 'unknown' }
 const SEV_CLS = { critical: 'critical', warning: 'warning', info: 'info', unknown: 'unknown' }
+const priorityFindings = computed(() => diagnostics.value
+  .filter(d => d.severity === 'critical' || d.severity === 'warning').slice(0, 3))
 
 const fmt = (v, d = 2) => v == null ? null : Number(v).toFixed(d)
 
@@ -553,7 +613,11 @@ function setupScrollSpy() {
 
 function scrollTo(sec) {
   const el = document.getElementById('sec-' + sec)
-  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  const motion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  if (el) {
+    activeSection.value = sec
+    el.scrollIntoView({ behavior: motion ? 'auto' : 'smooth', block: 'start' })
+  }
 }
 
 // 主题切换后重绘图表
@@ -565,83 +629,48 @@ function onThemeChange() {
   nextTick(renderCharts)
 }
 
-onMounted(async () => {
-  await loadAll()
-  if (store.isAnalyzing) startPoll()
-  setupScrollSpy()
+onMounted(() => {
   window.addEventListener('alma-theme-changed', onThemeChange)
   unbindResize = bindChartResize(charts)
 })
 onUnmounted(() => {
-  stopPoll()
+  clearResults()
   unbindResize?.()
   scrollObs?.disconnect()
   window.removeEventListener('alma-theme-changed', onThemeChange)
 })
-watch(() => store.currentTaskId, async () => {
+watch(() => store.currentTaskId, async (tid) => {
+  clearResults()
   await loadAll()
-  setupScrollSpy()
-})
+  if (tid === store.currentTaskId &&
+      (task.value?.status === 'analyzing' || task.value?.stage === '排队中')) startPoll()
+}, { immediate: true })
+watch(spyList, setupScrollSpy, { flush: 'post' })
 watch(openSections, () => nextTick(renderCharts), { deep: true })
 </script>
 
 <template>
   <div class="page">
-    <!-- ==================== 上传入口 ==================== -->
-    <div v-if="!task" class="hero">
-      <div class="hero-bg"></div>
-      <div class="hero-in">
-        <div class="hero-copy">
-          <h1 class="hero-h1">把一次点播<br>从 INVITE 查到画面</h1>
-          <p class="hero-p">
-            SIP 协商、RTP 质量、PS 封装与 H.265 参数按同一条时间线对齐。
-            抓包里能证明的写成结论，算不出的明确标为「无法计算」。
-          </p>
-          <dl class="hero-facts">
-            <div><dt>输入</dt><dd>PCAP / PCAPNG，单文件最大 2 GB</dd></div>
-            <div><dt>对齐</dt><dd>SIP Call-ID → SDP → SSRC → RTP</dd></div>
-            <div><dt>输出</dt><dd>时序、指标、诊断、可播放预览</dd></div>
-          </dl>
-        </div>
+    <div v-if="!task && loadingResults" class="fail-wrap" role="status">正在读取任务…</div>
+    <CaptureIntake v-else-if="!task" :busy="uploading || loadingSample" :progress="uploadPct" :error="err"
+                   @file="handleFile" @sample="loadSample" />
 
-        <div class="intake">
-          <input ref="fileInput" type="file" accept=".pcap,.pcapng,.cap"
-                 hidden @change="onPick" />
-          <button type="button" class="up-zone"
-                  :class="{ dragging, busy: uploading }"
-                  :disabled="uploading"
-                  @dragover.prevent="dragging = true"
-                  @dragleave.prevent="dragging = false"
-                  @drop.prevent="onDrop"
-                  @click="$refs.fileInput.click()">
-            <template v-if="!uploading">
-              <span class="up-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                  <polyline points="17 8 12 3 7 8"/>
-                  <line x1="12" y1="3" x2="12" y2="15"/>
-                </svg>
-              </span>
-              <span class="up-title">拖入抓包文件，或点击选择</span>
-              <span class="up-hint">.pcap / .pcapng · 单文件最大 2 GB</span>
-              <span class="up-key">分析在本机完成，抓包不会上传到第三方</span>
-            </template>
-
-            <span v-else class="up-progress">
-              <span class="up-title">上传中 {{ uploadPct }}%</span>
-              <span class="up-bar"><i :style="{ width: uploadPct + '%' }"></i></span>
-            </span>
-          </button>
-
-          <div v-if="err" class="err-box mt-14">{{ err }}</div>
-        </div>
+    <div v-else-if="task.status === 'pending' && task.stage !== '排队中'" class="fail-wrap">
+      <div class="info-box">
+        <strong>抓包已导入，等待分析</strong>
+        <div class="mt-10">{{ task.file?.filename || task.name }}</div>
       </div>
+      <p v-if="err || startFailure?.id === task.id" class="err-box mt-14" role="alert">
+        {{ err || startFailure.message }}
+      </p>
+      <button class="btn mt-14" :disabled="reanalyzing" @click="reanalyze">开始分析</button>
+      <button class="btn mt-14" @click="reset">返回工作台</button>
     </div>
 
     <!-- ==================== 分析中 ==================== -->
-    <div v-else-if="store.isAnalyzing" class="analyzing-wrap">
+    <div v-else-if="['pending', 'analyzing'].includes(task.status)" class="analyzing-wrap">
       <div class="an-card">
-        <div class="an-ring">
+        <div class="an-ring" role="progressbar" aria-label="分析进度" :aria-valuenow="busyPct || task.progress || 0">
           <svg viewBox="0 0 100 100">
             <circle cx="50" cy="50" r="42" fill="none"
                     stroke="var(--line)" stroke-width="6"/>
@@ -654,7 +683,8 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
           </svg>
           <div class="an-pct">{{ busyPct || task.progress }}<span>%</span></div>
         </div>
-        <div class="an-stage">{{ busyStage || task.stage || '分析中' }}</div>
+        <div class="an-stage" role="status">{{ busyStage || task.stage || '分析中' }}</div>
+        <p class="an-file truncate" :title="task.file?.filename">{{ task.file?.filename || task.name }}</p>
         <div class="an-steps">
           <div v-for="(s, i) in ANALYSIS_STEPS" :key="i" class="an-step"
                :class="{ done: (busyPct || task.progress) > s.pct,
@@ -664,6 +694,9 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
             <span class="as-txt">{{ s.label }}</span>
           </div>
         </div>
+        <div v-if="err" class="err-box mt-14" role="alert">{{ err }}</div>
+        <button v-if="task.status === 'analyzing'" class="btn mt-14"
+                :disabled="cancelling" @click="cancelAnalysis">取消分析</button>
       </div>
     </div>
 
@@ -684,6 +717,16 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
       </div>
       <button class="btn mt-14" :disabled="reanalyzing" @click="reanalyze">重新分析</button>
       <button class="btn mt-14" style="margin-left:8px" @click="reset">新建分析</button>
+      <div v-if="err" class="err-box mt-14" role="alert">{{ err }}</div>
+    </div>
+
+    <div v-else-if="!overview" class="fail-wrap">
+      <p v-if="loadingResults" role="status">正在读取分析结果…</p>
+      <template v-else>
+        <p class="err-box" role="alert">{{ err || '无法读取分析结果。' }}</p>
+        <button class="btn mt-14" @click="loadAll">重试</button>
+        <button class="btn mt-14" @click="reset">新建分析</button>
+      </template>
     </div>
 
     <!-- ==================== 结果瀑布 ==================== -->
@@ -712,6 +755,29 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
           <button class="btn-mini" @click="reset">新建分析</button>
         </div>
       </nav>
+
+      <section v-if="priorityFindings.length" class="sec mb-20 findings" aria-labelledby="findings-title">
+        <div class="sec-head">
+          <h2 id="findings-title" class="sec-title">优先排查</h2>
+          <span class="spacer"></span>
+          <router-link to="/diagnostics" class="btn-mini">全部诊断 →</router-link>
+        </div>
+        <ul>
+          <li v-for="d in priorityFindings" :key="d.id">
+            <span class="badge" :class="SEV_CLS[d.severity]">{{ d.severity === 'critical' ? '严重' : '警告' }}</span>
+            <div>
+              <strong>{{ d.title }}</strong>
+              <p>{{ d.description }}</p>
+            </div>
+            <span class="badge" :class="EV_CLS[d.evidence_level]">{{ EV[d.evidence_level] }}</span>
+            <div v-if="d.related_packet_ids?.length" class="evidence-links">
+              <router-link v-for="packet in d.related_packet_ids.slice(0, 2)" :key="packet"
+                           :to="{ name: 'packets', query: { number: packet } }">报文 #{{ packet }} →</router-link>
+            </div>
+            <router-link v-else-if="d.session_id" :to="`/sessions/${d.session_id}`">查看会话 →</router-link>
+          </li>
+        </ul>
+      </section>
 
       <!-- ===== 1. 总览 ===== -->
       <section id="sec-kpi" class="sec rise mb-20">
@@ -856,7 +922,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
             </div>
             <div class="mini-card">
               <div class="mc-head">会话状态</div>
-              <div v-if="(summary.session_count || 0) > 2" class="mc-chart" id="c-state"></div>
+              <div v-if="summary.session_count" class="mc-chart" id="c-state"></div>
               <div v-else class="mc-summary">
                 <div class="ms-row">
                   <span>信令成功</span>
@@ -875,17 +941,12 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
                   </b>
                 </div>
                 <div class="ms-foot">
-                  共 {{ summary.session_count || 0 }} 个会话；样本太少，不画环形图
+                  暂无点播会话
                 </div>
               </div>
             </div>
           </div>
         </div>
-      </section>
-
-      <!-- ===== AI 分析概览 ===== -->
-      <section id="sec-ai" class="rise mb-20">
-        <AiSummarySection :num="secNums.ai" />
       </section>
 
       <!-- ===== 信令 ===== -->
@@ -957,6 +1018,10 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
         </div>
         <div v-show="openSections.media" class="sec-body">
           <template v-if="streams.length">
+            <p v-if="metricsError" class="hint">媒体趋势暂时无法读取。</p>
+            <p v-else-if="streams.length > TREND_LIMIT" class="hint">
+              趋势展示报文量最高的 {{ TREND_LIMIT }} 条流。
+            </p>
             <div class="g2">
               <div class="mini-card">
                 <div class="mc-head">媒体码率趋势</div>
@@ -1001,10 +1066,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
               </div>
               <div>
                 <div class="vn-t">未能还原出视频画面</div>
-                <div class="vn-s">
-                  抓到 RTP 但解码失败。常见原因：抓包起点缺少 SPS/PPS、
-                  PS 封装不规范、或该流是纯音频
-                </div>
+                <div class="vn-s">请在「设置」检查 FFmpeg，或查看编码分析中的解析结果。</div>
               </div>
             </div>
 
@@ -1034,7 +1096,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
                 <div class="sc-bar">
                   <div class="sb-track">
                     <div class="sb-fill"
-                         :style="{ width: Math.min(100, (st.avg_bitrate || 0) / 250) + '%' }"></div>
+                         :style="{ transform: 'scaleX(' + Math.min(1, (st.avg_bitrate || 0) / 25000) + ')' }"></div>
                   </div>
                 </div>
               </div>
@@ -1215,6 +1277,11 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
         </div>
       </section>
 
+      <!-- ===== AI 分析概览 ===== -->
+      <section id="sec-ai" class="rise mt-14 mb-20">
+        <AiSummarySection :num="secNums.ai" />
+      </section>
+
       <!-- 底部局限声明 -->
       <div class="foot-note">
         <strong>分析局限</strong>：所有结论仅反映抓包点观察到的流量，
@@ -1227,115 +1294,9 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
 </template>
 
 <style scoped>
-/* ============ 上传 Hero ============ */
-.hero {
-  position: relative;
-  min-height: calc(100vh - 58px);
-  display: flex; align-items: center;
-  overflow: hidden;
-  padding: 48px 20px;
-}
-.hero-bg {
-  position: absolute; inset: 0;
-  background: var(--hero-grad);
-  pointer-events: none;
-}
-.hero-bg::after {
-  content: ''; position: absolute; inset: 0;
-  background-image:
-    linear-gradient(var(--grid-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
-  background-size: 56px 56px;
-  mask-image: radial-gradient(ellipse 70% 62% at 50% 42%, #000 20%, transparent 72%);
-}
-.hero-in {
-  position: relative; z-index: 1;
-  width: 100%; max-width: 1160px; margin: 0 auto;
-  display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr);
-  gap: 56px;
-  align-items: center;
-}
-.hero-h1 {
-  font-size: clamp(30px, 3.4vw, 42px);
-  font-weight: 700;
-  letter-spacing: -1.4px;
-  line-height: 1.22;
-  margin-bottom: 16px;
-}
-.hero-p {
-  font-size: 14px; color: var(--text-2);
-  line-height: 1.8; max-width: 46ch;
-}
-
-/* 三条事实替代营销式标签行 */
-.hero-facts {
-  margin-top: 26px;
-  border-top: 1px solid var(--line);
-}
-.hero-facts > div {
-  display: grid; grid-template-columns: 54px 1fr;
-  gap: 12px; align-items: baseline;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--line);
-}
-.hero-facts dt { font-size: 11.5px; color: var(--text-4); }
-.hero-facts dd { font-size: 12.5px; color: var(--text-2); font-family: var(--font-mono); }
-
-.intake { position: relative; }
-.up-zone {
-  display: block; width: 100%;
-  text-align: center;
-  border: 1px dashed var(--line-strong);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  padding: 46px 28px;
-  font-family: inherit;
-  color: inherit;
-  cursor: pointer;
-  transition: border-color var(--dur) var(--ease),
-              background-color var(--dur) var(--ease);
-}
-.up-zone:hover:not(:disabled), .up-zone.dragging {
-  border-color: var(--line-3);
-  background: var(--surface-2);
-}
-.up-zone.busy { cursor: default; }
-.up-icon {
-  width: 46px; height: 46px; margin: 0 auto 18px;
-  border-radius: var(--radius);
-  background: var(--surface-2);
-  border: 1px solid var(--line-2);
-  display: flex; align-items: center; justify-content: center;
-  color: var(--text-2);
-}
-.up-icon svg { width: 22px; height: 22px; }
-.up-title { display: block; font-size: 15px; font-weight: 550; margin-bottom: 7px; }
-.up-hint { display: block; font-size: 12px; color: var(--text-3); }
-.up-key {
-  display: block; margin-top: 20px;
-  font-size: 11.5px; color: var(--text-4);
-}
-.up-progress { display: block; max-width: 380px; margin: 0 auto; }
-.up-bar {
-  display: block; height: 5px; background: var(--surface-3);
-  border-radius: 99px; overflow: hidden; margin-top: 16px;
-}
-.up-bar i {
-  display: block; height: 100%;
-  background: var(--brand);
-  transition: width .3s var(--ease);
-}
-@media (max-width: 900px) {
-  .hero { padding: 32px 16px; min-height: auto; }
-  .hero-in { grid-template-columns: 1fr; gap: 30px; }
-  .hero-h1 { font-size: 30px; letter-spacing: -1px; }
-  .hero-p { font-size: 13.5px; }
-}
-
 /* ============ 分析中 ============ */
 .analyzing-wrap {
-  min-height: calc(100vh - 58px);
+  min-height: calc(100vh - var(--app-header-height));
   display: flex; align-items: center; justify-content: center;
   padding: 40px 20px;
 }
@@ -1345,7 +1306,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
   border-radius: var(--radius-lg);
   padding: 44px 56px;
   text-align: center;
-  min-width: 420px;
+  width: min(100%, 480px);
 }
 .an-ring { position: relative; width: 128px; height: 128px; margin: 0 auto 24px; }
 .an-ring svg { width: 100%; height: 100%; }
@@ -1359,7 +1320,22 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
 .an-pct span { font-size: 15px; color: var(--text-3); margin-left: 1px; }
 .an-stage {
   font-size: 15px; font-weight: 600;
-  margin-bottom: 22px;
+  margin-bottom: 4px;
+}
+.an-file { color: var(--text-3); margin-bottom: 20px; }
+.findings ul { list-style: none; }
+.findings li {
+  padding: 13px 18px; border-top: 1px solid var(--line);
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: baseline; gap: 12px;
+}
+.findings li:first-child { border-top: 0; }
+.findings p, .findings a { font-size: 12px; }
+.findings p { color: var(--text-2); }
+.findings li a { white-space: nowrap; }
+.evidence-links { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+@media (max-width: 600px) {
+  .an-card { padding: 26px 18px; }
+  .findings li { grid-template-columns: auto minmax(0, 1fr); gap: 8px; }
 }
 .an-steps {
   display: grid; grid-template-columns: 1fr 1fr;
@@ -1406,13 +1382,14 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
   .spy-file { display: none; }
 }
 .spy {
-  position: sticky; top: 58px; z-index: 50;
+  position: sticky; top: var(--app-header-height); z-index: 50;
   background: color-mix(in srgb, var(--bg) 88%, transparent);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--line);
   margin: -26px -28px 22px;
   padding: 0 28px;
 }
+.page :is(section[id^="sec-"]) { scroll-margin-top: calc(var(--app-header-height) + 58px); }
 .spy-in {
   max-width: 1720px; margin: 0 auto;
   height: 48px; display: flex; align-items: center; gap: 4px;
@@ -1598,7 +1575,8 @@ section.rise:nth-of-type(7) { animation-delay: .30s; }
   height: 100%;
   background: var(--info);
   border-radius: 99px;
-  transition: width .5s var(--ease);
+  transform-origin: left center;
+  transition: transform .35s var(--ease);
 }
 
 /* 编码 */
@@ -1632,15 +1610,11 @@ section.rise:nth-of-type(7) { animation-delay: .30s; }
 .diag-item {
   background: var(--surface-2);
   border: 1px solid var(--line);
-  border-left: 3px solid var(--text-4);
   border-radius: var(--radius-sm);
   padding: 13px 16px;
-  transition: all var(--dur) var(--ease);
+  transition: border-color var(--dur) var(--ease);
 }
 .diag-item:hover { border-color: var(--line-strong); }
-.diag-item.critical { border-left-color: var(--critical); }
-.diag-item.warning { border-left-color: var(--warning); }
-.diag-item.info { border-left-color: var(--info); }
 
 .di-head {
   display: flex; align-items: center; gap: 9px;
@@ -1667,7 +1641,6 @@ section.rise:nth-of-type(7) { animation-delay: .30s; }
   margin-top: 26px; padding: 18px 22px;
   background: var(--surface-2);
   border: 1px solid var(--line);
-  border-left: 3px solid var(--line-strong);
   border-radius: var(--radius);
   font-size: 12px; color: var(--text-3);
   line-height: 1.8;

@@ -28,6 +28,7 @@ export function chartPalette() {
 export function chartBase(extra = {}) {
   const c = chartPalette()
   return {
+    animation: !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
     backgroundColor: 'transparent',
     textStyle: { color: c.text, fontSize: 11 },
     tooltip: {

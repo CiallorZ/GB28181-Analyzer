@@ -46,6 +46,8 @@ class DialogInfo:
     messages: list = field(default_factory=list)
     sdp_offer: dict | None = None
     sdp_answer: dict | None = None
+    sdp_offer_packet: int | None = None
+    sdp_answer_packet: int | None = None
     source_ip: str = ''
     destination_ip: str = ''
     device_id: str = ''
@@ -89,6 +91,8 @@ class SessionInfo:
     negotiated_transport: str = ''
     subject_ssrc: str = ''
     sdp_ssrc: str = ''
+    subject_packet: int | None = None
+    sdp_ssrc_packet: int | None = None
 
     # 媒体关联方式：exact（SSRC 对上）/ mixed / weak（仅端口时间）/
     # none（没关联到流）。决定前端如何展示证据强度。
@@ -159,6 +163,7 @@ def build_dialogs(messages: list[SipInfo]) -> list[DialogInfo]:
                     d.destination_ip = m.destination_ip
                     if m.sdp:
                         d.sdp_offer = m.sdp.to_dict()
+                        d.sdp_offer_packet = m.packet_number
                     # 从 To 头取设备 ID
                     d.device_id = _uri_id(m.headers.get('to', ''))
             elif m.method == 'INVITE' and not m.is_request:
@@ -170,6 +175,7 @@ def build_dialogs(messages: list[SipInfo]) -> list[DialogInfo]:
                         d.final_code = m.status_code
                         if m.sdp:
                             d.sdp_answer = m.sdp.to_dict()
+                            d.sdp_answer_packet = m.packet_number
             elif m.method == 'ACK' and m.is_request:
                 if d.ack_time is None:
                     d.ack_time = m.timestamp
@@ -253,6 +259,8 @@ def build_sessions(dialogs: list[DialogInfo],
             is_tcp = bool(answer.get('is_tcp') or offer.get('is_tcp'))
             s.negotiated_transport = 'TCP' if is_tcp else 'UDP'
             s.sdp_ssrc = (answer.get('y_ssrc') or offer.get('y_ssrc') or '')
+            if s.sdp_ssrc:
+                s.sdp_ssrc_packet = d.sdp_answer_packet if answer.get('y_ssrc') else d.sdp_offer_packet
 
         # Subject 里的 SSRC（格式：设备ID:SSRC,平台ID:SSRC）
         for m in d.messages:
@@ -262,6 +270,7 @@ def build_sessions(dialogs: list[DialogInfo],
                     seg = parts[0].split(':')
                     if len(seg) >= 2:
                         s.subject_ssrc = seg[1].strip()
+                        s.subject_packet = m.packet_number
                 break
 
         # ---- 耗时计算（None 安全） ----

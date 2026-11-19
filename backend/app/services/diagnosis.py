@@ -375,6 +375,9 @@ def _check_sdp(sessions: list) -> list[Diagnostic]:
                     session_id=sid, device_id=dev,
                     timestamp=s.get('start_time'),
                     evidence={'subject_ssrc': subj, 'sdp_ssrc': sdp_ssrc},
+                    related_packet_ids=list(dict.fromkeys(
+                        s[key] for key in ('subject_packet', 'sdp_ssrc_packet') if s.get(key)
+                    )),
                     possible_causes=['设备厂商未统一 SSRC 生成规则',
                                      'Subject 与 SDP 由不同模块填充'],
                     recommendations=['要求厂商在 Subject 与 SDP y= 中填同一 SSRC',

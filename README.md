@@ -7,7 +7,7 @@
 上传 PCAP / PCAPNG，先回答「哪一步坏了」，再回答「为什么」。
 
 [![CI](https://github.com/CiallorZ/gb28181-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/CiallorZ/gb28181-analyzer/actions/workflows/ci.yml)
-[![version](https://img.shields.io/badge/version-0.0.1-1f6feb)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.1.0-1f6feb)](CHANGELOG.md)
 [![license](https://img.shields.io/badge/license-MIT-3fb950)](LICENSE)
 ![python](https://img.shields.io/badge/python-3.10%2B-3776ab)
 ![vue](https://img.shields.io/badge/vue-3-42b883)
@@ -19,7 +19,7 @@
   <img src="docs/images/overview-light.png" alt="工作台：一次点播的总览">
 </picture>
 
-<p align="center"><sub>工作台 · 一次 INVITE 点播的总览：信令成功率、媒体到达、异常事件与业务分布</sub></p>
+<p align="center"><sub>结果总览 · 优先排查、原始报文入口、信令与媒体状态</sub></p>
 
 ---
 
@@ -65,9 +65,15 @@ GB28181 的故障往往横跨三层：SIP 协商、SDP 协商的地址与 SSRC�
 
 <p align="center"><sub><b>诊断</b> · 规则命中统计、证据等级；展开可见观测证据、可能原因与排查建议</sub></p>
 
-<p align="center"><img src="docs/images/mobile.png" width="240" alt="移动端"><br><sub>窄屏下 KPI 自动两列，导航横向滚动</sub></p>
+<img src="docs/images/workbench-import.png" alt="抓包工作台的导入、分析链路与最近任务">
+
+<p align="center"><img src="docs/images/mobile.png" width="240" alt="窄屏的抓包工作台"><br><sub>窄屏工作台保留导入、示例抓包和最近任务入口</sub></p>
 
 ## 快速开始
+
+### Windows x64
+
+从 [GitHub Releases](https://github.com/CiallorZ/gb28181-analyzer/releases/latest) 下载 Windows x64 ZIP。安装 Wireshark 的 TShark 组件，完整解压后双击 `GB28181-Analyzer.exe`，浏览器会打开本机工作台。运行无需 Python 或 Node.js，画面重建另需 FFmpeg。详见 [Windows 使用说明](docs/WINDOWS.md)。
 
 ### Docker（推荐）
 

@@ -3,7 +3,10 @@
 """M05 / M06 会话查询与信令时序"""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from collections import defaultdict
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -188,12 +191,36 @@ def session_media(session_id: int, db: Session = Depends(get_db)):
 def session_metrics(session_id: int, db: Session = Depends(get_db)):
     """媒体指标时间序列（M07-04 图表数据）"""
     streams = db.scalars(
-        select(MediaStream).where(MediaStream.session_id == session_id)).all()
+        select(MediaStream).where(MediaStream.session_id == session_id)
+        .order_by(MediaStream.id)).all()
+    return {'items': _metric_series(db, streams)}
+
+
+@router.get('/tasks/{task_id}/media-metrics')
+def task_metrics(task_id: int, stream_id: Annotated[list[int], Query(min_length=1, max_length=12)],
+                 db: Session = Depends(get_db)):
+    """批量读取总览趋势，包含尚未关联到信令的 RTP 流。"""
+    streams = db.scalars(select(MediaStream).where(
+        MediaStream.task_id == task_id, MediaStream.id.in_(stream_id),
+    ).order_by(MediaStream.id)).all()
+    return {'items': _metric_series(db, streams)}
+
+
+def _metric_series(db: Session, streams):
+    if not streams:
+        return []
+    metrics_by_stream = defaultdict(list)
+    stmt = (
+        select(MediaMetric.stream_id, MediaMetric.timestamp, MediaMetric.bitrate, MediaMetric.jitter)
+        .where(MediaMetric.stream_id.in_([stream.id for stream in streams]))
+        .order_by(MediaMetric.stream_id, MediaMetric.timestamp, MediaMetric.id)
+    )
+    for row in db.execute(stmt):
+        metrics_by_stream[row.stream_id].append(row)
+
     out = []
     for st in streams:
-        metrics = db.scalars(
-            select(MediaMetric).where(MediaMetric.stream_id == st.id)
-            .order_by(MediaMetric.timestamp)).all()
+        metrics = metrics_by_stream[st.id]
         out.append({
             'stream_id': st.id,
             'ssrc': '%08x' % (st.ssrc or 0) if st.ssrc else None,
@@ -209,7 +236,7 @@ def session_metrics(session_id: int, db: Session = Depends(get_db)):
             ],
             'extra': st.extra or {},
         })
-    return {'items': out}
+    return out
 
 
 @router.get('/sessions/{session_id}/diagnostics',
@@ -242,7 +269,7 @@ def task_media(task_id: int,
     stmt = select(MediaStream).where(MediaStream.task_id == task_id)
     if only_rebuilt:
         stmt = stmt.where(MediaStream.rebuilt_path.isnot(None))
-    rows = db.scalars(stmt.order_by(MediaStream.packet_count.desc())).all()
+    rows = db.scalars(stmt.order_by(MediaStream.packet_count.desc(), MediaStream.id)).all()
     return S.StreamList(total=len(rows),
                         items=[S.StreamOut.model_validate(r) for r in rows])
 

@@ -15,7 +15,7 @@ import pytest
 from sqlalchemy import func, select
 
 from app.models.entities import (
-    AnalysisTask, BusinessSession, CaptureFile, MediaMetric, MediaStream,
+    AnalysisTask, BusinessSession, CaptureFile, DiagnosticEvent, MediaMetric, MediaStream,
     PacketIndex, SipDialog, SipMessage, TaskStatus,
 )
 from app.parsers import capture
@@ -96,6 +96,12 @@ def test_udp_basic_end_to_end(db, tmp_path):
         .order_by(SipMessage.timestamp))
     assert invite.sdp['y_ssrc'] == '00001234'
     assert invite.sdp['f_field'] == 'v/2/5/25/1/4000a/1/1a'
+    answer = db.scalar(select(SipMessage).where(
+        SipMessage.task_id == task.id, SipMessage.method == 'INVITE',
+        SipMessage.status_code == 200))
+    mismatch = db.scalar(select(DiagnosticEvent).where(
+        DiagnosticEvent.task_id == task.id, DiagnosticEvent.rule_id == 'SDP-003'))
+    assert mismatch.related_packet_ids == [invite.packet_id, answer.packet_id]
 
     # 分析本身不应动源文件（保留策略在 conftest 里已关掉）
     assert dst.exists()

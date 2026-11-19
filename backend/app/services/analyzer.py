@@ -870,6 +870,8 @@ def _session_dict(s, sid) -> dict:
         'negotiated_transport': s.negotiated_transport,
         'subject_ssrc': s.subject_ssrc,
         'sdp_ssrc': s.sdp_ssrc,
+        'subject_packet': s.subject_packet,
+        'sdp_ssrc_packet': s.sdp_ssrc_packet,
         'first_media_latency': s.first_media_latency,
         'call_ids': s.call_ids,
     }

@@ -9,6 +9,7 @@
    ============================================================ */
 
 :root {
+  --app-header-height: 59px;
   /* ---- 品牌：中国铁塔 ---- */
   --brand: #D9121F;
   --brand-dk: #A80D17;
@@ -59,6 +60,10 @@
   --dur-lg: .30s;
 }
 
+@media (max-width: 650px) {
+  :root { --app-header-height: 89px; }
+}
+
 /* ============================================================
    深色（默认）
    ============================================================ */
@@ -101,21 +106,21 @@
 :root[data-theme="light"] {
   color-scheme: light;
 
-  --bg: #F2F4F7;
+  --bg: #F5F3EF;
   --bg-2: #FFFFFF;
   --surface: #FFFFFF;
-  --surface-2: #F7F9FB;
-  --surface-3: #EDF1F5;
-  --surface-4: #E1E7EE;
+  --surface-2: #FAF9F6;
+  --surface-3: #F0EDE7;
+  --surface-4: #E7E3DC;
 
-  --line: #E2E8EF;
-  --line-2: #CFD8E2;
-  --line-strong: #B8C4D1;
+  --line: #E8E3DB;
+  --line-2: #DCD6CC;
+  --line-strong: #BEB6A9;
 
   --text: #0F1720;
   --text-2: #47535F;
   --text-3: #66717D;
-  --text-4: #8B98A5;
+  --text-4: #646E78;
 
   --brand: #C00B16;
   --brand-dk: #97080F;
@@ -722,7 +727,6 @@ select.inp { cursor: pointer; }
 .err-box {
   background: var(--critical-soft);
   border: 1px solid rgba(255, 107, 99, .28);
-  border-left: 2px solid var(--critical);
   border-radius: var(--radius-sm);
   padding: 12px 15px;
   font-size: 13px;
@@ -732,7 +736,6 @@ select.inp { cursor: pointer; }
 .warn-box {
   background: var(--warning-soft);
   border: 1px solid rgba(227, 179, 65, .28);
-  border-left: 2px solid var(--warning);
   border-radius: var(--radius-sm);
   padding: 12px 15px;
   font-size: 13px;
@@ -742,7 +745,6 @@ select.inp { cursor: pointer; }
 .info-box {
   background: var(--info-soft);
   border: 1px solid rgba(108, 182, 255, .24);
-  border-left: 2px solid var(--info);
   border-radius: var(--radius-sm);
   padding: 12px 15px;
   font-size: 13px;

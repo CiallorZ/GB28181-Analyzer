@@ -1,12 +1,14 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { api } from './api/client'
 import { useTaskStore } from './stores/task'
 import AiPanel from './components/AiPanel.vue'
 
 const store = useTaskStore()
+const route = useRoute()
 
-const theme = ref(localStorage.getItem('theme') || 'dark')
+const theme = ref(document.documentElement.dataset.theme || 'light')
 const health = ref(null)
 const healthError = ref(false)
 
@@ -26,10 +28,12 @@ function applyTheme(t, animate = false) {
 }
 function toggleTheme() { applyTheme(theme.value === 'dark' ? 'light' : 'dark', true) }
 
-const depsOk = computed(() => {
-  if (!health.value) return false
-  const d = health.value.dependencies || {}
-  return d.tshark && d.ffmpeg
+const engine = computed(() => {
+  if (healthError.value) return ['服务离线', 'bad']
+  if (!health.value) return ['正在连接', 'waiting']
+  if (!health.value.dependencies.tshark) return ['缺少 TShark', 'bad']
+  if (!health.value.dependencies.ffmpeg) return ['分析可用 · 无视频预览', 'partial']
+  return ['分析引擎就绪', 'ok']
 })
 
 const task = computed(() => store.task)
@@ -46,7 +50,7 @@ let healthTimer = null
 onMounted(() => {
   applyTheme(theme.value)
   loadHealth()
-  if (store.currentTaskId) store.loadTask().catch(() => {})
+  if (store.currentTaskId && !['workbench', 'task'].includes(route.name)) store.loadTask().catch(() => {})
   healthTimer = setInterval(loadHealth, 30000)
 })
 
@@ -70,6 +74,12 @@ onUnmounted(() => {
           </div>
         </router-link>
 
+        <nav class="bar-nav" aria-label="主导航">
+          <router-link to="/" :class="{ current: route.name === 'task' }">工作台</router-link>
+          <router-link to="/tasks">历史任务</router-link>
+          <router-link to="/settings">设置</router-link>
+        </nav>
+
         <div class="bar-task" v-if="task">
           <span class="bt-id mono">#{{ task.id }}</span>
           <span class="badge" :class="{
@@ -87,13 +97,8 @@ onUnmounted(() => {
         <div class="spacer"></div>
 
         <div class="bar-act">
-          <router-link to="/tasks" class="icon-btn" title="历史任务">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
-              <path d="M12 8v4l3 2"/>
-              <circle cx="12" cy="12" r="9"/>
-            </svg>
-          </router-link>
           <button class="icon-btn" @click="toggleTheme"
+                  :aria-label="theme === 'dark' ? '切换到浅色' : '切换到深色'"
                   :title="theme === 'dark' ? '切换到浅色' : '切换到深色'">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
               <template v-if="theme === 'dark'">
@@ -109,11 +114,10 @@ onUnmounted(() => {
             <span>DeepSeek 分析</span>
           </button>
 
-          <div class="dep" :class="depsOk ? 'ok' : 'bad'"
-               :title="healthError ? '服务离线' : (depsOk ? 'tshark / ffmpeg 就绪' : '依赖缺失')">
+          <router-link to="/settings" class="dep" :class="engine[1]" :title="engine[0]" :aria-label="engine[0]">
             <i></i>
-            <span>{{ healthError ? '离线' : (depsOk ? '就绪' : '缺依赖') }}</span>
-          </div>
+            <span>{{ engine[0] }}</span>
+          </router-link>
         </div>
       </div>
     </header>
@@ -143,8 +147,13 @@ onUnmounted(() => {
 }
 .bar-in {
   max-width: 1720px; margin: 0 auto;
-  height: 58px; padding: 0 28px;
+  height: calc(var(--app-header-height) - 1px); padding: 0 28px;
   display: flex; align-items: center; gap: 20px;
+}
+.bar-nav { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.bar-nav a { padding: 6px 9px; border-radius: var(--radius-sm); color: var(--text-2); font-size: 12px; }
+.bar-nav a:hover, .bar-nav .router-link-exact-active, .bar-nav .current {
+  background: var(--surface-3); color: var(--text); text-decoration: none;
 }
 @media (max-width: 1080px) { .bar-in { padding: 0 16px; gap: 12px; } }
 
@@ -206,9 +215,9 @@ onUnmounted(() => {
   display: inline-flex; align-items: center; gap: 7px;
   height: 34px; padding: 0 14px;
   border-radius: var(--radius-sm);
-  background: var(--ds);
-  border: 1px solid var(--ds);
-  color: #fff;
+  background: #253d92;
+  border: 1px solid #253d92;
+  color: white;
   font-size: 12.5px; font-weight: 500;
   font-family: inherit;
   cursor: pointer;
@@ -232,13 +241,20 @@ onUnmounted(() => {
 .dep i { width: 6px; height: 6px; border-radius: 50%; flex: none; }
 .dep.ok i { background: var(--ok); }
 .dep.bad i { background: var(--critical); }
+.dep.partial i { background: var(--warning); }
+.dep.waiting i { background: var(--text-3); }
 
 .main { flex: 1; }
 
 /* 移动端：只留标志与图标，任务上下文交给页面标题 */
-@media (max-width: 720px) {
-  .bar-in { padding: 0 12px; gap: 8px; }
+@media (max-width: 1020px) {
   .bar-task { display: none; }
+  .dep span { display: none; }
+}
+@media (max-width: 650px) {
+  .bar-in { padding: 0 12px; gap: 8px; }
+  .bar-in { flex-wrap: wrap; padding-top: 8px; }
+  .bar-nav { order: 2; flex-basis: 100%; padding-bottom: 6px; }
   .brand-desc { display: none; }
   .brand-name { font-size: 13px; }
   .brand-logo { height: 24px; }
