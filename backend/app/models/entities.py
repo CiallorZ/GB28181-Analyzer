@@ -24,6 +24,8 @@ from __future__ import annotations
 import enum
 from datetime import datetime
 
+from ..core.timeutil import utcnow
+
 from sqlalchemy import (
     JSON, Boolean, DateTime, Enum, Float, ForeignKey, Index, Integer,
     BigInteger, String, Text, UniqueConstraint,
@@ -97,7 +99,7 @@ class AnalysisTask(Base):
     stage: Mapped[str] = mapped_column(String(100), default='')
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, index=True)
+        DateTime, default=utcnow, index=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime)
     error_message: Mapped[str | None] = mapped_column(Text)
@@ -513,5 +515,5 @@ class Report(Base):
         ForeignKey('analysis_task.id', ondelete='CASCADE'), index=True)
     format: Mapped[str] = mapped_column(String(10), default='html')
     path: Mapped[str] = mapped_column(String(512))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     size: Mapped[int] = mapped_column(Integer, default=0)

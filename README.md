@@ -46,15 +46,28 @@ npm run dev                       # http://localhost:5173
 前端 dev server 把 `/api` 代理到 `127.0.0.1:8788`。生产构建用 `npm run build`，
 产物在 `frontend/dist/`，交给静态服务器并反代 `/api` 即可。
 
-### 测试
+### Docker
+
+```bash
+docker compose up --build
+# 前端 http://localhost:8080 ，后端 http://localhost:8788
+```
+
+镜像内已安装 tshark 与 ffmpeg；抓包、数据库和重建产物落在 `./data`。
+对外部署时请显式设置 `ALLOWED_HOSTS`。
+
+### 测试与检查
 
 ```bash
 cd backend
-python -m pytest tests/ -q
+pip install -r requirements-dev.txt
+python -m pytest tests/ -q                      # 端到端需要 tshark，缺失时 skip
+python -m pytest tests/ -q --cov=app            # 覆盖率
+ruff check app tests                            # 静态检查
 ```
 
-端到端用例需要 tshark；找不到时会 skip。CI 会安装 tshark 后真实执行。
-测试样本与说明见 `backend/tests/fixtures/`。
+端到端用例在 CI 的 integration job 中安装 tshark/ffmpeg 后真实执行，
+覆盖率门槛 70%。测试样本与说明见 `backend/tests/fixtures/`。
 
 ## 架构
 
@@ -135,7 +148,7 @@ docs/           ROADMAP 与抓包分析笔记
 - 设备拓扑只有后端数据，前端没有拓扑图
 - 报告导出（M13）未实现
 - 上传为单请求，未做分片，上限 2GB
-- PostgreSQL 与 Docker Compose 未在真实环境验证
+- PostgreSQL 未在真实环境验证；Docker 镜像由 CI 构建，Compose 运行需在目标机器验证
 - H.265 暂不区分 B 帧，非 IRAP 帧统一计入 P
 - 诊断规则尚余 9 条未实现（如 REGISTER 超时、SIP 重传、码率骤降），设置页会标注
 - 抓包缺少 SPS/PPS 时无法还原画面，只能给出编码参数缺失的诊断

@@ -1,4 +1,5 @@
-import struct, sys, time
+import struct
+import sys
 
 def csum(b):
     if len(b) % 2: b += b'\0'

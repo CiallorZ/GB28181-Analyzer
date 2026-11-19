@@ -33,7 +33,7 @@
 | # | 要求 | 状态 | 证据 |
 |---|---|---|---|
 | 1 | 前后端项目初始化 | ✅ | FastAPI + Vue3，可启动 |
-| 2 | Docker Compose 本地部署 | ⚠️ | 文件待补，**环境无 Docker 无法验证** |
+| 2 | Docker Compose 本地部署 | ⚠️ | Dockerfile/compose/nginx 已补，CI 构建镜像；运行未在真实 Docker 环境验证 |
 | 3 | PostgreSQL 数据表及迁移脚本 | 🟡 | 模型已定义（PG 兼容），实际用 SQLite；**迁移脚本未写** |
 | 4 | PCAP/PCAPNG 上传与解析 | ✅ | 实测 282 / 2000 报文两个样本 |
 | 5 | 基础网络报文分析 | ✅ | 报文索引、端点、协议分类 |

@@ -1,0 +1,17 @@
+# 统一换行符：脚本在 Linux 下必须 LF，Windows 批处理保持 CRLF
+* text=auto eol=lf
+*.sh text eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# 二进制样本不做换行转换
+*.pcap binary
+*.pcapng binary
+*.cap binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.mp4 binary
+*.bundle binary
+*.patch binary

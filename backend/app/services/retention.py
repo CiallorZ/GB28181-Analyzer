@@ -18,12 +18,13 @@ from __future__ import annotations
 
 import os
 import shutil
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
+from ..core.timeutil import utcnow
 from ..models.entities import AnalysisTask, TaskStatus
 
 
@@ -133,14 +134,12 @@ def purge_task_media(db: Session, task_id: int, drop_task: bool = False) -> dict
         # 一并删掉，能省下数据库里最大的一块空间
         from sqlalchemy import delete as _del
         from ..models.entities import PacketIndex
-        rows = db.execute(
-            _del(PacketIndex).where(PacketIndex.task_id == task_id)
-        ).rowcount or 0
+        db.execute(_del(PacketIndex).where(PacketIndex.task_id == task_id))
 
         task.configuration = {
             **(task.configuration or {}),
             'media_purged': True,
-            'media_purged_at': datetime.utcnow().isoformat(),
+            'media_purged_at': utcnow().isoformat(),
             'index_purged': True,
         }
         removed += 1
@@ -192,7 +191,7 @@ def auto_purge(db: Session) -> dict:
 
     # ---- 2. 保留天数 ----
     if settings.KEEP_DAYS > 0:
-        cutoff = datetime.utcnow() - timedelta(days=settings.KEEP_DAYS)
+        cutoff = utcnow() - timedelta(days=settings.KEEP_DAYS)
         for t in tasks:
             if t.created_at and t.created_at < cutoff:
                 if t.files and not (t.configuration or {}).get('media_purged'):

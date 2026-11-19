@@ -215,7 +215,8 @@ def _parse_time(s) -> datetime | None:
     for fmt in ('%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S',
                 '%b %d, %Y %H:%M:%S.%f', '%b %d, %Y %H:%M:%S'):
         try:
-            return datetime.strptime(s, fmt)
+            # capinfos 输出不带时区，这里按抓包机本地时间原样保留
+            return datetime.strptime(s, fmt)  # noqa: DTZ007
         except ValueError:
             continue
     return None
@@ -421,10 +422,7 @@ def extract_raw_packet(path: str, number: int) -> bytes | None:
     """按报文号取原始字节（M12 十六进制视图）"""
     if not TSHARK:
         raise CaptureError('未找到 tshark')
-    r = _run([TSHARK, '-r', path, '-Y', 'frame.number==%d' % number,
-              '-T', 'fields', '-e', 'frame.number', '-e', 'data.data'],
-             120, '读取报文')
-    # data.data 只覆盖 payload；要完整帧得用 -x
+    # -x 输出完整帧；不再先跑一次 fields 查询（结果未使用，纯浪费）
     r2 = _run([TSHARK, '-r', path, '-Y', 'frame.number==%d' % number,
                '-x'], 120, '读取报文十六进制')
     if r2.returncode != 0:

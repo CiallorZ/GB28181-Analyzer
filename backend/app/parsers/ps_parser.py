@@ -565,7 +565,6 @@ def analyze_ps(payloads: list, timestamps: list | None = None) -> PsAnalysis:
     video_es = bytearray()
     audio_es = bytearray()
     keyframe_time = None
-    first_video_pts = None
 
     for idx, pay in enumerate(payloads):
         if not pay:

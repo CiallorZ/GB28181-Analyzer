@@ -609,20 +609,20 @@ SQLite 外键与 WAL（实测 `foreign_keys=1`、`journal_mode=wal`）。
 | # | 内容 | 验证方式 | 状态 |
 |---|---|---|---|
 | 1 | SDP 顶层 `y=` / `f=` 解析 | 新增单测：国标独立行写法 | ✅ 已完成 |
-| 2 | `dialog_key` 排序一致 | 新增单测：INVITE 请求可回填 | 待办 |
-| 3 | 乱序/缺口分离计算 | 新增单测：`1,2,4,3,5,6` → gap=1 | 待办 |
-| 4 | RFC4571 长度上限 65535 + truncated 标记 | 新增单测：4000 字节包 | 待办 |
+| 2 | `dialog_key` 排序一致 | 新增单测：INVITE 请求可回填 | ✅ 已完成 |
+| 3 | 乱序/缺口分离计算 | 新增单测：`1,2,4,3,5,6` → gap=1 | ✅ 已完成 |
+| 4 | RFC4571 长度上限 65535 + truncated 标记 | 新增单测：4000 字节包 | ✅ 已完成 |
 | 5 | 取消真正生效 | 新增单测：cancelled 不被覆盖 | ✅ 已完成 |
-| 6 | SIP 抽取补 TCP 端口 | 用 `tests/fixtures/sip-tcp-register.pcap` | 待办 |
-| 7 | 空 SIP 消息过滤（握手空包不入库） | 同上，断言只入库 2 条 | 待办 |
-| 8 | PS 帧计数按 AU 边界 | 用真实 H.265 PS 样本 | 待办 |
-| 9 | 重建不缩放 + `source_codec` 分离 | ffprobe 断言 | 待办 |
-| 10 | `RULES` 标注实现状态、注释对齐 | `/rules` 断言 12 条 | 待办 |
-| 11 | README 已知限制重写 | 人工核对 | 待办 |
-| 12 | `sip_dialog.session_id` 回填 | `BusinessSession.dialogs` 非空 | 待办 |
-| 13 | `packet_index` 回填 `ssrc`/`session_id`，或删除字段 | API 过滤断言 | 待办 |
-| 14 | `related_packet_ids` 落地（至少 SIP 与 MED-002） | 诊断结果非空断言 | 待办 |
-| 15 | 诊断列表在 SQL 里排序后再分页 | 断言第 1 页含 critical | 待办 |
+| 6 | SIP 抽取补 TCP 端口 | 用 `tests/fixtures/sip-tcp-register.pcap` | ✅ 已完成 |
+| 7 | 空 SIP 消息过滤（握手空包不入库） | 同上，断言只入库 2 条 | ✅ 已完成 |
+| 8 | PS 帧计数按 AU 边界 | 用真实 H.265 PS 样本 | ✅ 已完成 |
+| 9 | 重建不缩放 + `source_codec` 分离 | ffprobe 断言 | ✅ 已完成 |
+| 10 | `RULES` 标注实现状态、注释对齐 | `/rules` 断言 12 条 | ✅ 已完成 |
+| 11 | README 已知限制重写 | 人工核对 | ✅ 已完成 |
+| 12 | `sip_dialog.session_id` 回填 | `BusinessSession.dialogs` 非空 | ✅ 已完成 |
+| 13 | `packet_index` 回填 `ssrc`/`session_id`，或删除字段 | API 过滤断言 | ✅ 已完成 |
+| 14 | `related_packet_ids` 落地（至少 SIP 与 MED-002） | 诊断结果非空断言 | ✅ 已完成 |
+| 15 | 诊断列表在 SQL 里排序后再分页 | 断言第 1 页含 critical | ✅ 已完成 |
 | 16 | 修 `traceback` 局部变量导致的 `UnboundLocalError`，改用 logger | 断言失败时能拿到真实异常 | ✅ 已完成 |
 | 17 | 重分析前校验原文件存在，不存在则 409（不删旧结果） | 断言失败后旧数据仍在 | ✅ 已完成 |
 | 18 | 同任务并发触发去重（`_running` 直接 409，锁内原子占坑） | 3 并发 → 只启 1 个 worker | ✅ 已完成 |
@@ -630,20 +630,19 @@ SQLite 外键与 WAL（实测 `foreign_keys=1`、`journal_mode=wal`）。
 **同时**：把自建抓包固化为 `backend/tests/fixtures/`（SIP/UDP、SIP/TCP、TCP+RFC4571 已放入，见该目录 README），
 让 CI 能跑端到端。注意：**端到端仍依赖 tshark**（`capture.py` 全部走 tshark），
 所以 CI 需 `apt-get install tshark` 或把解析器纯函数化后直接喂字节 —— 后者更彻底，建议随阶段 0 一起做。
-当前实现是前者：`tests/test_e2e_fixtures.py` 在无 tshark 时 `skip`，CI 尚未安装 tshark。
+当前实现是前者：`tests/test_e2e_fixtures.py` 在无 tshark 时 `skip`；CI 的 integration job 已安装 tshark/ffmpeg 并真实执行。2026-11-19：阶段 0 的 18 项全部完成（R1/R2）。
 
 ### 阶段 1：工程化护栏（1 天）
 
-- `pytest-cov` 接入，解析器/诊断/analyzer 覆盖率门槛 80%；当前总体 **67%**（本轮从 22% 提升），
-  `rebuild`/`ai`/`retention`/`api` 仍是短板。
+- `pytest-cov` 接入，当前总体 **72.19%**，门槛先设 **70%**；目标 80% 待补 `api`/`retention`/`rebuild` 用例（🟡 部分完成）。
 - 新增 `conftest.py`：临时 `DATA_DIR` / `DATABASE_URL` 的 fixture，让 API 与 analyzer 测试不碰真实数据。✅ 已完成
-- ruff + 配置入仓（当前 220 条告警，先 `--fix` 44 条安全的，其余逐条决策）；`F401/F841` 现有 13 处，先清零。
-- 前端 ESLint + Prettier + Vitest；CI 增加 `lint` / `test`。
-- requirements 锁定上限 + lock 文件（`pip-compile` 或 `uv lock`），拆分 `requirements-dev.txt`（`pytest`/`httpx` 目前混在运行依赖里）；删掉未使用的 `pydantic-settings`（或按 3.5 真正启用）。
-- `datetime.utcnow()` → `datetime.now(timezone.utc)`（实测 Python 3.14 已抛 `DeprecationWarning`，共 9 处）。
-- 补 `Dockerfile` + `docker-compose.yml`（CI 里 `docker build` 验证，不依赖本机 Docker）；加 `.gitattributes`（`*.sh text eol=lf`、`*.pcap binary` —— `start-dev.sh` 实测是 CRLF，Linux 下会 `bad interpreter`）。
-- CI hygiene job 按 3.7 重写（`quotePath=false` + `-z` 读取、补敏感文件规则、加 `permissions`/`concurrency`/`timeout-minutes`）。
-- 新增 `integration` job：`apt-get install -y tshark ffmpeg`，用 `tests/fixtures/` 跑端到端。
+- ruff + 配置入仓（`E4/E7/E9/F/DTZ`），`F401/F841`/`DTZ003` 已清零。✅ 已完成
+- 前端 ESLint + Prettier + Vitest；CI 增加 `lint` / `test`。⬜ 未完成
+- 拆分 `requirements.txt` / `requirements-dev.txt` 并加主版本上限，删除未使用的 `pydantic-settings`；lock 文件尚未引入。🟡 部分完成
+- `datetime.utcnow()` 全部替换为 `app/core/timeutil.py` 的 `utcnow()`（naive UTC，兼容 SQLite）。✅ 已完成
+- 补 `Dockerfile` + `docker-compose.yml` + nginx 配置（CI `docker` job 构建镜像）；加 `.gitattributes`。✅ 已完成（本地无 Docker，运行未验证）
+- CI hygiene job 重写（`git ls-files -z`、敏感文件/构建产物检查、`permissions`/`concurrency`/`timeout-minutes`）。✅ 已完成
+- 新增 `integration` job：`apt-get install -y tshark ffmpeg`，用 `tests/fixtures/` 跑端到端。✅ 已完成
 
 ### 阶段 2：性能（1 天）
 

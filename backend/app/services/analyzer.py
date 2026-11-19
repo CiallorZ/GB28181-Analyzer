@@ -19,19 +19,16 @@
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
-import re
-import time
-from datetime import datetime
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
+from ..core.timeutil import utcnow
 from ..models.entities import (
-    AnalysisTask, CaptureFile, DiagnosticEvent, Endpoint, MediaMetric,
+    AnalysisTask, DiagnosticEvent, Endpoint, MediaMetric,
     MediaStream, PacketIndex, SipDialog, SipMessage, TaskStatus,
     BusinessSession, Device,
 )
@@ -72,7 +69,7 @@ def run_analysis(db: Session, task_id: int):
         raise capture.CaptureError(msg)
 
     task.status = TaskStatus.ANALYZING
-    task.started_at = datetime.utcnow()
+    task.started_at = utcnow()
     task.error_message = None
     db.commit()
 
@@ -111,7 +108,7 @@ def run_analysis(db: Session, task_id: int):
         log.info('任务 #%s 分析完成，但已被取消，保留取消状态', task_id)
     else:
         task.status = TaskStatus.COMPLETED
-        task.completed_at = datetime.utcnow()
+        task.completed_at = utcnow()
         task.progress = 100
         task.stage = '完成'
     db.commit()

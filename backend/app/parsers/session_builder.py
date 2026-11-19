@@ -466,7 +466,6 @@ def detect_capture_limits(sessions: list[SessionInfo],
 
     times = [p['ts'] for p in packets if p.get('ts')]
     cap_start = min(times) if times else 0
-    cap_end = max(times) if times else 0
 
     for s in sessions:
         # 抓包起点落在会话中间

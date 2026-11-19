@@ -1,0 +1,14 @@
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [".venv", "data"]
+
+[tool.ruff.lint]
+# 先只启用"能抓到真实缺陷"的规则集：未使用导入/变量、语法、导入位置、时区。
+# 格式类规则（E501/E701 等）会带来大量无意义 diff，后续单独一轮处理。
+select = ["E4", "E7", "E9", "F", "DTZ"]
+ignore = ["E701", "E702", "E741"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

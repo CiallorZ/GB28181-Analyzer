@@ -18,7 +18,6 @@ from ..core.db import SessionLocal, get_db, session_scope
 from ..core.security import looks_like_capture
 from ..models.entities import (
     AnalysisTask, CaptureFile, DiagnosticEvent, TaskStatus, BusinessSession,
-    MediaStream,
 )
 from ..services import analyzer
 from ..schemas import task as S
@@ -304,9 +303,6 @@ def get_overview(task_id: int, db: Session = Depends(get_db)):
 
     sessions = db.scalars(
         select(BusinessSession).where(BusinessSession.task_id == task_id)
-    ).all()
-    streams = db.scalars(
-        select(MediaStream).where(MediaStream.task_id == task_id)
     ).all()
     events = db.scalars(
         select(DiagnosticEvent).where(DiagnosticEvent.task_id == task_id)
