@@ -1,279 +1,97 @@
-<div align="center">
-
 # GB28181 Analyzer
 
-**把一次国标视频点播的抓包，还原成一条能追到报文的时间线。**
-
-上传 PCAP / PCAPNG，先回答「哪一步坏了」，再回答「为什么」。
+**面向 GB/T 28181 视频联网的离线抓包分析工具。** 导入一份抓包，就能沿着 SIP 信令、SDP 协商、RTP 收流和视频编码逐层定位问题。遇到「点播成功但黑屏」，可以从诊断结论跳到对应会话或原始报文核对。
 
 [![CI](https://github.com/CiallorZ/gb28181-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/CiallorZ/gb28181-analyzer/actions/workflows/ci.yml)
-[![version](https://img.shields.io/badge/version-0.1.0-1f6feb)](CHANGELOG.md)
-[![license](https://img.shields.io/badge/license-MIT-3fb950)](LICENSE)
-![python](https://img.shields.io/badge/python-3.10%2B-3776ab)
-![vue](https://img.shields.io/badge/vue-3-42b883)
+[![GitHub Release](https://img.shields.io/github/v/release/CiallorZ/gb28181-analyzer)](https://github.com/CiallorZ/gb28181-analyzer/releases/latest)
+[![MIT License](https://img.shields.io/badge/license-MIT-3fb950)](LICENSE)
 
-</div>
+**[下载 Windows x64 便携包（v0.1.0）](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v0.1.0/gb28181-analyzer-windows-x64-v0.1.0.zip)** · [所有版本](https://github.com/CiallorZ/gb28181-analyzer/releases) · [Windows 使用说明](docs/WINDOWS.md)
+
+## Windows 快速开始
+
+1. 安装 [Wireshark x64](https://www.wireshark.org/download.html)，在安装选项中勾选 **TShark**。读取已有抓包可以跳过 Npcap。
+2. 完整解压 ZIP，双击 `GB28181-Analyzer.exe`。工作台会在默认浏览器的 `http://127.0.0.1:8791/` 打开，运行期间请保留启动窗口。
+3. 点击「试用示例抓包」，或拖入自己的 `.pcap`、`.pcapng`、`.cap` 文件。导入完成后会自动开始分析。
+
+便携包已包含前后端运行环境，无需安装 Python 或 Node.js。需要还原视频时，将 `ffmpeg.exe` 和 `ffprobe.exe` 所在目录加入 `PATH`，重启应用后在「设置」检查工具状态。[FFmpeg Windows 构建](https://ffmpeg.org/download.html#build-windows)
+
+Windows 版默认仅监听本机，数据保存在 `%LOCALAPPDATA%\GB28181 Analyzer`。可执行文件未做代码签名，可在发布页下载 `SHA256SUMS.txt` 核对 ZIP。
+
+## 一次抓包怎么查
+
+1. **先看「优先排查」**。严重和警告事件会显示证据等级。有报文证据时可以跳到对应包号，有会话关联时可以继续查看详情。
+2. **再核对信令和协商**。从 SIP 时序图查看 INVITE、响应和 ACK，核对 SDP 中的地址、端口和 SSRC。遇到 SSRC 不一致，可回到携带 Subject 和 SDP 的原始信令。
+3. **最后检查媒体和画面**。查看 RTP 是否到达，以及码率、抖动、序号缺口和静默。解析出编码信息后，可查看源编码参数。成功重建的媒体流可在浏览器中播放。
+4. **留档**。从工作台导出 Markdown 或 JSON 报告。报告使用已有结果，导出时无需重新分析抓包。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/overview-dark.png">
-  <img src="docs/images/overview-light.png" alt="工作台：一次点播的总览">
+  <img src="docs/images/overview-light.png" alt="分析总览显示优先告警、关联报文、SIP 响应码与媒体状态">
 </picture>
 
-<p align="center"><sub>结果总览 · 优先排查、原始报文入口、信令与媒体状态</sub></p>
+<details>
+<summary>查看工作台、信令时序与媒体详情</summary>
 
----
+<img src="docs/images/workbench-import.png" alt="抓包工作台的导入区、分析链路和最近任务">
+<img src="docs/images/sip.png" alt="SIP 信令时序图和交互阶段">
+<img src="docs/images/media.png" alt="RTP 码率、抖动和缺口趋势">
 
-## 为什么是它
+</details>
 
-通用的 Wireshark 能告诉你「第 37 号包是 RTP」，但回答不了「这次点播为什么不出画面」。
-GB28181 的故障往往横跨三层：SIP 协商、SDP 协商的地址与 SSRC、RTP 的实际收流。
-把这三层对齐，才能把「媒体没到」和「媒体到了但解不开」区分开。
+## 分析范围
 
-这个项目只做这一件事：**以一次业务会话为单位，给出可追溯到报文的结论**。
-不做通用协议分析，不猜，不把「没抓到」说成「没发生」。
+| 层级 | 可查看的数据 |
+| --- | --- |
+| SIP / SDP | 请求与响应、交互时序、重传、会话阶段耗时，以及 SDP 地址、端口、传输方式和国标扩展 `y=`、`f=`。 |
+| RTP | UDP 与 TCP（RFC 4571）承载的流，支持按序号回绕处理，并查看乱序、重复、缺口、抖动和码率。纯 RTP 抓包也能单独分析。 |
+| PS / ES | MPEG-PS 解封装、H.264 / H.265 识别、分辨率与帧结构统计。具备解码条件时可通过 FFmpeg 重建 MP4。 |
+| 诊断和报文 | 规则命中、可能原因和排查建议。诊断会标明「已确认」「疑似」或「证据不足」，并按可用证据关联报文或会话。 |
 
-## 一次分析，回答五个问题
+**读结果时请留意**
 
-| 问题 | 答案在哪 |
-|---|---|
-| 协商成功了吗 | SIP 请求/响应、重传、Dialog 归并、关键阶段耗时 |
-| 媒体到了吗 | RTP 包数、码率、RFC 3550 抖动、序号缺口、乱序、静默 |
-| 能解出画面吗 | MPEG-PS → PES → ES、H.264/H.265、SPS 解析、I/P/B 帧统计 |
-| 坏在哪一步 | 诊断规则命中，附证据等级、可能原因、排查建议 |
-| 依据是什么 | 关联报文号、十六进制、可导出的 Markdown / JSON 报告 |
+- SIP 响应成功、收到媒体和画面可播放是三个独立结果。判断依据来自当前抓包点及其覆盖的时间范围。
+- RTP 序号缺口反映抓包中看到的缺失区间。TCP 承载的到达时间可能是估算值，抖动与丢包结论需要结合证据等级阅读。无法计算的指标显示为「—」或「无法计算」。
+- 工作台趋势图展示报文量最高的 12 条媒体流，流列表仍保留其余流。上传使用单请求，默认单文件上限为 2048 MB。
+- 当前版本的规则目录包含规划中的规则。RTCP 质量分析和设备拓扑图尚未提供，H.265 帧统计暂未细分 B 帧。
 
-## 能力
+## Docker 部署
 
-- **信令**：SIP 请求/响应、重传识别、Dialog 归并；国标 SDP 扩展 `y=`（SSRC）、`f=`、`setup`、`xstreamtype`
-- **会话**：一个 INVITE Dialog = 一次点播；`signal_status` 与 `media_status` 分开判定，不合并成「成功/失败」
-- **媒体**：UDP 与 TCP（RFC 4571）承载；序号回绕、丢包、乱序、抖动、码率、静默
-- **编码**：MPEG-PS → PES → ES，H.264/H.265 识别，SPS 解析，按访问单元（AU）统计 I/P/B 帧
-- **还原**：参数集对齐后调用 ffmpeg 重建 MP4，浏览器内直接播放
-- **诊断**：21 条规则目录，12 条已接入检测；每条带证据等级（confirmed / suspected / insufficient）、可能原因、建议、关联报文
-- **报告**：单任务导出 Markdown 或 JSON，只读已入库结果，不重跑分析
-- **AI**：可选接入 DeepSeek，只发送结构化摘要，不发送抓包原始字节
-
-<img src="docs/images/sip.png" alt="SIP 信令分析">
-
-<p align="center"><sub><b>SIP 信令</b> · 关键阶段、交互时序、消息明细</sub></p>
-
-<img src="docs/images/media.png" alt="媒体质量分析">
-
-<p align="center"><sub><b>媒体质量</b> · 码率、抖动、缺口，附指标口径说明</sub></p>
-
-<img src="docs/images/diagnostics.png" alt="智能故障诊断">
-
-<p align="center"><sub><b>诊断</b> · 规则命中统计、证据等级；展开可见观测证据、可能原因与排查建议</sub></p>
-
-<img src="docs/images/workbench-import.png" alt="抓包工作台的导入、分析链路与最近任务">
-
-<p align="center"><img src="docs/images/mobile.png" width="240" alt="窄屏的抓包工作台"><br><sub>窄屏工作台保留导入、示例抓包和最近任务入口</sub></p>
-
-## 快速开始
-
-### Windows x64
-
-从 [GitHub Releases](https://github.com/CiallorZ/gb28181-analyzer/releases/latest) 下载 Windows x64 ZIP。安装 Wireshark 的 TShark 组件，完整解压后双击 `GB28181-Analyzer.exe`，浏览器会打开本机工作台。运行无需 Python 或 Node.js，画面重建另需 FFmpeg。详见 [Windows 使用说明](docs/WINDOWS.md)。
-
-### Docker（推荐）
+在仓库根目录启动 Docker Compose。
 
 ```bash
 docker compose up --build
-# 前端 http://localhost:8080
-# 后端 http://localhost:8788 ，API 文档 /api/v1/docs
 ```
 
-镜像内已装 tshark 与 ffmpeg；抓包、数据库、重建产物落在 `./data`。
-对外部署时请显式设置 `ALLOWED_HOSTS`。
+工作台位于 `http://localhost:8080`，后端 OpenAPI 文档位于 `http://localhost:8788/api/v1/docs`。镜像包含 TShark 和 FFmpeg，运行数据保存在仓库的 `data/` 目录。
 
-### 本地开发
+应用面向本机或可信内网。服务没有账号体系，向其他网络开放时应在反向代理层配置认证，并设置 `ALLOWED_HOSTS`。抓包由运行分析服务的机器处理。主动配置并调用可选的 DeepSeek 分析时，只向配置的模型服务发送结构化摘要。
 
-依赖：Python 3.10+、Node.js 18+、[tshark](https://www.wireshark.org/) 4.x；
-视频还原另需 ffmpeg 6.x（不装只影响播放，不影响统计）。
+## 从源码运行
 
-```bash
-# 后端
+准备 Python 3.10+、Node.js 18+ 和 TShark。视频还原需要 FFmpeg。以下后端命令以 PowerShell 为例，Linux/macOS 可将虚拟环境内的 Python 路径换为 `.venv/bin/python`。
+
+```powershell
 cd backend
 python -m venv .venv
-.venv\Scripts\activate              # Linux/macOS: source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env                # 可选：端口、数据目录、外部工具路径
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8788 --reload
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8788 --reload
 ```
 
-```bash
-# 前端（另一个终端）
-cd frontend
-npm install
-npm run dev                         # http://localhost:5173
-```
-
-前端 dev server 会把 `/api` 代理到 `127.0.0.1:8788`；生产构建用 `npm run build`，
-产物在 `frontend/dist/`，交给静态服务器并反代 `/api` 即可。`npm run preview` 也带同样的代理，
-可以按生产构建验收。
-
-### 三步用起来
-
-1. 打开工作台，拖入或选择抓包文件，点「新建分析」。
-2. 等待进度完成，先看总览里的信令成功率、发现媒体数与异常事件。
-3. 点开某条会话看 SDP 与 RTP 指标；在诊断页展开结论核对证据；需要留档时导出报告。
-
-## 工作方式
-
-```mermaid
-flowchart LR
-  A[上传 PCAP] --> B[capinfos + 魔数]
-  B --> C[tshark 报文索引]
-  C --> D[SIP / SDP 解析]
-  D --> E[Dialog → 业务会话]
-  E --> F[RTP 统计<br/>UDP / RFC 4571]
-  F --> G[PS → PES → ES<br/>H.264 / H.265]
-  G --> H[诊断规则引擎]
-  H --> I[(SQLite)]
-  I --> J[工作台 / 报告]
-```
-
-分析在后台线程执行，HTTP 请求不阻塞。同一任务不能并发启动，
-取消状态不会被后续进度覆盖。详细分层与数据模型见 [ARCHITECTURE.md](ARCHITECTURE.md)。
-
-## 诊断规则
-
-| 类别 | 规则 | 已接入 |
-|---|---|---|
-| 信令 SIP | 8 | 3 |
-| 协商 SDP | 4 | 1 |
-| 媒体 MED | 8 | 7 |
-| 抓包 CAP | 1 | 1 |
-| 合计 | 21 | 12 |
-
-规则 ID 稳定可引用，例如 `SDP-003` 表示 Subject 与 SDP `y=` 的 SSRC 不一致。
-未接入的 9 条在设置页明确标为「规划中」——**没报错不等于没问题**，这一点在界面上不模糊。
-
-## 几个关键口径
-
-**信令成功 ≠ 媒体成功。** `200 OK` 只说明协商完成。媒体是否真的到达、能否解码，单独判定；
-两者分开显示，不合并成一个「成功/失败」。
-
-**算不出来就留空。** 无法计算的指标存 `NULL`，界面显示「无法计算」或「—」，不写 0。
-报告文末会声明「— 不是 0」。
-
-**抓包点视角。** 结论只反映抓包位置观察到的流量。「没抓到」和「没发生」是两件事：
-抓包截断、起点在会话中间，会以 `capture_warnings` 显式标出，不当作故障。
-
-**TCP 被动模式的端口。** offer 里的 `m=video 8808` 是监听端口，answer 里的 `9` 是占位值。
-媒体关联优先用 offer 端口，并把 0/9 视为占位，否则永远匹配不上实际连接。
-
-**帧数按 AU 计。** 一帧通常由 SPS/PPS/SEI + 多个 slice NAL 组成，按 NAL 计数会把帧数放大数倍。
-本项目按 `first_mb_in_slice == 0`（H.264）/ `first_slice_segment_in_pic_flag == 1`（H.265）切分访问单元。
-
-## 质量与性能
-
-| 指标 | 当前值 |
-|---|---|
-| 首屏同步 JS（gzip） | 90.3 KB（ECharts 改为动态 import，首屏后再加载） |
-| FCP（生产构建） | 160 ms |
-| 首屏预算门禁 | 110 KB，`npm run budget`，已接入 CI |
-| 后端测试 | 158 passed，覆盖率 72.86%（门槛 70%） |
-| 前端测试 | Vitest 7 用例；ESLint 0 error / 0 warning |
-| CI | 后端 lint + test + coverage、前端 lint + test + build + budget、集成测试 |
-
-## API
-
-统一前缀 `/api/v1`，完整契约以运行中的 `/api/v1/docs` 为准。
-
-| 能力 | 端点 |
-|---|---|
-| 上传与分析 | `POST /tasks/upload`、`GET /tasks`、`POST /tasks/{id}/analyze\|cancel` |
-| 任务视图 | `GET /tasks/{id}/overview\|sessions\|diagnostics\|rule-stats\|packets` |
-| 报告导出 | `GET /tasks/{id}/report?format=md\|json` |
-| 会话详情 | `GET /sessions/{id}` 及 `sip\|timeline\|media\|metrics\|diagnostics` |
-| 报文详情 | `GET /packets/{id}`（协议树 + 十六进制） |
-
-## 配置
-
-`.env`（仓库根或 `backend/` 下）或环境变量；两者同时存在时环境变量优先。
-
-| 变量 | 默认 | 说明 |
-|---|---|---|
-| `HOST` / `PORT` | `127.0.0.1` / `8788` | 监听地址 |
-| `DATABASE_URL` | `sqlite:///data/analyzer.db` | schema 兼容 PostgreSQL |
-| `DATA_DIR` | `./data` | 上传、重建产物、数据库目录 |
-| `TSHARK_PATH` / `FFMPEG_PATH` | 自动查找 | Windows 也会查 Wireshark 安装目录 |
-| `MAX_CONCURRENT_TASKS` | `2` | 同时分析的任务数 |
-| `REBUILD_WORKERS` | 自动 | ffmpeg 并发，默认 `min(4, 核数/2)` |
-| `MAX_UPLOAD_MB` | `2048` | 单文件上传上限，超过直接拒绝 |
-| `KEEP_TASKS` / `KEEP_DAYS` / `DISK_BUDGET_MB` | `5` / `7` / `2048` | 历史与磁盘保留策略 |
-| `KEEP_UPLOADS` | `1` | 关掉可省空间，但不能重新分析 |
-| `ALLOWED_HOSTS` / `CORS_ORIGINS` | 仅本机 | 对外部署必须显式设置 |
-| `DEEPSEEK_API_KEY` | 空 | 也可在前端首次使用时配置（落盘权限 0600） |
-| `AI_BASE_URL_ALLOWLIST` | `api.deepseek.com` | 允许的 AI 网关；换网关必须显式加白 |
-
-## 部署与安全
-
-本服务**没有账号体系**，定位是本机或可信内网的单用户工具。对外暴露前请在反向代理层加认证，
-并设置 `ALLOWED_HOSTS`、透传 `Host`。上传文件按魔数校验，只读解析，不执行；
-抓包原始内容不会发给 AI，也不会离开本机。
-
-## 项目结构
-
-```
-backend/app/
-  api/          tasks / sessions / diagnostics / ai
-  core/         配置、数据库、安全校验
-  models/       SQLAlchemy 实体
-  parsers/      capture / sip_parser / session_builder / rtp_analyzer / ps_parser / rebuild
-  services/     analyzer（编排）/ diagnosis（规则引擎）/ report（导出）
-  schemas/      Pydantic 契约
-frontend/src/
-  api/ stores/ views/ utils/ styles/
-data/           uploads、analyzer.db、rebuilt/（运行时生成）
-docs/           ROADMAP、发布说明与抓包分析笔记
-```
-
-## 测试与检查
-
-```bash
-cd backend
-pip install -r requirements-dev.txt
-python -m pytest tests/ -q                      # 端到端需要 tshark，缺失时 skip
-python -m pytest tests/ -q --cov=app            # 覆盖率，门槛 70%
-ruff check app tests
-```
+从仓库根目录打开另一个终端并启动前端。
 
 ```bash
 cd frontend
-npm run lint && npm run test && npm run build
-npm run budget                                  # 首屏 JS 预算（110 KB）
+npm ci
+npm run dev
 ```
 
-端到端用例在 CI 的 integration job 里装上 tshark/ffmpeg 后真实执行。
-测试样本与说明见 `backend/tests/fixtures/`。
+打开 `http://localhost:5173`。开发服务器会将 `/api` 转发到本机 8788 端口。要检查生产构建，可运行 `npm run build` 后执行 `npm run preview`。上传上限、历史保留和工具路径等配置见 [backend/.env.example](backend/.env.example)。
 
-## 已知限制
+## 开发与维护
 
-- 未做 RTCP 统计分析（数据模型已留位置）
-- 设备拓扑只有后端数据，前端没有拓扑图
-- 报告支持 Markdown / JSON；HTML 单文件与 CSV 未实现
-- 上传为单请求，未做分片，上限 2 GB
-- PostgreSQL 未在真实环境验证；Docker 镜像由 CI 构建，Compose 运行需在目标机器验证
-- H.265 暂不区分 B 帧，非 IRAP 帧统一计入 P
-- 诊断规则尚余 9 条未实现（如 REGISTER 超时、SIP 重传、码率骤降）
-- 抓包缺少 SPS/PPS 时无法还原画面，只能给出编码参数缺失的诊断
-
-路线图与优先级见 [docs/ROADMAP.md](docs/ROADMAP.md)，版本变更见 [CHANGELOG.md](CHANGELOG.md)。
-
-## 参与开发
-
-- API 统一 `/api/v1/` 前缀；异步任务状态可查询
-- 外部程序一律列表传参，不用 `shell=True`
-- 上传文件只读解析；抓包原始内容不外发
-- 新解析逻辑必须配黄金值测试（固定输入 → 固定输出），避免「看起来对」的统计回归
-
-```bash
-git clone https://github.com/CiallorZ/gb28181-analyzer.git
-cd gb28181-analyzer
-```
-
-## License
-
-[MIT](LICENSE)
+- [架构与数据流](ARCHITECTURE.md)
+- [贡献指南与验证命令](CONTRIBUTING.md)
+- [发布与 Windows 打包流程](docs/RELEASE.md)
+- [测试抓包与预期结果](backend/tests/fixtures/README.md)
+- [变更记录](CHANGELOG.md) · [路线图](docs/ROADMAP.md)
