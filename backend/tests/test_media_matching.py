@@ -65,9 +65,16 @@ class TestSsrcMatching:
         assert _match_score(s, _stream(ssrc=0x1234)) == 10000
 
     def test_match_ten_digit_gb_form(self):
-        """GB 里 y= 常是 10 位十进制风格，设备实际 SSRC 可能只有低位"""
+        """GB 里 y= 是 10 位十进制，不是十六进制
+
+        y=0600001869 按十进制是 600001869 = 0x23C34D4D。
+        误当十六进制会得到 0x0600001869（33 位，超出 SSRC 范围），
+        永远不可能与真实流匹配。实测抓包 8/8 都按十进制对上。
+        """
         s = _session(sdp_ssrc='0600001869')
-        assert _match_score(s, _stream(ssrc=0x0600001869)) == 10000
+        assert _match_score(s, _stream(ssrc=0x23C34D4D)) == 10000
+        # 按十六进制解释的值（超出 32 位）不应该匹配任何真实流
+        assert _match_score(s, _stream(ssrc=0x0600001869 & 0xFFFFFFFF)) == 0
 
     def test_subject_ssrc_also_matches(self):
         s = _session(subject_ssrc='00001234')
