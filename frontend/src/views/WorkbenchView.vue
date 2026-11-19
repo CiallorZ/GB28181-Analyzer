@@ -1013,6 +1013,15 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
                 <div class="sc-top">
                   <span class="mono sc-ssrc">0x{{ st.ssrc?.toString(16) }}</span>
                   <span class="proto">{{ st.transport }}</span>
+                  <span v-if="st.extra?.link_mode === 'exact'"
+                        class="badge success sc-link" title="SSRC 与 SDP 的 y= 精确匹配">
+                    SSRC 匹配
+                  </span>
+                  <span v-else-if="st.extra?.link_mode === 'weak'"
+                        class="badge warning sc-link"
+                        title="仅按端口与时间窗关联，非 SSRC 精确匹配，归属存疑">
+                    推断关联
+                  </span>
                 </div>
                 <div class="sc-metrics">
                   <div><i>包数</i><b>{{ st.packet_count }}</b></div>
@@ -1564,10 +1573,11 @@ section.rise:nth-of-type(7) { animation-delay: .30s; }
 }
 .stream-card:hover { border-color: var(--line-strong); }
 .sc-top {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; gap: 6px;
   margin-bottom: 12px;
 }
 .sc-ssrc { font-size: 12px; color: var(--brand-lt); font-weight: 600; }
+.sc-link { font-size: 10px; padding: 1px 6px; margin-left: auto; cursor: help; }
 .sc-metrics {
   display: grid; grid-template-columns: repeat(4, 1fr);
   gap: 8px;

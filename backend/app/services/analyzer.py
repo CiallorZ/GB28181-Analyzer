@@ -355,7 +355,8 @@ def _run(db: Session, task: AnalysisTask):
                      'dst_port': r.destination_port,
                      'start_time': r.start_time, 'end_time': r.end_time,
                      'has_video': r.has_video, 'frame_count': r.frame_count,
-                     'transport': r.transport}
+                     'transport': r.transport, 'src_ip': r.source_ip,
+                     'link_mode': None}
                     for r in streams_raw]
     session_builder.link_media(sessions, stream_dicts)
 
@@ -378,6 +379,12 @@ def _run(db: Session, task: AnalysisTask):
             if i is None or i >= len(streams_raw):
                 continue
             streams_raw[i].session_id = sid
+            # 记录该流是怎么关联上的：SSRC 精确匹配 vs 仅端口/时间弱关联。
+            # 弱关联的流不能当作"确证属于本会话"呈现给用户。
+            mode = stream_dicts[i].get('link_mode') or 'weak'
+            extra = dict(streams_raw[i].extra or {})
+            extra['link_mode'] = mode
+            streams_raw[i].extra = extra
     db.commit()
 
     _link_packet_streams(db, task.id, streams_raw)

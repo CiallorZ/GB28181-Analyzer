@@ -315,6 +315,42 @@ def _check_bye_media(sessions: list, streams: list) -> list[Diagnostic]:
     return out
 
 
+def _parse_ssrc(raw: str) -> int | None:
+    """把 SSRC 文本归一化成整数
+
+    国标里 SSRC 的写法不统一：
+      - 十进制：`0600001869`（前导 0 是定宽填充，不是八进制）→ 600001869
+      - 十六进制：`0x23C34D4D` / `23C34D4D`
+    比较前必须归一化，否则十进制与十六进制会被误判为"不一致"。
+    """
+    if not raw:
+        return None
+    t = raw.strip()
+    if t.lower().startswith('0x'):
+        try:
+            return int(t, 16)
+        except ValueError:
+            return None
+    if t.isdigit():
+        try:
+            return int(t, 10)
+        except ValueError:
+            return None
+    try:
+        return int(t, 16)
+    except ValueError:
+        return None
+
+
+def _ssrc_pair_equal(a: str, b: str) -> bool:
+    """两个 SSRC 文本是否表示同一个值（兼容十进制/十六进制混写）"""
+    va, vb = _parse_ssrc(a), _parse_ssrc(b)
+    if va is not None and vb is not None:
+        return va == vb
+    # 都解析不出来时退回字符串比较，避免漏报
+    return a.strip().lower().lstrip('0') == b.strip().lower().lstrip('0')
+
+
 def _check_sdp(sessions: list) -> list[Diagnostic]:
     out = []
     for s in sessions:
@@ -325,9 +361,8 @@ def _check_sdp(sessions: list) -> list[Diagnostic]:
         subj = (s.get('subject_ssrc') or '').strip()
         sdp_ssrc = (s.get('sdp_ssrc') or '').strip()
         if subj and sdp_ssrc:
-            a = subj.lstrip('0').lower()
-            b = sdp_ssrc.lstrip('0').lower()
-            if a != b:
+            # 两个字段可能是十进制也可能是十六进制，不能直接字符串比
+            if not _ssrc_pair_equal(subj, sdp_ssrc):
                 out.append(Diagnostic(
                     rule_id='SDP-003',
                     severity=WARNING,

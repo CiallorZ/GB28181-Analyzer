@@ -90,6 +90,10 @@ class SessionInfo:
     subject_ssrc: str = ''
     sdp_ssrc: str = ''
 
+    # 媒体关联方式：exact（SSRC 对上）/ mixed / weak（仅端口时间）/
+    # none（没关联到流）。决定前端如何展示证据强度。
+    link_mode: str = 'none'
+
     call_ids: list = field(default_factory=list)
     notes: list = field(default_factory=list)
 
@@ -323,7 +327,6 @@ def link_media(sessions: list[SessionInfo], streams: list[dict]) -> None:
     3. 时间窗重叠 + 同方向
     """
     # 一条流只能归属一个会话：先全局算分，再按分数贪心分配
-    # 否则 4 条流可能被 7 个会话重复认领
     claims: list = []      # (score, session_idx, stream_idx)
 
     for si, s in enumerate(sessions):
@@ -335,17 +338,32 @@ def link_media(sessions: list[SessionInfo], streams: list[dict]) -> None:
     claims.sort(key=lambda x: -x[0])
     assigned_streams = set()
     per_session: dict = {}
+    per_session_exact: dict = {}   # 其中哪些是 SSRC 精确匹配
     for score, si, ti in claims:
         if ti in assigned_streams:
             continue
-        if si in per_session and len(per_session[si]) >= 8:
-            continue
+        # SSRC 精确匹配不限数量；弱关联最多补 1 条，
+        # 否则同一端口上的无关流会被硬塞给同一个会话（实测会把 8 条
+        # 互不相关的流全归到一路点播，导致结论失真）
+        exact = score >= SSRC_EXACT_SCORE
+        if si in per_session:
+            if not exact and len(per_session[si]) >= 1:
+                continue
+            if exact and len(per_session[si]) >= 8:
+                continue
         assigned_streams.add(ti)
         per_session.setdefault(si, []).append(ti)
+        if exact:
+            per_session_exact.setdefault(si, set()).add(ti)
 
     for si, s in enumerate(sessions):
         idxs = per_session.get(si, [])
         matched = [(1, streams[ti]) for ti in idxs]
+
+        # ---- 关联方式标记（供前端/报告区分证据强度）----
+        exact_ids = per_session_exact.get(si, set())
+        s.link_mode = 'exact' if idxs and len(exact_ids) == len(idxs) else (
+            'mixed' if exact_ids else ('weak' if idxs else 'none'))
 
         # ---- 媒体状态 ----
         # 判据只到"抓到并解析出 RTP"这一层。
@@ -357,6 +375,8 @@ def link_media(sessions: list[SessionInfo], streams: list[dict]) -> None:
             s.media_status = 'received'
 
         s.media_stream_keys = [id(st) for _sc, st in matched]
+        for ti in idxs:
+            streams[ti]['link_mode'] = 'exact' if ti in exact_ids else 'weak'
 
         # ---- 首媒体包耗时 ----
         # 关键约束：媒体首包必须落在会话生命周期内。
@@ -392,6 +412,58 @@ def link_media(sessions: list[SessionInfo], streams: list[dict]) -> None:
     return
 
 
+# SSRC 精确匹配的得分门槛（_match_score 命中 SSRC 时给 10000）
+SSRC_EXACT_SCORE = 10000
+
+
+def ssrc_matches(declared: str, actual: int) -> bool:
+    """判断 SDP 声明的 SSRC 是否等于实际 RTP 流的 SSRC
+
+    国标里 SSRC 的写法极不统一，必须做归一化：
+
+      1. 十进制文本 —— 最常见。`y=0600001869` 是十进制 600001869，
+         其十六进制为 0x23C34D4D。**前导 0 只是定宽填充，不是八进制。**
+      2. 十六进制文本 —— `y=0x23C34D4D` 或 `y=23C34D4D`
+      3. Subject 头里的 `SSRC=` 也用同样规则
+
+    实测 20261118141959.pcap：8 个 y= 全按十进制解析后与实际流
+    100% 匹配（0x0600xxxx 段看着像十六进制，其实是十进制数
+    转成 8 位十六进制的样子，两者相差约 6 倍）。
+    """
+    if not declared:
+        return False
+    actual &= 0xFFFFFFFF
+    raw = declared.strip()
+
+    # 显式十六进制写法
+    if raw.lower().startswith('0x'):
+        try:
+            return int(raw, 16) == actual
+        except ValueError:
+            return False
+
+    # 纯数字：先按十进制（国标主流），再按十六进制兜底
+    if raw.isdigit():
+        try:
+            if int(raw, 10) == actual:
+                return True
+        except ValueError:
+            pass
+        # 十进制对不上时，试十六进制解释（部分厂商直接填 hex 串）
+        try:
+            if int(raw, 16) == actual:
+                return True
+        except ValueError:
+            pass
+        return False
+
+    # 含 A-F 的十六进制串
+    try:
+        return int(raw, 16) == actual
+    except ValueError:
+        return False
+
+
 def _match_score(s: SessionInfo, st: dict) -> int:
     """给"会话-媒体流"配对打分
 
@@ -403,24 +475,17 @@ def _match_score(s: SessionInfo, st: dict) -> int:
     """
     score = 0
     raw_ssrc = st.get('ssrc')
-    ssrc_hex = '%08x' % (raw_ssrc or 0)
 
-    # 1) SSRC 精确匹配 —— 唯一强判据，权重必须远超其他项
+    # 1) SSRC 匹配 —— 唯一强判据，权重必须远超其他项
     #    否则多会话共享同一端口（国标 TCP 常见）时所有候选同分，
     #    贪心分配会把所有流都塞给第一个会话。
     #
-    #    注意：SSRC 缺失（0 / None）时**不能参与匹配**。
-    #    lstrip('0') 后 h 变成空串，而任何字符串都 endswith('')，
-    #    会让「没有 SSRC 的流」拿到满分，比真实匹配还高。
+    #    注意：SSRC 缺失（0 / None）时**不能参与匹配**，
+    #    否则「没有 SSRC 的流」会拿到满分，比真实匹配还高。
     for want in (s.sdp_ssrc, s.subject_ssrc):
         if not want or not raw_ssrc:
             continue
-        w = want.lower().lstrip('0')
-        h = ssrc_hex.lower().lstrip('0')
-        if not w or not h:
-            continue
-        # 兼容三种写法：完整 8 位 / 去前导 0 / 互为后缀
-        if h == w or h.endswith(w) or w.endswith(h):
+        if ssrc_matches(want, raw_ssrc):
             score += 10000
             break
 

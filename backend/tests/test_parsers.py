@@ -95,6 +95,29 @@ class TestSdpParser:
         assert sdp is not None
         assert sdp.y_ssrc == '0600001869'
 
+    def test_ssrc_decimal_matches_hex(self):
+        """SDP 的 y= 是十进制，RTP SSRC 是同一值的十六进制
+
+        这是最容易踩的坑：y=0600001869 看着像十六进制，
+        实际是十进制 600001869 = 0x23C34D4D。
+        按十六进制解析会得到 0x0600001869（超出 32 位），永远匹配不上。
+        实测 20261118141959.pcap 的 8 个 y= 全部按十进制匹配成功。
+        """
+        assert session_builder.ssrc_matches('0600001869', 0x23C34D4D)
+        assert session_builder.ssrc_matches('600001869', 0x23C34D4D)
+        # 前导 0 是定宽填充，不是八进制
+        assert session_builder.ssrc_matches('0600001755', 0x23C34CDB)
+
+    def test_ssrc_hex_forms_still_work(self):
+        """显式十六进制写法也要支持"""
+        assert session_builder.ssrc_matches('0x23C34D4D', 0x23C34D4D)
+        assert session_builder.ssrc_matches('23c34d4d', 0x23C34D4D)
+
+    def test_ssrc_mismatch(self):
+        """不同的 SSRC 不能误判为匹配"""
+        assert not session_builder.ssrc_matches('0600001869', 0x23C34D4E)
+        assert not session_builder.ssrc_matches('', 0x23C34D4D)
+
     def test_y_line_both_forms(self):
         """独立行与 a=y: 两种写法都要能解析"""
         sep = chr(13) + chr(10)
