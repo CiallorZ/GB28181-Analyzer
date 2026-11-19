@@ -71,6 +71,12 @@ python -m pytest tests/ -q --cov=app            # 覆盖率
 ruff check app tests                            # 静态检查
 ```
 
+```bash
+cd frontend
+npm run lint && npm run test && npm run build
+npm run budget                                  # 首屏 JS 预算（110 KB）
+```
+
 端到端用例在 CI 的 integration job 中安装 tshark/ffmpeg 后真实执行，
 覆盖率门槛 70%。测试样本与说明见 `backend/tests/fixtures/`。
 

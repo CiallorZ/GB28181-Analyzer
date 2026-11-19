@@ -652,8 +652,10 @@ SQLite 外键与 WAL（实测 `foreign_keys=1`、`journal_mode=wal`）。
   `reassemble_tcp` 会把反向数据当成空洞补零，RFC4571 解帧随之错位。
 - ✅ 前端 ECharts 按需引入（line/bar/pie/scatter + grid/tooltip/legend）与 `manualChunks`：
   首屏 gzip **343 → 252 KB**（index 32.1 + vue 43.4 + echarts 176.9）。
-  仍未达到 120 KB 目标 —— 工作台首屏就有图表，`echarts` chunk 天然在关键路径上；
-  再往下要么图表懒加载（先出骨架，图表后到），要么换更轻的绘图库。
+- ✅ 图表库改为动态 import（R8）：首屏同步 JS **252 → 90.3 KB**（preview 实测
+  transferSize，FCP 160ms），echarts 177.9 KB 在首屏之后才加载。
+  工作台改为静态引入，让构建期即可算准预算；新增 `npm run budget`（阈值 110 KB）
+  与 CI 步骤，防止图表库被重新拉回关键路径。
 - ✅ `analyzer` 不再保留全量 `packets` 列表（R6-A）：索引落库时只累计
   `count / first_ts / last_ts / has_rtp` 与端点计数，抓包结束判定改用这份统计，
   内存不再随报文数线性增长。`extract_fields` 仍按批返回，未做真流式。

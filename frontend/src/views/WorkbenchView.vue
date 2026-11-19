@@ -8,7 +8,7 @@
  */
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import echarts from '../utils/chart'
+import { loadECharts } from '../utils/chartLoader'
 import { chartPalette } from '../utils/chartTheme'
 import { bindChartResize } from '../utils/chartResize'
 import { api } from '../api/client'
@@ -55,9 +55,12 @@ function reportUrl(format) {
   return `/api/v1/tasks/${task.value?.id}/report?format=${format}`
 }
 
-function chart(id, opt) {
+async function chart(id, opt) {
   const el = document.getElementById(id)
   if (!el) return
+  // 图表库是异步加载的，等它回来时容器可能已经因切换任务被移除
+  const echarts = await loadECharts()
+  if (!el.isConnected) return
   if (!charts[id]) charts[id] = echarts.init(el)
   charts[id].setOption(opt, true)
 }
@@ -274,12 +277,8 @@ function renderCharts() {
       name: '0x' + (st.ssrc ? st.ssrc.toString(16) : i),
       type: 'line', smooth: true, showSymbol: false,
       lineStyle: { width: 1.8, color: PALETTE[i % PALETTE.length] },
-      areaStyle: {
-        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-          { offset: 0, color: PALETTE[i % PALETTE.length] + '38' },
-          { offset: 1, color: PALETTE[i % PALETTE.length] + '00' }
-        ])
-      },
+      // 面积用单层低透明度填充：渐变在暗色下会把网格线压暗，也不承载信息
+      areaStyle: { color: PALETTE[i % PALETTE.length] + '18' },
       data: m.bitrate_series.map(p => [p.t, p.v])
     }
   }).filter(Boolean)

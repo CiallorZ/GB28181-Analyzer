@@ -16,7 +16,17 @@ export default defineConfig({
       }
     }
   },
+  // vite preview 也把 /api 转给后端，便于按生产构建验收
+  preview: {
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:8788',
+        changeOrigin: true
+      }
+    }
+  },
   build: {
+    manifest: true,
     outDir: 'dist',
     chunkSizeWarningLimit: 1500,
     rollupOptions: {

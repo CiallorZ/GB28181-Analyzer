@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import echarts from '../utils/chart'
+import { loadECharts } from '../utils/chartLoader'
 import { chartBase as baseOption, chartPalette } from '../utils/chartTheme'
 import { bindChartResize } from '../utils/chartResize'
 import { api } from '../api/client'
@@ -24,9 +24,12 @@ const filterMethod = ref('')
 const filterCallId = ref('')
 
 const charts = {}
-function chart(id, opt) {
+async function chart(id, opt) {
   const el = document.getElementById(id)
   if (!el) return
+  // 图表库是异步加载的，等它回来时容器可能已经因切换任务被移除
+  const echarts = await loadECharts()
+  if (!el.isConnected) return
   if (!charts[id]) charts[id] = echarts.init(el)
   charts[id].setOption(opt, true)
 }
