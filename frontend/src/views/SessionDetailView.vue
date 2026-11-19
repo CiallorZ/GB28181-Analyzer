@@ -15,12 +15,10 @@ const timeline = ref([])
 const streams = ref([])
 const metrics = ref([])
 const diagnostics = ref([])
-const packetIdx = ref({})
 const loading = ref(true)
 const err = ref('')
 const selectedMsg = ref(null)
 const filterMethod = ref('')
-const hideNonCritical = ref(false)
 const filterCallId = ref('')
 
 const charts = {}
@@ -127,11 +125,6 @@ const methods = computed(() => {
   const s = new Set()
   sip.value.forEach(m => s.add(m.method || String(m.status_code)))
   return [...s].sort()
-})
-
-const filteredTimeline = computed(() => {
-  if (!hideNonCritical.value) return timeline.value
-  return timeline.value.filter(e => e.severity !== 'normal')
 })
 
 // 时序图布局
@@ -284,7 +277,7 @@ onMounted(load)
             <svg id="sip-timeline" class="tl-svg" :viewBox="`0 0 1000 ${TIMELINE_H}`"
                  :style="{ height: TIMELINE_H + 'px' }">
               <!-- 参与方竖线 -->
-              <g v-for="(ip, i) in SIG_ROLES" :key="ip">
+              <g v-for="ip in SIG_ROLES" :key="ip">
                 <line :x1="laneX(ip) * 10" y1="34" :x2="laneX(ip) * 10" :y2="TIMELINE_H - 14"
                       stroke="#263140" stroke-width="1" stroke-dasharray="3 3" />
                 <text :x="laneX(ip) * 10" y="22" text-anchor="middle"

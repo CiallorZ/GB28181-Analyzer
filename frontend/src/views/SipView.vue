@@ -95,9 +95,6 @@ const latency = computed(() => {
   return +(ok.t - inv.t).toFixed(3)
 })
 
-const sessionInfo = computed(() =>
-  sessions.value.find(s => s.id === selected.value) || null)
-
 function onPick(m) { selectedMsg.value = m }
 
 function goPacket(id) {

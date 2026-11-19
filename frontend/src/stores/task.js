@@ -39,7 +39,7 @@ export const useTaskStore = defineStore('task', () => {
         task.value = t
         if (cb) cb(t)
         if (!['pending', 'analyzing'].includes(t.status)) stopPolling()
-      } catch (e) { /* 忽略轮询错误 */ }
+      } catch { /* 忽略轮询错误 */ }
     }, 1200)
   }
 

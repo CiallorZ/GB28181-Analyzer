@@ -1,11 +1,9 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
-import { useRoute } from 'vue-router'
 import { api } from './api/client'
 import { useTaskStore } from './stores/task'
 import AiPanel from './components/AiPanel.vue'
 
-const route = useRoute()
 const store = useTaskStore()
 
 const theme = ref(localStorage.getItem('theme') || 'dark')

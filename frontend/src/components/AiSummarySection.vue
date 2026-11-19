@@ -15,11 +15,11 @@ import { api } from '../api/client'
 import { useTaskStore } from '../stores/task'
 import { renderMd } from '../utils/markdown'
 
-const props = defineProps({
+defineProps({
   open: { type: Boolean, default: false },
   num: { type: [Number, String], default: 2 }
 })
-const emit = defineEmits(['update:open'])
+defineEmits(['update:open'])
 
 function openPanel() { store.openAiPanel() }
 
@@ -170,7 +170,7 @@ async function run() {
     })
     if (!res.ok || !res.body) {
       let m = 'HTTP ' + res.status
-      try { const j = await res.json(); if (j.error) m = j.error } catch {}
+      try { const j = await res.json(); if (j.error) m = j.error } catch { /* 非 JSON 响应 */ }
       throw new Error(m)
     }
 

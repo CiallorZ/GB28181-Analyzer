@@ -637,7 +637,7 @@ SQLite 外键与 WAL（实测 `foreign_keys=1`、`journal_mode=wal`）。
 - `pytest-cov` 接入，当前总体 **72.19%**，门槛先设 **70%**；目标 80% 待补 `api`/`retention`/`rebuild` 用例（🟡 部分完成）。
 - 新增 `conftest.py`：临时 `DATA_DIR` / `DATABASE_URL` 的 fixture，让 API 与 analyzer 测试不碰真实数据。✅ 已完成
 - ruff + 配置入仓（`E4/E7/E9/F/DTZ`），`F401/F841`/`DTZ003` 已清零。✅ 已完成
-- 前端 ESLint + Prettier + Vitest；CI 增加 `lint` / `test`。⬜ 未完成
+- 前端 ESLint（flat config）+ Vitest（markdown 渲染 7 用例）；CI `frontend` job 增加 `lint` / `test`。✅ 已完成（Prettier 暂缓：会重排全部前端文件，留待专门一次格式化提交）
 - 拆分 `requirements.txt` / `requirements-dev.txt` 并加主版本上限，删除未使用的 `pydantic-settings`；lock 文件尚未引入。🟡 部分完成
 - `datetime.utcnow()` 全部替换为 `app/core/timeutil.py` 的 `utcnow()`（naive UTC，兼容 SQLite）。✅ 已完成
 - 补 `Dockerfile` + `docker-compose.yml` + nginx 配置（CI `docker` job 构建镜像）；加 `.gitattributes`。✅ 已完成（本地无 Docker，运行未验证）

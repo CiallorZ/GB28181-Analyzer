@@ -40,12 +40,6 @@ const openSections = ref({
   codec: true, diag: true, packet: true
 })
 const activeSection = ref('kpi')
-// AI 设置抽屉走全局 store，避免两个实例
-const aiPanelOpen = computed({
-  get: () => store.aiPanelOpen,
-  set: (v) => v ? store.openAiPanel() : store.closeAiPanel()
-})
-
 const charts = {}
 const C = {
   brand: '#D70D19', ds: '#4D6BFE', ok: '#22c55e', warn: '#f0a020',

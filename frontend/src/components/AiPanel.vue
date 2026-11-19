@@ -174,7 +174,7 @@ async function runAnalyze() {
     })
     if (!res.ok || !res.body) {
       let m = 'HTTP ' + res.status
-      try { const j = await res.json(); if (j.error) m = j.error } catch {}
+      try { const j = await res.json(); if (j.error) m = j.error } catch { /* 非 JSON 响应 */ }
       throw new Error(m)
     }
 
@@ -244,7 +244,7 @@ async function sendQuestion() {
     })
     if (!res.ok || !res.body) {
       let m = 'HTTP ' + res.status
-      try { const j = await res.json(); if (j.error) m = j.error } catch {}
+      try { const j = await res.json(); if (j.error) m = j.error } catch { /* 非 JSON 响应 */ }
       throw new Error(m)
     }
 

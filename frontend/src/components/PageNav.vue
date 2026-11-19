@@ -6,7 +6,7 @@
  * 返回逻辑优先用浏览器历史，无历史时回落到首页。
  */
 import { computed } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRouter } from 'vue-router'
 
 const props = defineProps({
   title: { type: String, default: '' },
@@ -17,7 +17,6 @@ const props = defineProps({
 })
 
 const router = useRouter()
-const route = useRoute()
 
 function goBack() {
   // 有历史就后退，否则回落到 backTo

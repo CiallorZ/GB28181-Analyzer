@@ -17,11 +17,11 @@ function inline(s) {
   const codes = []
   t = t.replace(/`([^`]+)`/g, (_, c) => {
     codes.push(c)
-    return `\u0000C${codes.length - 1}\u0000`
+    return `\uE000C${codes.length - 1}\uE001`
   })
   t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
   t = t.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>')
-  t = t.replace(/\u0000C(\d+)\u0000/g, (_, i) => `<code>${codes[+i]}</code>`)
+  t = t.replace(/\uE000C(\d+)\uE001/g, (_, i) => `<code>${codes[+i]}</code>`)
   return t
 }
 
