@@ -191,11 +191,19 @@ def _run(db: Session, task: AnalysisTask):
 
     # ---------------- 2. 报文索引 ----------------
     _set_progress(db, task, '建立报文索引', 15)
-    packets = []
+    # 只保留聚合量。之前把所有报文 dict 攒在列表里，百万级抓包时
+    # 仅这一份列表就要几百 MB —— 这是大包 OOM 的主要来源。
+    stats = {'count': 0, 'first_ts': None, 'last_ts': None, 'has_rtp': False}
     endpoints: dict = {}
     batch = []
-    for i, p in enumerate(capture.iter_packets(path)):
-        packets.append(p)
+    for p in capture.iter_packets(path):
+        stats['count'] += 1
+        ts = p.get('ts')
+        if ts is not None:
+            stats['first_ts'] = ts if stats['first_ts'] is None else min(stats['first_ts'], ts)
+            stats['last_ts'] = ts if stats['last_ts'] is None else max(stats['last_ts'], ts)
+        if not stats['has_rtp'] and 'rtp' in (p.get('protocols') or '').lower():
+            stats['has_rtp'] = True
         key = (p['src_ip'], p['src_port'])
         ep = endpoints.setdefault(key, {'ip': p['src_ip'], 'port': p['src_port'],
                                         'count': 0, 'bytes': 0})
@@ -229,7 +237,7 @@ def _run(db: Session, task: AnalysisTask):
 
     # ---------------- 3. SIP 消息 ----------------
     _set_progress(db, task, '解析 SIP 信令', 30)
-    sip_msgs = _load_sip(db, task, path, packets)
+    sip_msgs = _load_sip(db, task, path)
 
     # ---------------- 4. 会话重建 ----------------
     _set_progress(db, task, '重建点播会话', 45)
@@ -380,9 +388,8 @@ def _run(db: Session, task: AnalysisTask):
 
     # ---------------- 7. 诊断 ----------------
     _set_progress(db, task, '执行诊断', 85)
-    limits = session_builder.detect_capture_limits(sessions, 
-                                                   [m['info'] for m in sip_msgs],
-                                                   packets)
+    limits = session_builder.detect_capture_limits(
+        sessions, [m['info'] for m in sip_msgs], stats)
     limits.extend(media_limits)
     task_payload = {
         'sessions': [_session_dict(s, sid) for s, sid in session_rows],
@@ -417,14 +424,14 @@ def _run(db: Session, task: AnalysisTask):
     # ---------------- 8. 汇总 ----------------
     _set_progress(db, task, '生成汇总', 95)
     task.summary = _build_summary(task, session_rows, streams_raw, diagnostics,
-                                 packets, limits)
+                                 stats, limits)
     db.commit()
 
 
 # ===============================================================
 # 子步骤
 # ===============================================================
-def _load_sip(db: Session, task: AnalysisTask, path: str, packets: list) -> list[dict]:
+def _load_sip(db: Session, task: AnalysisTask, path: str) -> list[dict]:
     """抽取并解析所有 SIP 消息，返回 [{info, row}]"""
     rows_raw = capture.extract_fields(path, [
         'frame.number', 'frame.time_relative',
@@ -630,8 +637,10 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
             out_dir = os.path.join(settings.DATA_DIR, 'rebuilt', str(task.id))
             rb_tasks = [(tag, pkts, st.duration)
                         for tag, pkts, st, _k, _tr, _m, _ps in pending]
+            workers = settings.REBUILD_WORKERS or max(
+                1, min(4, (os.cpu_count() or 2) // 2))
             rb_map = rb_mod.rebuild_streams_parallel(rb_tasks, out_dir,
-                                                     max_workers=3)
+                                                     max_workers=workers)
         except Exception:
             log.exception('并行重建媒体流失败（不影响统计结果）')
             rb_map = {}
@@ -942,7 +951,7 @@ def _packet_summary(p: dict) -> str:
     return '%s -> %s  %s' % (src, dst, _top_protocol(p.get('protocols') or ''))
 
 
-def _build_summary(task, session_rows, streams, diagnostics, packets,
+def _build_summary(task, session_rows, streams, diagnostics, stats,
                    limits) -> dict:
     sessions = [s for s, _sid in session_rows]
     total_sessions = len(sessions)
@@ -958,7 +967,7 @@ def _build_summary(task, session_rows, streams, diagnostics, packets,
         sev_count[d.severity] = sev_count.get(d.severity, 0) + 1
 
     return {
-        'packet_count': len(packets),
+        'packet_count': stats.get('count', 0),
         'session_count': total_sessions,
         'signal_success': signal_ok,
         'signal_success_rate': (round(signal_ok / total_sessions * 100, 1)
@@ -976,6 +985,6 @@ def _build_summary(task, session_rows, streams, diagnostics, packets,
         'analysis_scope': {
             'note': '本结果仅反映抓包点观察到的流量，'
                     '不代表端到端网络状况或客户端实际播放结果',
-            'packet_count': len(packets),
+            'packet_count': stats.get('count', 0),
         },
     }

@@ -654,9 +654,12 @@ SQLite 外键与 WAL（实测 `foreign_keys=1`、`journal_mode=wal`）。
   首屏 gzip **343 → 252 KB**（index 32.1 + vue 43.4 + echarts 176.9）。
   仍未达到 120 KB 目标 —— 工作台首屏就有图表，`echarts` chunk 天然在关键路径上；
   再往下要么图表懒加载（先出骨架，图表后到），要么换更轻的绘图库。
-- ⬜ `extract_fields` 流式化；`analyzer` 不再保留全量 `packets` 列表 —— 大包 OOM 未解决。
+- ✅ `analyzer` 不再保留全量 `packets` 列表（R6-A）：索引落库时只累计
+  `count / first_ts / last_ts / has_rtp` 与端点计数，抓包结束判定改用这份统计，
+  内存不再随报文数线性增长。`extract_fields` 仍按批返回，未做真流式。
+- ✅ `rebuild` 并发按 CPU 核数（R6-B）：`REBUILD_WORKERS` 默认 0 表示自动，
+  取 `min(4, cores/2)` —— ffmpeg 自身多线程，进程数超过核数只会互相抢核。
 - ⬜ 合并 `iter_packets` 与 SIP 字段抽取为单次 tshark 调用（当前仍是 2 次）。
-- ⬜ `rebuild` 按 CPU 核数并发（仍硬编码 3）。
 - ⬜ 前端任务级数据缓存（按 `taskId`），路由切换仍会全量重取。
 
 ### 阶段 2.5：视觉语言、交互与可访问性（R5）
@@ -671,10 +674,22 @@ SQLite 外键与 WAL（实测 `foreign_keys=1`、`journal_mode=wal`）。
 - 移动端：头部与二级导航横向滚动不换行；表格横向滚动并保留最小列宽；设置页键值对按 3/2/1 列降级。
 - 数值语义：只有警告的「异常事件」不再标红，首包耗时 1.5s 内不再染成警告色。
 
+### 阶段 2.6：报告导出（R6-C）
+
+分析结果此前只能留在页面里，无法进入工单、邮件或归档。现在：
+
+- `GET /api/v1/tasks/{id}/report?format=md|json`，只读已入库结果，不重跑分析。
+- Markdown 分五节：结论摘要、信令会话、媒体流、诊断明细（含证据/可能原因/建议）、分析范围；
+  无法计算的指标写「—」而不是 0，并在文末声明这一点。
+- JSON 与页面接口字段一致（`task / file / summary / sessions / streams / diagnostics`），方便脚本二次处理。
+- 未完成的任务返回 409，未知格式返回 400；文件名由 `Content-Disposition` 给出。
+- 前端在工作台导航右侧提供导出入口：桌面为下拉，移动端平铺为 `.md` / `.json` 两个链接。
+
 ### 阶段 3：功能补齐（按价值排序）
 
 1. **RTCP 分析**（M07 缺口）：丢包率/往返时延/接收端报告，字段已在模型里。
-2. **报告导出**（M13）：HTML 单文件 + JSON + CSV，复用现有 KPI/诊断结构。
+2. **报告导出**（M13）：Markdown + JSON 已实现（R6-C，`GET /tasks/{id}/report`），
+   复用现有 KPI/诊断结构，含证据与建议；HTML 单文件与 CSV 仍未做。
 3. **设备拓扑图**（M11）：`Device` / `Endpoint` 数据已入库，只差前端。
 4. **分片上传**：2GB 上限对大型抓包不够；`tus` 或简单分片 + 断点续传。
 5. **实时采集**：接 `dumpcap` 管道，替代「先存盘再上传」。

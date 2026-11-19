@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import threading
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from fastapi import (APIRouter, BackgroundTasks, Depends, File, HTTPException,
+                     Response, UploadFile)
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -18,8 +20,10 @@ from ..core.db import SessionLocal, get_db, session_scope
 from ..core.security import looks_like_capture
 from ..models.entities import (
     AnalysisTask, CaptureFile, DiagnosticEvent, TaskStatus, BusinessSession,
+    MediaStream,
 )
-from ..services import analyzer
+from ..services import analyzer, report
+from ..services.diagnosis import severity_order_clause
 from ..schemas import task as S
 
 router = APIRouter(prefix='/tasks', tags=['tasks'])
@@ -176,6 +180,54 @@ def _task_detail(db: Session, t: AnalysisTask) -> S.TaskDetail:
 # ---------------------------------------------------------------
 # 启动 / 取消 / 删除
 # ---------------------------------------------------------------
+@router.get('/{task_id}/report')
+def task_report(task_id: int, format: str = 'md',
+                db: Session = Depends(get_db)):
+    """导出分析报告：format=md（默认）或 json
+
+    报告只读已入库的结果，不重新分析 —— 同一个任务在页面与报告里
+    必须给出同一组数字。
+    """
+    task = db.get(AnalysisTask, task_id)
+    if not task:
+        raise HTTPException(404, '任务不存在')
+    if task.status != TaskStatus.COMPLETED:
+        raise HTTPException(409, '任务尚未完成分析，暂不能导出报告')
+
+    file = task.files[0] if task.files else None
+    sessions = db.scalars(
+        select(BusinessSession)
+        .where(BusinessSession.task_id == task_id)
+        .order_by(BusinessSession.start_time)).all()
+    streams = db.scalars(
+        select(MediaStream)
+        .where(MediaStream.task_id == task_id)
+        .order_by(MediaStream.id)).all()
+    diagnostics = db.scalars(
+        select(DiagnosticEvent)
+        .where(DiagnosticEvent.task_id == task_id)
+        .order_by(severity_order_clause(DiagnosticEvent.severity),
+                  DiagnosticEvent.id)).all()
+
+    if format == 'json':
+        payload = report.build_payload(task, file, sessions, streams,
+                                       diagnostics)
+        return Response(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            media_type='application/json; charset=utf-8',
+            headers={'Content-Disposition':
+                     'attachment; filename="gb28181-report-%d.json"' % task_id})
+
+    if format != 'md':
+        raise HTTPException(400, '不支持的格式，可选 md / json')
+
+    md = report.build_markdown(task, file, sessions, streams, diagnostics)
+    return Response(
+        md, media_type='text/markdown; charset=utf-8',
+        headers={'Content-Disposition':
+                 'attachment; filename="gb28181-report-%d.md"' % task_id})
+
+
 @router.post('/{task_id}/analyze', response_model=S.TaskBrief)
 def start_analyze(task_id: int, bg: BackgroundTasks,
                   db: Session = Depends(get_db)):

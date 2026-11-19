@@ -50,6 +50,11 @@ function themeColors() {
   return chartPalette()
 }
 
+// 报告由浏览器直接下载，不经 axios，文件名交给后端 Content-Disposition
+function reportUrl(format) {
+  return `/api/v1/tasks/${task.value?.id}/report?format=${format}`
+}
+
 function chart(id, opt) {
   const el = document.getElementById(id)
   if (!el) return
@@ -694,6 +699,17 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
           <span class="spy-file mono-sm truncate">
             {{ task.file?.filename }}
           </span>
+          <details class="exp">
+            <summary class="btn-mini">导出报告</summary>
+            <div class="exp-menu">
+              <a :href="reportUrl('md')" download>Markdown（.md）</a>
+              <a :href="reportUrl('json')" download>JSON（.json）</a>
+            </div>
+          </details>
+          <a class="btn-mini exp-alt" :href="reportUrl('md')" download
+             aria-label="导出 Markdown 报告">导出 .md</a>
+          <a class="btn-mini exp-alt" :href="reportUrl('json')" download
+             aria-label="导出 JSON 报告">导出 .json</a>
           <button class="btn-mini" @click="reset">新建分析</button>
         </div>
       </nav>
@@ -1413,6 +1429,36 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
   background: var(--text-3);
 }
 .spy-file { color: var(--text-4); max-width: 280px; margin-right: 10px; }
+
+/* 导出：挂在导航右侧，不额外占一栏；两种格式写清后缀，避免下错文件 */
+.exp { position: relative; }
+.exp > summary { list-style: none; cursor: pointer; user-select: none; }
+.exp > summary::-webkit-details-marker { display: none; }
+.exp[open] > summary {
+  background: var(--surface-3); border-color: var(--line-strong); color: var(--text);
+}
+.exp-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 60;
+  min-width: 168px; padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+}
+.exp-menu a {
+  display: block; padding: 7px 10px;
+  border-radius: var(--radius-xs);
+  color: var(--text-2); font-size: 12.5px; text-decoration: none;
+}
+.exp-menu a:hover { background: var(--surface-3); color: var(--text); }
+
+.exp-alt { display: none; }
+/* 移动端导航横向滚动，绝对定位菜单会被 overflow 裁掉：
+   收起下拉，改为两个平铺链接 */
+@media (max-width: 720px) {
+  .exp { display: none; }
+  .exp-alt { display: inline-flex; }
+}
 
 /* ============ 区块 ============ */
 /* 单次错峰进场：同一屏的区块依次出现，不做逐卡 hover 位移 */

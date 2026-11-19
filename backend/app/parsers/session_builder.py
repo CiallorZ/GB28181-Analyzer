@@ -452,11 +452,15 @@ def _match_score(s: SessionInfo, st: dict) -> int:
 # ---------------------------------------------------------------
 def detect_capture_limits(sessions: list[SessionInfo],
                           messages: list[SipInfo],
-                          packets: list[dict]) -> list[dict]:
-    """识别抓包本身的局限，避免把"没抓到"当成"没发生" """
+                          stats: dict) -> list[dict]:
+    """识别抓包本身的局限，避免把"没抓到"当成"没发生"
+
+    ``stats`` 是报文索引阶段的聚合结果（count / first_ts / has_rtp），
+    不再需要把每条报文都留在内存里 —— 百万级抓包下那份列表就是 OOM 源头。
+    """
     warns = []
 
-    if not packets:
+    if not stats.get('count'):
         warns.append({
             'code': 'no_packets',
             'level': 'critical',
@@ -464,8 +468,7 @@ def detect_capture_limits(sessions: list[SessionInfo],
         })
         return warns
 
-    times = [p['ts'] for p in packets if p.get('ts')]
-    cap_start = min(times) if times else 0
+    cap_start = stats.get('first_ts') or 0
 
     for s in sessions:
         # 抓包起点落在会话中间
@@ -497,9 +500,8 @@ def detect_capture_limits(sessions: list[SessionInfo],
             })
 
     # 只抓到媒体没抓到信令
-    if not any(s.dialogs for s in sessions) and packets:
-        has_rtp = any('rtp' in (p.get('protocols') or '').lower() for p in packets)
-        if has_rtp:
+    if not any(s.dialogs for s in sessions) and stats.get('count'):
+        if stats.get('has_rtp'):
             warns.append({
                 'code': 'no_signal',
                 'level': 'info',

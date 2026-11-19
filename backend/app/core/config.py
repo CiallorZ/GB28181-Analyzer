@@ -39,6 +39,9 @@ class Settings:
 
     # 并发
     MAX_CONCURRENT_TASKS: int = int(_env('MAX_CONCURRENT_TASKS', '2'))
+    # 媒体重建的并行度。0 表示按 CPU 自动取（上限 4）——
+    # ffmpeg 本身是多线程的，起太多进程反而互相抢核。
+    REBUILD_WORKERS: int = int(_env('REBUILD_WORKERS', '0'))
 
     # ---- 任务保留策略 ----
     # KEEP_TASKS=0 表示不保留历史：分析完成后立即清理原文件与重建产物

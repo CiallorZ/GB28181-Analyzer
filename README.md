@@ -139,6 +139,7 @@ docs/           ROADMAP 与抓包分析笔记
 
 - `POST /tasks/upload`、`GET /tasks`、`POST /tasks/{id}/analyze|cancel`
 - `GET /tasks/{id}/overview|sessions|diagnostics|rule-stats|packets`
+- `GET /tasks/{id}/report?format=md|json`（分析报告导出）
 - `GET /sessions/{id}` 及其 `sip|timeline|media|metrics|diagnostics`
 - `GET /packets/{id}`（协议树 + 十六进制）
 
@@ -146,7 +147,7 @@ docs/           ROADMAP 与抓包分析笔记
 
 - 未做 RTCP 统计分析（数据模型已留位置）
 - 设备拓扑只有后端数据，前端没有拓扑图
-- 报告导出（M13）未实现
+- 报告导出支持 Markdown / JSON；HTML 单文件报告与 CSV 未实现
 - 上传为单请求，未做分片，上限 2GB
 - PostgreSQL 未在真实环境验证；Docker 镜像由 CI 构建，Compose 运行需在目标机器验证
 - H.265 暂不区分 B 帧，非 IRAP 帧统一计入 P
