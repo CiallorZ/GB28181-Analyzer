@@ -287,9 +287,13 @@ class TestRtpSequence:
 
     def test_real_gap_detected(self):
         pkts = self._pkts([1, 2, 5, 6])     # 缺 3、4
+        for i, p in enumerate(pkts):
+            p.packet_number = 100 + i
         st = rtp_analyzer.analyze_stream(pkts)
         assert st.seq_gap_count == 1
         assert st.seq_gap_packets == 2
+        # 缺口事件要带报文号，诊断才能指回报文查看器
+        assert st.seq_gap_events[0]['packet'] == 102
 
     def test_duplicates(self):
         pkts = self._pkts([1, 2, 2, 3])
@@ -300,6 +304,14 @@ class TestRtpSequence:
         pkts = self._pkts([1, 3, 2, 4])
         st = rtp_analyzer.analyze_stream(pkts)
         assert st.out_of_order_count >= 1
+
+    def test_reorder_is_not_loss(self):
+        """乱序不是丢包：1,2,4,3,5,6 一个包都不缺"""
+        pkts = self._pkts([1, 2, 4, 3, 5, 6])
+        st = rtp_analyzer.analyze_stream(pkts)
+        assert st.out_of_order_count == 1
+        assert st.seq_gap_count == 0
+        assert st.seq_gap_packets == 0
 
     def test_tcp_gap_not_confirmed_loss(self):
         """TCP 承载的缺口不能标为确认丢包"""

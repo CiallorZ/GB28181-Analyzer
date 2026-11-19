@@ -140,10 +140,11 @@ def health():
 
 @app.get(API + '/rules')
 def list_rules():
-    """诊断规则清单 —— 前端展示与文档引用"""
-    from .services.diagnosis import RULES
-    return {'rules': [{'id': k, 'name': v} for k, v in RULES.items()],
-            'total': len(RULES)}
+    """诊断规则清单 —— 含实现状态，避免把「未实现」误读成「未命中」"""
+    from .services.diagnosis import RULES, rule_catalog
+    rules = rule_catalog()
+    return {'rules': rules, 'total': len(RULES),
+            'implemented': sum(1 for r in rules if r['implemented'])}
 
 
 # ---------------- 统一错误响应 ----------------

@@ -71,6 +71,7 @@ class SessionInfo:
 
     # 分层状态（初始都是 unknown，由后续判定）
     signal_status: str = 'unknown'
+    final_code: int | None = None       # INVITE 的最终响应码
     media_status: str = 'unknown'
     end_reason: str = 'unknown'
 
@@ -208,6 +209,7 @@ def build_sessions(dialogs: list[DialogInfo],
         s = SessionInfo()
         s.dialogs.append(d)
         s.call_ids.append(d.call_id)
+        s.final_code = d.final_code
         s.device_id = d.device_id
         s.channel_id = d.device_id          # 国标点播通常是通道 ID
         s.initiator_ip = d.source_ip

@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 
 from app.models.entities import (
     AnalysisTask, BusinessSession, CaptureFile, MediaMetric, MediaStream,
-    SipMessage, TaskStatus,
+    PacketIndex, SipDialog, SipMessage, TaskStatus,
 )
 from app.parsers import capture
 from app.services import analyzer
@@ -75,6 +75,19 @@ def test_udp_basic_end_to_end(db, tmp_path):
     assert st.seq_gap_count == 0          # 连续序号不应报缺口
     assert st.session_id == sess.id
 
+    # Dialog 也要回填会话，否则"一个会话包含哪些 Dialog"无从查询
+    dialog = db.scalar(select(SipDialog).where(SipDialog.task_id == task.id))
+    assert dialog is not None
+    assert dialog.session_id == sess.id
+
+    # 报文索引要能按 SSRC/会话过滤（M12）
+    rtp_rows = db.scalars(
+        select(PacketIndex).where(PacketIndex.task_id == task.id,
+                                  PacketIndex.ssrc.is_not(None))).all()
+    assert len(rtp_rows) >= 100
+    assert {r.ssrc for r in rtp_rows} == {st.ssrc}
+    assert {r.session_id for r in rtp_rows} == {sess.id}
+
     # 标准 y= 行（offer）也要能落库
     invite = db.scalar(
         select(SipMessage).where(SipMessage.task_id == task.id,
@@ -126,3 +139,20 @@ def test_tcp_rfc4571_end_to_end(db, tmp_path):
     assert st.transport == 'TCP'
     assert st.packet_count >= 100
     assert st.seq_gap_count == 0
+
+
+def test_tcp_sip_ports_and_empty_packets(db, tmp_path):
+    """TCP 5060 的 SIP：端口不能为空，握手的空包不能入库"""
+    task, _dst = _make_task(db, tmp_path, 'sip-tcp-register.pcap')
+    analyzer.run_analysis(db, task.id)
+
+    db.expire_all()
+    msgs = db.scalars(select(SipMessage).where(
+        SipMessage.task_id == task.id)
+        .order_by(SipMessage.timestamp)).all()
+    assert len(msgs) == 2, [(m.method, m.status_code) for m in msgs]
+    for m in msgs:
+        assert m.source_port == 5060
+        assert m.destination_port == 5060
+    assert msgs[0].method == 'REGISTER'
+    assert msgs[1].status_code == 200

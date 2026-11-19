@@ -16,7 +16,7 @@
 - **编码**：MPEG-PS → PES → ES，H.264/H.265 识别，SPS 解析，按访问单元（AU）统计 I/P/B 帧
 - **还原**：参数集对齐后用 ffmpeg 重建 MP4，前端直接播放
 - **诊断**：规则引擎输出 critical/warning/info，每条带证据等级（confirmed/suspected/insufficient）、
-  可能原因、排查建议、关联报文
+  可能原因、排查建议、关联报文；21 条规则中 12 条已接入，其余在设置页明确标为「规划中」
 - **AI 摘要**：可选接入 DeepSeek，只发送结构化摘要，不发送抓包原始字节
 
 ## 快速开始
@@ -137,6 +137,7 @@ docs/           ROADMAP 与抓包分析笔记
 - 上传为单请求，未做分片，上限 2GB
 - PostgreSQL 与 Docker Compose 未在真实环境验证
 - H.265 暂不区分 B 帧，非 IRAP 帧统一计入 P
+- 诊断规则尚余 9 条未实现（如 REGISTER 超时、SIP 重传、码率骤降），设置页会标注
 - 抓包缺少 SPS/PPS 时无法还原画面，只能给出编码参数缺失的诊断
 
 路线图与优先级见 [docs/ROADMAP.md](docs/ROADMAP.md)。

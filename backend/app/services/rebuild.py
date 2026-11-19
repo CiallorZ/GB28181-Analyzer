@@ -27,6 +27,10 @@ MAX_SECONDS = 60          # 单条流转码时长上限
 FFMPEG_TIMEOUT = 900
 MIN_PS_BYTES = 4096       # 小于这个不值得转码
 
+# 预览转码只降不升：2688×1520 -> 1280×724，640×360 保持 640×360。
+# 固定 scale=1280:-2 会把低分辨率源放大，既伪造成"高清"，也浪费 CPU。
+TRANSCODE_SCALE = "scale='min(1280,iw)':-2"
+
 
 @dataclass
 class RebuildResult:
@@ -188,7 +192,7 @@ def transcode(ps_path: str, mp4_path: str, poster_path: str | None = None
         '-c:v', 'libx264',
         '-preset', 'veryfast',          # 比 medium 快约 2 倍，画质差异可忽略
         '-crf', '24',
-        '-vf', 'scale=1280:-2',
+        '-vf', TRANSCODE_SCALE,
         '-pix_fmt', 'yuv420p',          # 浏览器兼容
         '-movflags', '+faststart',
         '-t', str(MAX_SECONDS),

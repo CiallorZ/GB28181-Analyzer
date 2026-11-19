@@ -484,7 +484,11 @@ def _decode_body(raw: bytes) -> str:
 
 
 def body_from_hex(hexstr: str) -> bytes:
-    """tshark 的 msg_body 是十六进制字符串"""
+    """兼容旧字段：把十六进制正文转成字节
+
+    注意 tshark 的 `sip.msg_body` 实际是 FT_NONE 存在标记（"1"），
+    这里通常会得到空串；真正的正文由 `build_message` 从 msg_hdr 拆出。
+    """
     s = re.sub(r'[^0-9a-fA-F]', '', hexstr or '')
     if not s or len(s) % 2:
         return b''

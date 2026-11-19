@@ -71,6 +71,23 @@ RULES = {
     'CAP-001': '抓包不完整',
 }
 
+# 已接入检测逻辑的规则。清单里其余条目是规划中的规则，
+# 界面与文档必须明确区分，避免用户以为"没报错 = 没问题"。
+# 新增规则时同步更新；tests/test_rule_catalog.py 会对照源码校验。
+RULE_IMPLEMENTED = frozenset({
+    'SIP-001', 'SIP-003', 'SIP-008',
+    'SDP-003',
+    'MED-001', 'MED-002', 'MED-003', 'MED-004', 'MED-005',
+    'MED-007', 'MED-008',
+    'CAP-001',
+})
+
+
+def rule_catalog() -> list[dict]:
+    """规则清单（带实现状态），供 /api/rules 与前端展示"""
+    return [{'id': k, 'name': v, 'implemented': k in RULE_IMPLEMENTED}
+            for k, v in RULES.items()]
+
 
 # ---------------------------------------------------------------
 # 各规则的检测逻辑
@@ -138,6 +155,21 @@ def _severity_rank(s: str) -> int:
     return {CRITICAL: 0, WARNING: 1, INFO: 2, UNKNOWN: 3}.get(s, 4)
 
 
+def _packets_of(messages: list, call_ids: list, predicate, limit: int = 5
+                ) -> list[int]:
+    """取满足条件的报文号，用于 related_packet_ids"""
+    wanted = set(c for c in call_ids if c)
+    ids = []
+    for m in messages:
+        if m.get('call_id') not in wanted:
+            continue
+        if predicate(m) and m.get('packet_number'):
+            ids.append(m['packet_number'])
+            if len(ids) >= limit:
+                break
+    return ids
+
+
 def _check_signal(sessions: list, messages: list) -> list[Diagnostic]:
     out = []
     for s in sessions:
@@ -161,6 +193,10 @@ def _check_signal(sessions: list, messages: list) -> list[Diagnostic]:
                 timestamp=s.get('start_time'),
                 evidence={'signal_status': signal_status,
                           'call_ids': call_ids[:3]},
+                related_packet_ids=_packets_of(
+                    messages, call_ids,
+                    lambda m: m.get('is_request') and m.get('method') == 'INVITE',
+                    limit=3),
                 possible_causes=['对端未响应 INVITE',
                                  '信令经过的节点不通',
                                  '抓包点只捕获了单向信令'],
@@ -182,6 +218,13 @@ def _check_signal(sessions: list, messages: list) -> list[Diagnostic]:
                 session_id=sid, device_id=dev,
                 timestamp=s.get('start_time'),
                 evidence={'final_code': code},
+                related_packet_ids=_packets_of(
+                    messages, call_ids,
+                    lambda m: (
+                        not m.get('is_request') and m.get('status_code')
+                        and (m['status_code'] == code if code
+                             else m['status_code'] >= 300)),
+                    limit=3),
                 possible_causes=['设备不在目录中或通道不存在',
                                  '权限/鉴权拒绝',
                                  '设备离线',
@@ -204,6 +247,10 @@ def _check_signal(sessions: list, messages: list) -> list[Diagnostic]:
                 session_id=sid, device_id=dev,
                 timestamp=s.get('end_time'),
                 evidence={'bye_time': s.get('end_time')},
+                related_packet_ids=_packets_of(
+                    messages, call_ids,
+                    lambda m: m.get('is_request') and m.get('method') == 'BYE',
+                    limit=3),
                 possible_causes=['对端 SIP 栈事务处理不完整',
                                  'BYE 的响应方向未被抓包'],
                 recommendations=['要求对端修复 BYE 事务响应',
@@ -373,6 +420,9 @@ def _check_media(sessions: list, streams: list, by_session: dict) -> list[Diagno
                 description=desc,
                 session_id=sid, stream_id=st_id, device_id=dev,
                 timestamp=st.get('start_time'),
+                related_packet_ids=[
+                    e['packet'] for e in (st.get('seq_gap_events') or [])
+                    if e.get('packet')][:10],
                 evidence={
                     'ssrc': '%08x' % (st.get('ssrc') or 0),
                     'gap_count': st.get('seq_gap_count'),

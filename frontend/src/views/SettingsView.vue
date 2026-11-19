@@ -57,14 +57,24 @@ onMounted(async () => {
     </div>
 
     <div class="card mb-16">
-      <div class="card-head">诊断规则清单 <span class="count-badge">{{ rules.length }}</span></div>
+      <div class="card-head">
+        诊断规则清单
+        <span class="count-badge">
+          {{ rules.filter(r => r.implemented).length }} / {{ rules.length }} 已接入
+        </span>
+      </div>
       <div class="card-body tight">
         <table class="tbl">
-          <thead><tr><th>规则 ID</th><th>名称</th></tr></thead>
+          <thead><tr><th>规则 ID</th><th>名称</th><th>状态</th></tr></thead>
           <tbody>
             <tr v-for="r in rules" :key="r.id">
               <td class="mono text-dim">{{ r.id }}</td>
               <td>{{ r.name }}</td>
+              <td>
+                <span class="badge" :class="r.implemented ? 'ok' : 'unknown'">
+                  {{ r.implemented ? '已接入' : '规划中' }}
+                </span>
+              </td>
             </tr>
           </tbody>
         </table>

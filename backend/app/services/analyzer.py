@@ -26,7 +26,7 @@ import re
 import time
 from datetime import datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
@@ -306,18 +306,39 @@ def _run(db: Session, task: AnalysisTask):
         session_rows.append((s, row.id))
     db.commit()
 
-    # 回填 session_id
+    # 回填 session_id（SIP 消息、Dialog、报文索引共用一张 Call-ID 映射）
+    cid_to_sid: dict[str, int] = {}
+    for s, sid in session_rows:
+        for cid in s.call_ids:
+            cid_to_sid.setdefault(cid, sid)
+
     for m in sip_msgs:
-        if not m['info'].call_id:
+        sid = cid_to_sid.get(m['info'].call_id)
+        if sid is None:
             continue
-        for s, sid in session_rows:
-            if m['info'].call_id in s.call_ids:
-                db.execute(
-                    SipMessage.__table__.update()
-                    .where(SipMessage.id == m['row'].id)
-                    .values(session_id=sid)
-                )
-                break
+        db.execute(
+            SipMessage.__table__.update()
+            .where(SipMessage.id == m['row'].id)
+            .values(session_id=sid)
+        )
+
+    for d in dialogs:
+        sid = cid_to_sid.get(d.call_id)
+        if sid is None:
+            continue
+        db.execute(
+            update(SipDialog.__table__)
+            .where(SipDialog.id == dialog_map[d.key])
+            .values(session_id=sid)
+        )
+
+    for cid, sid in cid_to_sid.items():
+        db.execute(
+            update(PacketIndex.__table__)
+            .where(PacketIndex.task_id == task.id)
+            .where(PacketIndex.call_id == cid)
+            .values(session_id=sid)
+        )
     db.commit()
 
     # ---------------- 5. RTP 分析 ----------------
@@ -354,6 +375,8 @@ def _run(db: Session, task: AnalysisTask):
             streams_raw[i].session_id = sid
     db.commit()
 
+    _link_packet_streams(db, task.id, streams_raw)
+
     # ---------------- 6. 设备目录 ----------------
     _set_progress(db, task, '整理设备目录', 75)
     _load_devices(db, task, sip_msgs)
@@ -367,7 +390,7 @@ def _run(db: Session, task: AnalysisTask):
     task_payload = {
         'sessions': [_session_dict(s, sid) for s, sid in session_rows],
         'streams': [_stream_dict(r) for r in streams_raw],
-        'messages': [],
+        'messages': [_message_dict(m['info']) for m in sip_msgs],
         'limits': limits,
     }
     diagnostics = diag_engine.diagnose(task_payload)
@@ -408,7 +431,10 @@ def _load_sip(db: Session, task: AnalysisTask, path: str, packets: list) -> list
     """抽取并解析所有 SIP 消息，返回 [{info, row}]"""
     rows_raw = capture.extract_fields(path, [
         'frame.number', 'frame.time_relative',
-        'ip.src', 'udp.srcport', 'ip.dst', 'udp.dstport',
+        # SIP 既可能走 UDP 5060，也可能走 TCP 5060（国标 2022 很常见），
+        # 只取 udp.* 会让 TCP 信令的端口全为空，端点与会话方向随之残缺。
+        'ip.src', 'udp.srcport', 'tcp.srcport',
+        'ip.dst', 'udp.dstport', 'tcp.dstport',
         'sip.CSeq', 'sip.Status-Code',
         'sip.Request-Line', 'sip.Status-Line',
         'sip.msg_hdr', 'sip.msg_body',
@@ -421,16 +447,23 @@ def _load_sip(db: Session, task: AnalysisTask, path: str, packets: list) -> list
             meta = {
                 'packet_number': int(r[0]) if r[0] else 0,
                 'timestamp': float(r[1]) if r[1] else 0.0,
-                'src_ip': r[2], 'src_port': int(r[3]) if r[3] else None,
-                'dst_ip': r[4], 'dst_port': int(r[5]) if r[5] else None,
-                'request_line': r[8], 'status_line': r[9],
+                'src_ip': r[2],
+                'src_port': int(r[3] or r[4]) if (r[3] or r[4]) else None,
+                'dst_ip': r[5],
+                'dst_port': int(r[6] or r[7]) if (r[6] or r[7]) else None,
+                'request_line': r[10], 'status_line': r[11],
             }
         except (ValueError, IndexError):
             continue
 
         info = sip_parser.build_message(
-            r[10], sip_parser.body_from_hex(r[11]), meta)
+            r[12], sip_parser.body_from_hex(r[13]), meta)
         if not info:
+            continue
+        # tcp.port==5060 会把三次握手等非 SIP 报文也带进来：它们没有
+        # 起始行、头域和 Call-ID，入库只会污染消息总数与方法分布。
+        if not (info.headers or info.call_id or info.method
+                or info.status_code):
             continue
 
         row = SipMessage(
@@ -476,13 +509,12 @@ def _load_sip(db: Session, task: AnalysisTask, path: str, packets: list) -> list
             by_cid.setdefault(cid, []).append(m['info'].packet_number)
 
     if by_cid:
-        from sqlalchemy import update as _update
         for cid, nums in by_cid.items():
             # 分批，避免 SQL 参数过多
             for i in range(0, len(nums), 500):
                 chunk = nums[i:i + 500]
                 db.execute(
-                    _update(PacketIndex.__table__)
+                    update(PacketIndex.__table__)
                     .where(PacketIndex.task_id == task.id)
                     .where(PacketIndex.packet_number.in_(chunk))
                     .values(call_id=cid)
@@ -528,6 +560,7 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
                 arrival=p['ts'],
                 size=len(payload),
                 payload=payload[12:],
+                packet_number=p['frame'],
             )))
 
         groups: dict = {}
@@ -673,10 +706,39 @@ def _tcp_time_spread(path: str, stream_id: str):
     return None
 
 
+_CODEC_ALIASES = {'h264': 'H.264', 'avc': 'H.264',
+                  'h265': 'H.265', 'hevc': 'H.265'}
+
+
+def _normalize_codec(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    return _CODEC_ALIASES.get(raw.lower(), raw.upper())
+
+
+def _source_media(ps, rb) -> dict:
+    """源编码与源分辨率：PS/SPS 为准，重建产物只作兜底
+
+    转码产物统一是 H.264，且预览会缩到 1280 宽。若直接把 ffprobe
+    结果写进 codec/width/height，H.265 的 2688×1520 源会显示成
+    "H.264 1280×724"，源信息就永久丢了。
+    """
+    v = ps.video if ps and getattr(ps, 'video', None) else None
+    return {
+        'codec': ((v.codec if v and v.codec else None)
+                  or _normalize_codec(rb.codec if rb else None)),
+        'width': ((v.width if v and v.width else None)
+                  or (rb.width if rb and rb.width else None)),
+        'height': ((v.height if v and v.height else None)
+                   or (rb.height if rb and rb.height else None)),
+    }
+
+
 def _save_stream(db: Session, task: AnalysisTask, st, key, transport,
                  meta: dict | None = None, ps=None, rb=None) -> MediaStream:
     ssrc, sip_, sport, dip, dport = key
     meta = meta or {}
+    source = _source_media(ps, rb)
 
     def _int(v):
         try:
@@ -705,12 +767,10 @@ def _save_stream(db: Session, task: AnalysisTask, st, key, transport,
         # 重建成功后以 ffprobe 结果为准（比 SPS 解析可靠）
         has_video=bool(rb and rb.ok) or bool(ps and ps.video and ps.video.frame_count),
         has_audio=bool(ps and ps.audio and ps.audio.pes_count),
-        codec=((rb.codec.upper() if rb and rb.codec else None)
-               or (ps.video.codec if ps and ps.video else None)),
-        width=((rb.width if rb and rb.width else None)
-               or (ps.video.width if ps and ps.video else None)),
-        height=((rb.height if rb and rb.height else None)
-                or (ps.video.height if ps and ps.video else None)),
+        # 源编码/分辨率（不是转码产物）
+        codec=source['codec'],
+        width=source['width'],
+        height=source['height'],
         fps=(rb.fps if rb else None),
         frame_count=((rb.frames if rb and rb.frames else None)
                      or (ps.video.frame_count if ps and ps.video else None)),
@@ -729,6 +789,10 @@ def _save_stream(db: Session, task: AnalysisTask, st, key, transport,
                    'duration': rb.duration if rb else None,
                    'ps_bytes': rb.ps_bytes if rb else 0,
                    'error': rb.error if rb else None,
+                   # 预览产物的编码与尺寸，和上面的源信息分开记录
+                   'output_codec': (rb.codec.upper() if rb and rb.codec else None),
+                   'output_width': rb.width if rb else None,
+                   'output_height': rb.height if rb else None,
                } if rb else None},
     )
     db.add(row)
@@ -798,6 +862,7 @@ def _session_dict(s, sid) -> dict:
         'device_id': s.device_id,
         'channel_id': s.channel_id,
         'signal_status': s.signal_status,
+        'final_code': s.final_code,
         'media_status': s.media_status,
         'end_reason': s.end_reason,
         'start_time': s.start_time,
@@ -833,6 +898,50 @@ def _stream_dict(r: MediaStream) -> dict:
         'ts_anomalies': (r.extra or {}).get('ts_anomalies'),
         'rebuild_error': r.rebuild_error,
     }
+
+
+def _message_dict(info) -> dict:
+    """诊断规则只需要定位报文的最小字段集"""
+    return {
+        'packet_number': info.packet_number,
+        'timestamp': info.timestamp,
+        'call_id': info.call_id,
+        'method': info.method,
+        'is_request': info.is_request,
+        'status_code': info.status_code,
+    }
+
+
+def _link_packet_streams(db: Session, task_id: int, streams) -> None:
+    """把媒体流线索回填到报文索引
+
+    报文查看器要支持"按 SSRC / 会话过滤"，但建索引时还不知道 SSRC。
+    这里用五元组 + 时间窗把 RTP 报文归到流上；TCP 承载时同一连接
+    可能承载多段媒体，时间窗能避免整条连接被多次覆盖。
+    """
+    for r in streams:
+        if not (r.source_ip and r.destination_ip
+                and r.source_port is not None and r.destination_port is not None):
+            continue
+        values = {}
+        if r.ssrc:
+            values['ssrc'] = r.ssrc
+        if r.session_id is not None:
+            values['session_id'] = r.session_id
+        if not values:
+            continue
+
+        stmt = (update(PacketIndex.__table__)
+                .where(PacketIndex.task_id == task_id)
+                .where(PacketIndex.source_ip == r.source_ip)
+                .where(PacketIndex.source_port == r.source_port)
+                .where(PacketIndex.destination_ip == r.destination_ip)
+                .where(PacketIndex.destination_port == r.destination_port)
+                .where(PacketIndex.timestamp >= r.start_time)
+                .where(PacketIndex.timestamp <= r.end_time)
+                .values(**values))
+        db.execute(stmt)
+    db.commit()
 
 
 def _top_protocol(protocols: str) -> str:

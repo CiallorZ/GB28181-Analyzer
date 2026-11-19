@@ -29,6 +29,7 @@ class RtpPacket:
     arrival: float = 0.0
     size: int = 0
     payload: bytes = b''
+    packet_number: int = 0      # 原始报文号（TCP 重组时可能为 0）
 
 
 @dataclass
@@ -170,35 +171,46 @@ def analyze_stream(packets: list[RtpPacket], transport: str = 'UDP',
         st.avg_bitrate = round(st.byte_count * 8 / span / 1000, 1)
 
     # ---- 序号分析 ----
+    # 丢包必须在"去重 + 按序号排序"后计算；按到达顺序算会把乱序包
+    # 前后的正常间隔误判成两个缺口（例如 1,2,4,3,5,6 实际一个包都没丢）。
     unwrap_sequences(packets)
     st.seq_start = packets[0].seq
     st.seq_end = packets[-1].seq
 
-    expected = len(packets)
-    seen = {}
-    gaps = []
-    ooo = 0
+    seen = set()
+    unique = []
     dup = 0
-    prev_unwrapped = None
-
-    for p in packets:
+    for p in packets:                     # packets 已按到达顺序排好
         u = p.seq_unwrapped
         if u in seen:
             dup += 1
             continue
-        seen[u] = True
-        if prev_unwrapped is not None:
-            d = u - prev_unwrapped
-            if d <= 0:
-                ooo += 1
-            elif d > 1:
-                missing = d - 1
-                gaps.append({
-                    'after_seq': p.seq - d,
-                    'gap': missing,
-                    'time': round(p.arrival - st.start_time, 3),
-                })
-        prev_unwrapped = u
+        seen.add(u)
+        unique.append(p)
+
+    # 乱序看到达顺序：后到的包序号小于已见最大序号
+    ooo = 0
+    max_seen = None
+    for p in unique:
+        if max_seen is not None and p.seq_unwrapped < max_seen:
+            ooo += 1
+        if max_seen is None or p.seq_unwrapped > max_seen:
+            max_seen = p.seq_unwrapped
+
+    # 缺口看序号顺序：相邻两个已收到的包之间缺了多少
+    gaps = []
+    ordered = sorted(unique, key=lambda p: p.seq_unwrapped)
+    for prev, cur in zip(ordered, ordered[1:]):
+        missing = cur.seq_unwrapped - prev.seq_unwrapped - 1
+        if missing > 0:
+            gaps.append({
+                'after_seq': prev.seq,
+                'gap': missing,
+                'time': round(cur.arrival - st.start_time, 3),
+                # 缺口后第一个包，报文查看器据此定位
+                'packet': cur.packet_number,
+                'prev_packet': prev.packet_number,
+            })
 
     st.duplicate_count = dup
     st.out_of_order_count = ooo
