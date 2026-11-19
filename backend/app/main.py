@@ -16,6 +16,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from . import __version__
 from .api import ai, diagnostics, sessions, tasks
 from .core.config import settings
 from .core.db import init_db
@@ -31,7 +32,7 @@ log = logging.getLogger('gb28181')
 app = FastAPI(
     title='GB28181 Analyzer',
     description='GB/T 28181 视联网协议分析与流媒体质量诊断平台',
-    version='1.0.0-P0',
+    version=__version__,
     docs_url='/api/v1/docs',
     openapi_url='/api/v1/openapi.json',
 )
@@ -126,7 +127,7 @@ def health():
     """健康检查 —— 同时反映外部依赖状态"""
     return {
         'status': 'ok',
-        'version': '1.0.0-P0',
+        'version': __version__,
         'dependencies': {
             'tshark': bool(capture.TSHARK),
             'ffmpeg': bool(capture.FFMPEG),

@@ -75,3 +75,4 @@ docs/samples/*.mp4
 .coverage
 coverage.xml
 htmlcov/
+frontend/dist-demo/

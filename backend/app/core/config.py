@@ -6,8 +6,15 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 BASE_DIR = Path(__file__).resolve().parent.parent.parent   # backend/
 PROJECT_DIR = BASE_DIR.parent                              # 仓库根目录
+
+# .env 只是本地开发的便利：真实环境变量优先（override=False），
+# 仓库根与 backend/ 两处都认，方便从根目录或 backend/ 启动。
+load_dotenv(PROJECT_DIR / '.env')
+load_dotenv(BASE_DIR / '.env')
 
 
 def _env(key: str, default: str) -> str:
@@ -18,7 +25,7 @@ class Settings:
     # 服务
     HOST: str = _env('HOST', '127.0.0.1')
     PORT: int = int(_env('PORT', '8788'))
-    DEBUG: bool = _env('DEBUG', '1') == '1'
+    DEBUG: bool = _env('DEBUG', '0') == '1'
 
     # 数据库：默认 SQLite，便于开箱即用；schema 与 PostgreSQL 兼容
     # 切 PG 时设 DATABASE_URL=postgresql+psycopg://user:pass@host/db

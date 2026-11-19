@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: 构建发布制品
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 构建前端
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+          cd dist
+          zip -qr "../../gb28181-analyzer-frontend-${GITHUB_REF_NAME}.zip" .
+
+      - name: 打包源码
+        run: |
+          git archive --format=tar.gz \
+            --prefix="gb28181-analyzer-${GITHUB_REF_NAME}/" \
+            -o "gb28181-analyzer-${GITHUB_REF_NAME}.tar.gz" HEAD
+
+      - name: 生成校验和
+        run: sha256sum gb28181-analyzer-frontend-*.zip gb28181-analyzer-*.tar.gz > SHA256SUMS.txt
+
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            gb28181-analyzer-frontend-${{ github.ref_name }}.zip
+            gb28181-analyzer-${{ github.ref_name }}.tar.gz
+            SHA256SUMS.txt

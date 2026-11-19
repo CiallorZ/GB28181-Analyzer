@@ -8,6 +8,8 @@
 
 [![CI](https://github.com/CiallorZ/gb28181-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/CiallorZ/gb28181-analyzer/actions/workflows/ci.yml)
 
+当前版本 **0.0.1**（首个公开发布版本），变更见 [CHANGELOG.md](CHANGELOG.md)。
+
 ## 能做什么
 
 - **信令**：SIP 请求/响应、重传、Dialog 归并；国标 SDP 扩展 `y=`（SSRC）、`f=`、`setup`、`xstreamtype`
@@ -30,8 +32,11 @@ cd backend
 python -m venv .venv
 .venv\Scripts\activate            # Linux/macOS: source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env               # 可选：改端口/数据目录/外部工具路径
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8788 --reload
 ```
+
+配置也可以不用 `.env`，直接设环境变量；两者同时存在时环境变量优先。
 
 - API 文档：http://127.0.0.1:8788/api/v1/docs
 - 健康检查：http://127.0.0.1:8788/api/v1/health
@@ -114,7 +119,7 @@ docs/           ROADMAP 与抓包分析笔记
 
 ## 配置
 
-全部通过环境变量，常用项：
+`.env`（仓库根或 `backend/` 下）或环境变量，常用项：
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
