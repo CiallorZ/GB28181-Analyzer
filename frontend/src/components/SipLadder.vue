@@ -18,7 +18,6 @@ const hovered = ref(null)
 const selected = ref(null)
 const zoom = ref(1)
 const ROW_H = 30
-const PAD = 12
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
@@ -39,9 +38,9 @@ const parties = computed(() => {
       m.method === 'INVITE' && m.is_request && m.source_ip === ip)
     const recvInvite = list.some(m =>
       m.method === 'INVITE' && m.is_request && m.destination_ip === ip)
-    let label = '端点', color = '#7d8b9a'
-    if (sentInvite) { label = '点播方'; color = '#4D6BFE' }
-    else if (recvInvite) { label = '被点播方'; color = '#D70D19' }
+    let label = '端点', color = 'var(--text-4)'
+    if (sentInvite) { label = '点播方'; color = 'var(--info)' }
+    else if (recvInvite) { label = '被点播方'; color = 'var(--text-2)' }
     return { ip, label, color }
   })
 })
@@ -49,8 +48,9 @@ const parties = computed(() => {
 function laneX(ip, list) {
   const i = list.findIndex(p => p.ip === ip)
   if (i < 0) return 500
-  const usable = 1000 - PAD * 2
-  return PAD + (usable / (list.length + 1)) * (i + 1)
+  if (list.length === 1) return 500
+  const pad = 110
+  return pad + i * ((1000 - pad * 2) / (list.length - 1))
 }
 
 /* ---------------- 消息样式 ---------------- */
@@ -59,15 +59,15 @@ const KEY_METHODS = new Set(['INVITE', 'ACK', 'BYE', 'CANCEL'])
 function styleOf(m) {
   if (m.is_request) {
     const meth = m.method || 'REQ'
-    if (meth === 'INVITE') return { color: '#4D6BFE', label: 'INVITE', marker: 'arwReq' }
-    if (meth === 'BYE') return { color: '#f0a020', label: 'BYE', marker: 'arwReq' }
-    if (meth === 'ACK') return { color: '#22c55e', label: 'ACK', marker: 'arwOk' }
-    return { color: '#3d9be9', label: meth, marker: 'arwReq' }
+    if (meth === 'INVITE') return { color: 'var(--info)', label: 'INVITE', marker: 'arwReq' }
+    if (meth === 'BYE') return { color: 'var(--text-2)', label: 'BYE', marker: 'arwProv' }
+    if (meth === 'ACK') return { color: 'var(--ok)', label: 'ACK', marker: 'arwOk' }
+    return { color: 'var(--info)', label: meth, marker: 'arwReq' }
   }
   const code = String(m.status_code || '')
-  if (code.startsWith('2')) return { color: '#22c55e', label: code, marker: 'arwOk' }
-  if (code.startsWith('1')) return { color: '#7d8b9a', label: code, marker: 'arwProv' }
-  return { color: '#f0453a', label: code || 'ERR', marker: 'arwErr' }
+  if (code.startsWith('2')) return { color: 'var(--ok)', label: code, marker: 'arwOk' }
+  if (code.startsWith('1')) return { color: 'var(--text-4)', label: code, marker: 'arwProv' }
+  return { color: 'var(--critical)', label: code || 'ERR', marker: 'arwErr' }
 }
 
 const svgH = computed(() =>
@@ -83,25 +83,25 @@ const svgHtml = computed(() => {
   out.push(`<defs>
     <marker id="arwReq" viewBox="0 0 10 10" refX="9" refY="5"
       markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-      <path d="M0,0 L10,5 L0,10 z" fill="#4D6BFE"/></marker>
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--info)"/></marker>
     <marker id="arwOk" viewBox="0 0 10 10" refX="9" refY="5"
       markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-      <path d="M0,0 L10,5 L0,10 z" fill="#22c55e"/></marker>
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--ok)"/></marker>
     <marker id="arwErr" viewBox="0 0 10 10" refX="9" refY="5"
       markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-      <path d="M0,0 L10,5 L0,10 z" fill="#f0453a"/></marker>
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--critical)"/></marker>
     <marker id="arwProv" viewBox="0 0 10 10" refX="9" refY="5"
       markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-      <path d="M0,0 L10,5 L0,10 z" fill="#7d8b9a"/></marker>
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--text-4)"/></marker>
   </defs>`)
 
   // 参与方立柱 + 头部卡片
   list.forEach(p => {
     const x = laneX(p.ip, list)
     out.push(`<line x1="${x}" y1="56" x2="${x}" y2="${H - 20}"
-      stroke="#1a2432" stroke-width="1" stroke-dasharray="4 4" opacity=".8"/>`)
+      stroke="var(--line-2)" stroke-width="1" stroke-dasharray="4 4" opacity=".9"/>`)
     out.push(`<rect x="${x - 62}" y="8" width="124" height="38" rx="8"
-      fill="#161f2c" stroke="#2c3a4d" stroke-width="1"/>`)
+      fill="var(--surface-2)" stroke="var(--line-2)" stroke-width="1"/>`)
     out.push(`<circle cx="${x - 46}" cy="27" r="4" fill="${p.color}"/>`)
     out.push(`<text x="${x + 4}" y="24" text-anchor="middle"
       fill="#eaf0f7" font-size="10.5" font-weight="600">${esc(p.label)}</text>`)
@@ -121,7 +121,7 @@ const svgHtml = computed(() => {
     // 行底
     if (hl) {
       out.push(`<rect x="0" y="${y - 12}" width="1000" height="${ROW_H - 4}"
-        fill="${selected.value === i ? 'rgba(215,13,25,.09)' : '#161f2c'}" rx="5"/>`)
+        fill="${selected.value === i ? 'var(--surface-3)' : 'var(--surface-2)'}" rx="5"/>`)
     }
 
     // 连线

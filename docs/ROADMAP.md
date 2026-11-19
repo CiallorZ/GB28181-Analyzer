@@ -644,15 +644,32 @@ SQLite 外键与 WAL（实测 `foreign_keys=1`、`journal_mode=wal`）。
 - CI hygiene job 重写（`git ls-files -z`、敏感文件/构建产物检查、`permissions`/`concurrency`/`timeout-minutes`）。✅ 已完成
 - 新增 `integration` job：`apt-get install -y tshark ffmpeg`，用 `tests/fixtures/` 跑端到端。✅ 已完成
 
-### 阶段 2：性能（1 天）
+### 阶段 2：性能（🟡 进行中，R5 完成一半）
 
-- 删除 `_tcp_time_spread`（改用 `dump_tcp_segments` 已取的时间），省掉 N 次全量扫描。
-- `dump_tcp_segments` 按方向分组（`stream + 五元组`），修掉双向合并补零的问题。
-- `extract_fields` 流式化；`analyzer` 不再保留全量 `packets` 列表（只留计数与首末时间），解决大包 OOM。
-- 合并 `iter_packets` 与 SIP 字段抽取为单次 tshark 调用。
-- `rebuild` 按 CPU 核数并发（当前硬编码 3）。
-- 前端 ECharts 按需引入 + `manualChunks`，目标首屏 gzip < 120 KB。
-- 前端任务级数据缓存（按 `taskId`），消除路由切换全量重取。
+- ✅ 删除 `_tcp_time_spread`：`dump_tcp_segments` 现在记录每个方向的 `t0/t1`，
+  RFC4571 流的到达时间不再为每条流额外跑一次全量 `frame.time_relative` 扫描。
+- ✅ `dump_tcp_segments` 按 `stream + 方向` 聚合：双向共用一份 seq 空间时，
+  `reassemble_tcp` 会把反向数据当成空洞补零，RFC4571 解帧随之错位。
+- ✅ 前端 ECharts 按需引入（line/bar/pie/scatter + grid/tooltip/legend）与 `manualChunks`：
+  首屏 gzip **343 → 252 KB**（index 32.1 + vue 43.4 + echarts 176.9）。
+  仍未达到 120 KB 目标 —— 工作台首屏就有图表，`echarts` chunk 天然在关键路径上；
+  再往下要么图表懒加载（先出骨架，图表后到），要么换更轻的绘图库。
+- ⬜ `extract_fields` 流式化；`analyzer` 不再保留全量 `packets` 列表 —— 大包 OOM 未解决。
+- ⬜ 合并 `iter_packets` 与 SIP 字段抽取为单次 tshark 调用（当前仍是 2 次）。
+- ⬜ `rebuild` 按 CPU 核数并发（仍硬编码 3）。
+- ⬜ 前端任务级数据缓存（按 `taskId`），路由切换仍会全量重取。
+
+### 阶段 2.5：视觉语言、交互与可访问性（R5）
+
+不引入组件库、不改信息架构，只把同一套视觉语法落到每个页面：
+
+- 设计令牌：红色只用于故障与当前态；主操作统一为墨色（`--ink-btn`）；
+  颜色、间距、字号全部走 `theme.css` 变量，页面里不再出现硬编码色值（含内联 SVG 与图表 option）。
+- 去掉渐变、发光、悬浮抬升与彩色 KPI 底纹；图表调色板改为单色系 + 语义色。
+- 动效只保留一次入场错峰和用户触发的展开/抽屉；`prefers-reduced-motion` 下全部关闭。
+- 键盘可达：表格行可 Tab 聚焦、Enter 打开，`:focus-visible` 用 `--info` 描边。
+- 移动端：头部与二级导航横向滚动不换行；表格横向滚动并保留最小列宽；设置页键值对按 3/2/1 列降级。
+- 数值语义：只有警告的「异常事件」不再标红，首包耗时 1.5s 内不再染成警告色。
 
 ### 阶段 3：功能补齐（按价值排序）
 

@@ -1,7 +1,9 @@
 <script setup>
-import { ref, onMounted, computed, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import * as echarts from 'echarts'
+import echarts from '../utils/chart'
+import { chartBase as baseOption, chartPalette } from '../utils/chartTheme'
+import { bindChartResize } from '../utils/chartResize'
 import { api } from '../api/client'
 import PageNav from '../components/PageNav.vue'
 
@@ -29,13 +31,13 @@ function chart(id, opt) {
   charts[id].setOption(opt, true)
 }
 
-const chartBase = (extra = {}) => ({
-  backgroundColor: 'transparent',
+const chartBase = (extra = {}) => baseOption({
   grid: { left: 52, right: 16, top: 20, bottom: 26 },
   tooltip: { trigger: 'axis' },
-  textStyle: { color: '#a8b5c4', fontSize: 11 },
   ...extra
 })
+
+let C = chartPalette()
 
 async function load() {
   loading.value = true
@@ -61,6 +63,7 @@ async function load() {
 }
 
 function renderCharts() {
+  C = chartPalette()
   // 码率趋势
   const brSeries = []
   metrics.value.forEach((m, i) => {
@@ -73,10 +76,10 @@ function renderCharts() {
     })
   })
   chart('chart-bitrate', chartBase({
-    legend: { top: 0, textStyle: { color: '#a8b5c4', fontSize: 10 } },
-    xAxis: { type: 'value', name: '秒', axisLine: { lineStyle: { color: '#263140' } },
-             splitLine: { lineStyle: { color: '#1c242f' } } },
-    yAxis: { type: 'value', name: 'kbps', splitLine: { lineStyle: { color: '#1c242f' } } },
+    legend: { top: 0, textStyle: { color: C.dim, fontSize: 11 } },
+    xAxis: { type: 'value', name: '秒', axisLine: { lineStyle: { color: C.line2 } },
+             splitLine: { lineStyle: { color: C.line } } },
+    yAxis: { type: 'value', name: 'kbps', splitLine: { lineStyle: { color: C.line } } },
     series: brSeries.length ? brSeries : []
   }))
 
@@ -92,10 +95,10 @@ function renderCharts() {
     })
   })
   chart('chart-jitter', chartBase({
-    legend: { top: 0, textStyle: { color: '#a8b5c4', fontSize: 10 } },
-    xAxis: { type: 'value', name: '秒', axisLine: { lineStyle: { color: '#263140' } },
-             splitLine: { lineStyle: { color: '#1c242f' } } },
-    yAxis: { type: 'value', name: 'ms', splitLine: { lineStyle: { color: '#1c242f' } } },
+    legend: { top: 0, textStyle: { color: C.dim, fontSize: 11 } },
+    xAxis: { type: 'value', name: '秒', axisLine: { lineStyle: { color: C.line2 } },
+             splitLine: { lineStyle: { color: C.line } } },
+    yAxis: { type: 'value', name: 'ms', splitLine: { lineStyle: { color: C.line } } },
     series: jSeries.length ? jSeries : []
   }))
 }
@@ -128,13 +131,15 @@ const methods = computed(() => {
 })
 
 // 时序图布局
-const TIMELINE_H = computed(() => Math.max(300, filteredSip.value.length * 26 + 60))
+const TIMELINE_H = computed(() => Math.max(200, filteredSip.value.length * 26 + 70))
 
 function laneX(ip) {
-  const idx = SIG_ROLES.value.indexOf(ip)
-  const n = SIG_ROLES.value.length || 1
-  const w = 100 / (n + 1)
-  return (idx + 1) * w
+  const roles = SIG_ROLES.value
+  const n = roles.length || 1
+  if (n === 1) return 500
+  const idx = Math.max(0, roles.indexOf(ip))
+  const pad = 130
+  return pad + idx * ((1000 - pad * 2) / (n - 1))
 }
 
 function selectMsg(m) {
@@ -159,7 +164,12 @@ function downloadSvg() {
 
 const fmt = (v, d = 3) => v == null ? '—' : Number(v).toFixed(d)
 
-onMounted(load)
+let unbindResize = null
+onMounted(async () => {
+  await load()
+  unbindResize = bindChartResize(charts)
+})
+onUnmounted(() => unbindResize?.())
 </script>
 
 <template>
@@ -173,7 +183,7 @@ onMounted(load)
 
     <template v-if="session">
       <!-- 会话摘要 -->
-      <div class="kpis mb-16">
+      <div class="kpis k8 mb-16">
         <div class="kpi">
           <div class="kpi-label">设备 ID</div>
           <div class="kpi-mono">{{ session.device_id || '—' }}</div>
@@ -278,31 +288,31 @@ onMounted(load)
                  :style="{ height: TIMELINE_H + 'px' }">
               <!-- 参与方竖线 -->
               <g v-for="ip in SIG_ROLES" :key="ip">
-                <line :x1="laneX(ip) * 10" y1="34" :x2="laneX(ip) * 10" :y2="TIMELINE_H - 14"
-                      stroke="#263140" stroke-width="1" stroke-dasharray="3 3" />
-                <text :x="laneX(ip) * 10" y="22" text-anchor="middle"
-                      fill="#6d7b8a" font-size="10" font-family="monospace">{{ ip }}</text>
+                <line :x1="laneX(ip)" y1="34" :x2="laneX(ip)" :y2="TIMELINE_H - 14"
+                      stroke="var(--line-2)" stroke-width="1" stroke-dasharray="3 3" />
+                <text :x="laneX(ip)" y="22" text-anchor="middle"
+                      fill="var(--text-3)" font-size="10.5" font-family="monospace">{{ ip }}</text>
               </g>
 
               <!-- 消息箭头 -->
               <g v-for="(m, i) in filteredSip" :key="m.id"
                  @click="selectMsg(m)" style="cursor:pointer">
                 <rect x="0" :y="44 + i * 26 - 10" width="1000" height="24"
-                      :fill="selectedMsg?.id === m.id ? 'rgba(77,107,254,.13)' : 'transparent'" />
+                      :fill="selectedMsg?.id === m.id ? 'var(--ds-soft)' : 'transparent'" />
                 <line
-                  :x1="laneX(m.source_ip || SIG_ROLES[0]) * 10"
+                  :x1="laneX(m.source_ip || SIG_ROLES[0])"
                   :y1="44 + i * 26"
-                  :x2="laneX(m.destination_ip || SIG_ROLES[1] || SIG_ROLES[0]) * 10"
+                  :x2="laneX(m.destination_ip || SIG_ROLES[1] || SIG_ROLES[0])"
                   :y2="44 + i * 26"
-                  :stroke="m.is_request ? '#4d6bfe' : (String(m.status_code || '').startsWith('2') ? '#2ecc71' : '#f0453a')"
+                  :stroke="m.is_request ? 'var(--ds)' : (String(m.status_code || '').startsWith('2') ? 'var(--ok)' : 'var(--critical)')"
                   stroke-width="1.4"
                   :marker-end="`url(#arr${m.is_request ? 'Req' : (String(m.status_code || '').startsWith('2') ? 'Ok' : 'Err')})`" />
-                <text :x="laneX(m.source_ip || SIG_ROLES[0]) * 10" :y="40 + i * 26"
-                      text-anchor="middle" fill="#a8b5c4" font-size="9" font-family="monospace">
+                <text :x="laneX(m.source_ip || SIG_ROLES[0])" :y="40 + i * 26"
+                      text-anchor="middle" fill="var(--text-3)" font-size="10" font-family="monospace">
                   {{ m.is_request ? m.method : m.status_code }}
                 </text>
                 <text x="995" :y="47 + i * 26" text-anchor="end"
-                      fill="#4a5563" font-size="9" font-family="monospace">
+                      fill="var(--text-4)" font-size="10" font-family="var(--font-mono)">
                   {{ m.timestamp.toFixed(3) }}s
                 </text>
               </g>
@@ -310,15 +320,15 @@ onMounted(load)
               <defs>
                 <marker id="arrReq" viewBox="0 0 10 10" refX="9" refY="5"
                         markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-                  <path d="M0,0 L10,5 L0,10 z" fill="#4d6bfe"/>
+                  <path d="M0,0 L10,5 L0,10 z" fill="var(--ds)"/>
                 </marker>
                 <marker id="arrOk" viewBox="0 0 10 10" refX="9" refY="5"
                         markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-                  <path d="M0,0 L10,5 L0,10 z" fill="#2ecc71"/>
+                  <path d="M0,0 L10,5 L0,10 z" fill="var(--ok)"/>
                 </marker>
                 <marker id="arrErr" viewBox="0 0 10 10" refX="9" refY="5"
                         markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-                  <path d="M0,0 L10,5 L0,10 z" fill="#f0453a"/>
+                  <path d="M0,0 L10,5 L0,10 z" fill="var(--critical)"/>
                 </marker>
               </defs>
             </svg>
@@ -365,7 +375,7 @@ onMounted(load)
             <tbody>
               <tr v-for="st in streams" :key="st.id">
                 <td class="mono">{{ st.ssrc ? '0x' + st.ssrc.toString(16).padStart(8,'0') : '—' }}</td>
-                <td><span class="badge unknown">{{ st.transport }}</span></td>
+                <td><span class="proto">{{ st.transport }}</span></td>
                 <td class="mono-sm">{{ st.source_port }} → {{ st.destination_port }}</td>
                 <td class="num">{{ st.packet_count }}</td>
                 <td class="num">{{ fmt(st.duration, 2) }}s</td>
@@ -491,13 +501,27 @@ onMounted(load)
   display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 10px 22px;
 }
-.param, .msg-grid > div, .sdp-grid > div {
+.msg-grid > div, .sdp-grid > div {
   display: flex; gap: 10px; font-size: 12.5px; align-items: baseline;
 }
-.param span, .msg-grid span, .sdp-grid span {
+.msg-grid span, .sdp-grid span {
   color: var(--text-3); width: 84px; flex: none; font-size: 12px;
 }
-.param b, .msg-grid b, .sdp-grid b { color: var(--text-2); font-weight: 500; }
+.msg-grid b, .sdp-grid b { color: var(--text-2); font-weight: 500; }
+
+/* 协商参数：像仪表铭牌一样成列，而不是一串漂浮的标签 */
+.param-grid {
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 0 26px;
+  border-top: 1px solid var(--line);
+}
+.param {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.param span { color: var(--text-4); width: auto; font-size: 11.5px; }
+.param b { color: var(--text); font-weight: 500; font-size: 13px; font-family: var(--font-mono); }
 
 .ssrc-warn {
   margin-top: 12px; padding: 9px 12px;
@@ -507,12 +531,12 @@ onMounted(load)
 
 .count-badge {
   font-size: 12px; padding: 1px 7px; border-radius: 99px;
-  background: var(--panel-3); color: var(--text-3);
+  background: var(--surface-3); color: var(--text-3);
 }
 
 .mini-select, .mini-input {
   height: 26px; padding: 0 8px;
-  background: var(--bg-2); border: 1px solid var(--border);
+  background: var(--surface-2); border: 1px solid var(--line);
   border-radius: var(--radius-sm); color: var(--text-2);
   font-size: 12px; font-family: inherit;
 }
@@ -530,13 +554,15 @@ onMounted(load)
 
 .diag-list { display: flex; flex-direction: column; gap: 12px; }
 .diag {
-  background: var(--panel-2); border-radius: var(--radius-sm);
-  padding: 12px 14px; border-left: 3px solid var(--text-4);
+  background: transparent; border-radius: 0;
+  padding: 12px 0 12px 13px; border-left: 2px solid var(--text-4);
+  border-top: 1px solid var(--line);
 }
-.diag.critical { border-left-color: var(--critical); background: var(--critical-bg); }
-.diag.warning { border-left-color: var(--warning); background: var(--warning-bg); }
-.diag.info { border-left-color: var(--info); background: var(--info-bg); }
-.diag.unknown { border-left-color: var(--unknown); }
+.diag:last-child { border-bottom: 1px solid var(--line); }
+.diag.critical { border-left-color: var(--critical); }
+.diag.warning { border-left-color: var(--warning); }
+.diag.info { border-left-color: var(--info); }
+.diag.unknown { border-left-color: var(--text-4); }
 
 .diag-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
 .diag-rule { font-size: 12px; color: var(--text-3); }
@@ -544,15 +570,16 @@ onMounted(load)
 .diag-desc { font-size: 12.5px; color: var(--text-2); margin-top: 7px; line-height: 1.7; }
 .diag-block { margin-top: 9px; }
 .diag-label {
-  font-size: 12px; color: var(--text-3); margin-bottom: 4px;
-  text-transform: uppercase; letter-spacing: .5px;
+  font-size: 11.5px; color: var(--text-4); margin-bottom: 4px;
 }
 .diag-block ul { margin-left: 18px; font-size: 12.5px; color: var(--text-2); line-height: 1.8; }
 
 .pkt-link {
-  font-size: 12px; padding: 1px 7px; border-radius: 3px;
-  background: var(--accent-bg); color: var(--accent); cursor: pointer;
+  font-family: var(--font-mono); font-size: 11.5px; padding: 1px 4px;
+  color: var(--text-2); cursor: pointer;
+  border-bottom: 1px solid var(--line-3);
 }
+.pkt-link:hover { color: var(--text); border-bottom-color: currentColor; }
 
 .sdp-block, .body-block { margin-top: 14px; }
 .body-pre {

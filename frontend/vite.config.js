@@ -16,5 +16,18 @@ export default defineConfig({
       }
     }
   },
-  build: { outDir: 'dist', chunkSizeWarningLimit: 1500 }
+  build: {
+    outDir: 'dist',
+    chunkSizeWarningLimit: 1500,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return
+          if (id.includes('/echarts/') || id.includes('/zrender/')) return 'echarts'
+          if (id.includes('/vue/') || id.includes('/@vue/') ||
+              id.includes('/vue-router/') || id.includes('/pinia/')) return 'vue'
+        }
+      }
+    }
+  }
 })

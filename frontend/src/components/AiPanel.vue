@@ -316,10 +316,9 @@ watch(() => props.open, async (v) => {
         <aside class="drawer">
           <!-- 双品牌头部 -->
           <div class="head">
-            <div class="head-glow"></div>
             <div class="head-in">
               <div class="logos">
-                <img src="/brand/deepseek-white.svg" alt="" class="lg-ds" />
+                <img src="/brand/deepseek.svg" alt="" class="lg-ds" />
               </div>
               <div class="head-txt">
                 <div class="head-name">DeepSeek 智能分析</div>
@@ -418,9 +417,9 @@ watch(() => props.open, async (v) => {
                   AI 将基于上述事实，分析信令与媒体的关联关系，
                   指出最可能的问题位置并给出可验证的排查步骤
                 </div>
-                <button class="think-btn" @click="runAnalyze"
+                <button class="btn primary lg" @click="runAnalyze"
                         :disabled="running || !cfg.has_key">
-                  <img src="/brand/deepseek-white.svg" alt="" class="btn-ico" />
+                  <img src="/brand/deepseek.svg" alt="" class="btn-ico" />
                   深度思考
                 </button>
                 <div v-if="!cfg.has_key" class="hint mt-10">需要先配置 API Key</div>
@@ -505,7 +504,7 @@ watch(() => props.open, async (v) => {
   background: var(--bg-2);
   border-left: 1px solid var(--line-strong);
   display: flex; flex-direction: column;
-  box-shadow: -10px 0 50px rgba(0, 0, 0, .5);
+  box-shadow: -12px 0 40px rgba(0, 0, 0, .35);
 }
 
 .slide-enter-active, .slide-leave-active { transition: opacity .2s; }
@@ -517,52 +516,45 @@ watch(() => props.open, async (v) => {
   transform: translateX(100%);
 }
 
-/* ===== 头部：双品牌融合 ===== */
+/* ===== 头部 ===== */
 .head {
   position: relative;
   flex: none;
-  background: linear-gradient(120deg,
-    var(--ds-dk) 0%, var(--ds) 38%, #8B1A2A 72%, var(--brand) 100%);
-  overflow: hidden;
-}
-.head-glow {
-  position: absolute; inset: 0;
-  background:
-    radial-gradient(320px 120px at 18% 0%, rgba(255,255,255,.22), transparent 70%),
-    radial-gradient(280px 100px at 88% 100%, rgba(255,255,255,.14), transparent 70%);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+  box-shadow: inset 0 2px 0 var(--ds);
 }
 .head-in {
   position: relative;
   display: flex; align-items: center; gap: 12px;
-  padding: 15px 16px;
+  padding: 14px 16px;
 }
 .logos { display: flex; align-items: center; }
-.lg-ds { height: 24px; width: auto; filter: drop-shadow(0 2px 6px rgba(0,0,0,.3)); }
-.head-txt { line-height: 1.3; }
+.lg-ds { height: 20px; width: auto; }
+.head-txt { line-height: 1.35; }
 .head-name {
-  font-size: 14.5px; font-weight: 680;
-  color: #fff; letter-spacing: -.1px;
+  font-size: 14px; font-weight: 600;
+  color: var(--text); letter-spacing: -.1px;
 }
 .head-sub {
-  font-size: 10.5px; color: rgba(255,255,255,.78);
+  font-size: 10.5px; color: var(--text-4);
   display: flex; align-items: center; gap: 5px;
 }
 .dot-brand {
   width: 5px; height: 5px; border-radius: 50%;
-  background: #fff; opacity: .85;
-  box-shadow: 0 0 6px rgba(255,255,255,.8);
+  background: var(--ds); opacity: .9;
 }
 .hbtn {
   width: 28px; height: 28px;
-  border-radius: 7px;
-  background: rgba(255,255,255,.14);
-  border: 1px solid rgba(255,255,255,.18);
-  color: #fff; cursor: pointer;
+  border-radius: 5px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-3); cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   transition: .15s;
   flex: none;
 }
-.hbtn:hover { background: rgba(255,255,255,.26); }
+.hbtn:hover { background: var(--surface-3); border-color: var(--line); color: var(--text); }
 .hbtn svg { width: 14px; height: 14px; }
 
 .body { flex: 1; overflow-y: auto; padding: 16px; }
@@ -599,9 +591,8 @@ watch(() => props.open, async (v) => {
   padding: 14px 16px 0;
 }
 .facts-title {
-  font-size: 10.5px; color: var(--text-4);
-  letter-spacing: .4px; margin-bottom: 8px;
-  text-transform: uppercase;
+  font-size: 11px; color: var(--text-4);
+  margin-bottom: 6px;
 }
 .facts-grid {
   display: grid; grid-template-columns: repeat(6, 1fr);
@@ -630,8 +621,8 @@ watch(() => props.open, async (v) => {
 .start-icon {
   width: 56px; height: 56px; margin: 0 auto 16px;
   border-radius: 15px;
-  background: linear-gradient(135deg, var(--ds-soft), var(--brand-soft));
-  border: 1px solid var(--ds-line);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
   display: flex; align-items: center; justify-content: center;
 }
 .start-icon img { width: 28px; height: auto; }
@@ -644,31 +635,13 @@ watch(() => props.open, async (v) => {
   line-height: 1.78; margin-bottom: 20px;
   max-width: 380px; margin-left: auto; margin-right: auto;
 }
-.think-btn {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 11px 26px;
-  border-radius: var(--radius);
-  background: linear-gradient(135deg, var(--ds), var(--ds-dk) 55%, var(--brand));
-  border: none;
-  color: #fff; font-size: 13.5px; font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  box-shadow: 0 4px 20px rgba(77, 107, 254, .32);
-  transition: all var(--dur) var(--ease);
-}
-.think-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 30px rgba(77, 107, 254, .42);
-  filter: brightness(1.08);
-}
-.think-btn:disabled { opacity: .45; cursor: not-allowed; }
-.btn-ico { height: 14px; width: auto; }
+.btn-ico { height: 15px; width: auto; }
 
 /* 思考 */
 .think {
   margin: 14px 16px 0;
-  background: linear-gradient(180deg, var(--ds-soft), transparent);
-  border: 1px solid var(--ds-line);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   overflow: hidden;
 }
@@ -723,12 +696,7 @@ watch(() => props.open, async (v) => {
 .tstep.active { color: var(--text-2); }
 .tstep.active .sdot {
   border-color: var(--ds);
-  animation: ringPulse 1.2s ease infinite;
-}
-@keyframes ringPulse {
-  0% { box-shadow: 0 0 0 0 rgba(77,107,254,.5) }
-  70% { box-shadow: 0 0 0 6px rgba(77,107,254,0) }
-  100% { box-shadow: 0 0 0 0 rgba(77,107,254,0) }
+  animation: dotPulse 1.4s ease-in-out infinite;
 }
 .tstep.done { color: var(--text-2); }
 .tstep.done .sdot { background: var(--ds); border-color: var(--ds); }
@@ -871,17 +839,13 @@ watch(() => props.open, async (v) => {
 .send {
   width: 36px; height: 36px; flex: none;
   border-radius: 10px;
-  background: linear-gradient(135deg, var(--ds), var(--ds-dk));
+  background: var(--ds);
   border: none; color: #fff;
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
-  transition: .15s;
-  box-shadow: 0 2px 10px rgba(77,107,254,.3);
+  transition: background-color .15s;
 }
-.send:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(77,107,254,.45);
-}
+.send:hover:not(:disabled) { background: var(--ds-dk); }
 .send:disabled { opacity: .4; cursor: not-allowed; }
 .send svg { width: 14px; height: 14px; }
 </style>

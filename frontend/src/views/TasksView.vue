@@ -166,7 +166,7 @@ onMounted(() => { load(); loadStorage() })
 
     <div class="card">
       <div class="card-body tight">
-        <table class="tbl">
+        <table class="tbl clickable">
           <thead>
             <tr>
               <th>ID</th><th>文件名</th><th>状态</th><th>报文</th>
@@ -174,7 +174,7 @@ onMounted(() => { load(); loadStorage() })
             </tr>
           </thead>
           <tbody>
-            <tr v-for="t in list" :key="t.id" @click="openTask(t)">
+            <tr v-for="t in list" :key="t.id" tabindex="0" @click="openTask(t)" @keydown.enter="openTask(t)">
               <td class="mono">#{{ t.id }}</td>
               <td class="truncate" style="max-width:260px">{{ t.name }}</td>
               <td>

@@ -68,7 +68,7 @@ const items = computed(() => {
   flex-wrap: wrap;
 }
 .back {
-  width: 34px; height: 34px; flex: none;
+  width: 32px; height: 32px; flex: none;
   border-radius: var(--radius-sm);
   background: var(--surface);
   border: 1px solid var(--line);
@@ -78,10 +78,9 @@ const items = computed(() => {
   transition: all var(--dur) var(--ease);
 }
 .back:hover {
-  border-color: var(--brand-line);
-  color: var(--brand-lt);
-  background: var(--brand-soft);
-  transform: translateX(-2px);
+  border-color: var(--line-strong);
+  color: var(--text);
+  background: var(--surface-2);
 }
 .back svg { width: 15px; height: 15px; }
 
@@ -93,13 +92,13 @@ const items = computed(() => {
   color: var(--text-3);
   transition: color var(--dur-xs);
 }
-a.crumb:hover { color: var(--brand-lt); }
+a.crumb:hover { color: var(--text); text-decoration: none; }
 .crumb.cur { color: var(--text); font-weight: 500; }
 .sep { color: var(--text-4); font-size: 10px; }
 
 .pnav-title { margin-left: 6px; }
 .pnav-title .t {
-  font-size: 19px; font-weight: 680;
+  font-size: 18px; font-weight: 650;
   letter-spacing: -.4px; line-height: 1.25;
 }
 .pnav-title .s {

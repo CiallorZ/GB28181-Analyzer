@@ -104,7 +104,7 @@ onUnmounted(() => {
             </svg>
           </button>
 
-          <button class="ai-btn" @click="store.openAiPanel()">
+          <button class="ai-btn" aria-label="DeepSeek 分析" @click="store.openAiPanel()">
             <img src="/brand/deepseek-white.svg" alt="" class="ai-ico" />
             <span>DeepSeek 分析</span>
           </button>
@@ -143,7 +143,7 @@ onUnmounted(() => {
 }
 .bar-in {
   max-width: 1720px; margin: 0 auto;
-  height: 62px; padding: 0 28px;
+  height: 58px; padding: 0 28px;
   display: flex; align-items: center; gap: 20px;
 }
 @media (max-width: 1080px) { .bar-in { padding: 0 16px; gap: 12px; } }
@@ -154,7 +154,7 @@ onUnmounted(() => {
   border-radius: var(--radius-sm);
   transition: background var(--dur) var(--ease);
 }
-.brand:hover { background: var(--surface); }
+.brand:hover { background: var(--surface); text-decoration: none; }
 .brand-logo {
   height: 30px; width: auto; display: block;
   transition: opacity var(--dur) var(--ease);
@@ -165,13 +165,13 @@ onUnmounted(() => {
   letter-spacing: -.2px;
 }
 .brand-desc {
-  font-size: 10px; color: var(--text-3);
-  letter-spacing: .2px;
+  font-size: 11px; color: var(--text-4);
+  letter-spacing: .01em;
 }
 
 .bar-task {
   display: flex; align-items: center; gap: 9px;
-  padding: 6px 14px;
+  padding: 5px 12px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 99px;
@@ -179,13 +179,13 @@ onUnmounted(() => {
   max-width: 440px;
   overflow: hidden;
 }
-.bt-id { color: var(--brand-lt); font-weight: 600; font-size: 11.5px; }
+.bt-id { color: var(--text-3); font-weight: 600; font-size: 11.5px; }
 .bt-name { color: var(--text-2); min-width: 0; }
 
 .bar-act { display: flex; align-items: center; gap: 10px; flex: none; }
 
 .icon-btn {
-  width: 36px; height: 36px; flex: none;
+  width: 34px; height: 34px; flex: none;
   border-radius: var(--radius-sm);
   background: var(--surface);
   border: 1px solid var(--line);
@@ -196,29 +196,28 @@ onUnmounted(() => {
   text-decoration: none;
 }
 .icon-btn:hover {
-  border-color: var(--brand-line);
-  color: var(--brand-lt);
-  transform: translateY(-1px);
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+  color: var(--text);
 }
 .icon-btn svg { width: 16px; height: 16px; }
 
 .ai-btn {
-  display: inline-flex; align-items: center; gap: 8px;
-  height: 36px; padding: 0 16px;
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 34px; padding: 0 14px;
   border-radius: var(--radius-sm);
-  background: linear-gradient(135deg, var(--ds), var(--ds-dk));
-  border: 1px solid transparent;
+  background: var(--ds);
+  border: 1px solid var(--ds);
   color: #fff;
-  font-size: 13px; font-weight: 500;
+  font-size: 12.5px; font-weight: 500;
   font-family: inherit;
   cursor: pointer;
-  box-shadow: 0 2px 14px rgba(77, 107, 254, .3);
-  transition: all var(--dur) var(--ease);
+  transition: background-color var(--dur) var(--ease),
+              border-color var(--dur) var(--ease);
 }
 .ai-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 5px 22px rgba(77, 107, 254, .45);
-  filter: brightness(1.1);
+  background: var(--ds-dk);
+  border-color: var(--ds-dk);
 }
 .ai-ico { height: 14px; width: auto; }
 
@@ -231,13 +230,28 @@ onUnmounted(() => {
   border-radius: 99px;
 }
 .dep i { width: 6px; height: 6px; border-radius: 50%; flex: none; }
-.dep.ok i { background: var(--ok); box-shadow: 0 0 7px var(--ok); }
+.dep.ok i { background: var(--ok); }
 .dep.bad i { background: var(--critical); }
 
 .main { flex: 1; }
 
+/* 移动端：只留标志与图标，任务上下文交给页面标题 */
+@media (max-width: 720px) {
+  .bar-in { padding: 0 12px; gap: 8px; }
+  .bar-task { display: none; }
+  .brand-desc { display: none; }
+  .brand-name { font-size: 13px; }
+  .brand-logo { height: 24px; }
+  .bar-act { gap: 6px; }
+  .icon-btn { width: 30px; height: 30px; }
+  .ai-btn { width: 30px; padding: 0; justify-content: center; }
+  .ai-btn span { display: none; }
+  .dep { padding: 0 8px; }
+  .dep span { display: none; }
+}
+
 .fade-enter-active, .fade-leave-active {
-  transition: opacity .2s var(--ease);
+  transition: opacity .16s var(--ease);
 }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>

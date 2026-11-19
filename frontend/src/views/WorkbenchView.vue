@@ -8,7 +8,9 @@
  */
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import * as echarts from 'echarts'
+import echarts from '../utils/chart'
+import { chartPalette } from '../utils/chartTheme'
+import { bindChartResize } from '../utils/chartResize'
 import { api } from '../api/client'
 import { useTaskStore } from '../stores/task'
 import VideoPlayer from '../components/VideoPlayer.vue'
@@ -41,23 +43,11 @@ const openSections = ref({
 })
 const activeSection = ref('kpi')
 const charts = {}
-const C = {
-  brand: '#D70D19', ds: '#4D6BFE', ok: '#22c55e', warn: '#f0a020',
-  crit: '#f0453a', info: '#3d9be9', dim: '#6f7d90'
-}
+let C = chartPalette()
 
 /* ---------------- 主题色读取（图表跟随明暗） ---------------- */
 function themeColors() {
-  const dark = document.documentElement.getAttribute('data-theme') !== 'light'
-  return {
-    text: dark ? '#a5b3c4' : '#4c5a6b',
-    dim: dark ? '#6f7d90' : '#74828f',
-    line: dark ? '#1a2432' : '#e4eaf2',
-    surface: dark ? '#111823' : '#ffffff',
-    tipBg: dark ? '#161f2c' : '#ffffff',
-    tipBorder: dark ? '#2c3a4d' : '#d3dde8',
-    tipText: dark ? '#eaf0f7' : '#101822'
-  }
+  return chartPalette()
 }
 
 function chart(id, opt) {
@@ -88,7 +78,7 @@ function axisCommon() {
   return {
     axisLine: { lineStyle: { color: t.line } },
     axisTick: { show: false },
-    axisLabel: { color: t.dim, fontSize: 10 }
+    axisLabel: { color: t.dim, fontSize: 10.5 }
   }
 }
 function splitCommon() {
@@ -173,7 +163,8 @@ function renderCharts() {
   const ov = overview.value
   if (!ov) return
   const s = ov.summary || {}
-  const t = themeColors()
+  C = themeColors()
+  const t = C
 
   /* --- 1. 业务分布环形 --- */
   const md = ov.method_distribution || {}
@@ -204,7 +195,7 @@ function renderCharts() {
         }
       },
       data: biz,
-      color: [C.brand, C.ds, C.ok, C.warn, C.info, '#9b59f0', C.dim]
+      color: [C.ds, C.info, C.dim, C.ok, '#A371F7', C.warn]
     }]
   }))
 
@@ -242,7 +233,7 @@ function renderCharts() {
   const sigD = ov.signal_distribution || {}
   const medD = ov.media_distribution || {}
   const total = s.session_count || 0
-  chart('c-state', baseGrid({
+  if (total > 2) chart('c-state', baseGrid({
     tooltip: { ...baseGrid().tooltip, trigger: 'item' },
     legend: {
       bottom: 0, itemWidth: 8, itemHeight: 8, itemGap: 14,
@@ -292,16 +283,16 @@ function renderCharts() {
     grid: { left: 56, right: 20, top: 34, bottom: 30 },
     legend: {
       top: 0, right: 0, itemWidth: 8, itemHeight: 8, itemGap: 12,
-      textStyle: { color: t.dim, fontSize: 10 },
+      textStyle: { color: t.dim, fontSize: 10.5 },
       data: brSeries.map(x => x.name)
     },
     tooltip: { ...baseGrid().tooltip, trigger: 'axis' },
     xAxis: {
-      type: 'value', name: '秒', nameTextStyle: { color: t.dim, fontSize: 9.5 },
+      type: 'value', name: '秒', nameTextStyle: { color: t.dim, fontSize: 10.5 },
       ...axisCommon(), ...splitCommon()
     },
     yAxis: {
-      type: 'value', name: 'kbps', nameTextStyle: { color: t.dim, fontSize: 9.5 },
+      type: 'value', name: 'kbps', nameTextStyle: { color: t.dim, fontSize: 10.5 },
       ...axisCommon(), ...splitCommon(), axisLine: { show: false }
     },
     series: brSeries
@@ -323,16 +314,16 @@ function renderCharts() {
     grid: { left: 56, right: 20, top: 34, bottom: 30 },
     legend: {
       top: 0, right: 0, itemWidth: 8, itemHeight: 8, itemGap: 12,
-      textStyle: { color: t.dim, fontSize: 10 },
+      textStyle: { color: t.dim, fontSize: 10.5 },
       data: jSeries.map(x => x.name)
     },
     tooltip: { ...baseGrid().tooltip, trigger: 'axis' },
     xAxis: {
-      type: 'value', name: '秒', nameTextStyle: { color: t.dim, fontSize: 9.5 },
+      type: 'value', name: '秒', nameTextStyle: { color: t.dim, fontSize: 10.5 },
       ...axisCommon(), ...splitCommon()
     },
     yAxis: {
-      type: 'value', name: 'ms', nameTextStyle: { color: t.dim, fontSize: 9.5 },
+      type: 'value', name: 'ms', nameTextStyle: { color: t.dim, fontSize: 10.5 },
       ...axisCommon(), ...splitCommon(), axisLine: { show: false }
     },
     series: jSeries
@@ -359,6 +350,7 @@ async function handleFile(f) {
 }
 
 let pollTimer = null
+let unbindResize = null
 function startPoll() {
   stopPoll()
   pollTimer = setInterval(async () => {
@@ -432,6 +424,19 @@ const summary = computed(() => overview.value?.summary || {})
 const diagTotal = computed(() => {
   const d = summary.value.diagnostics || {}
   return (d.critical || 0) + (d.warning || 0) + (d.info || 0)
+})
+// 异常的严重度决定颜色：只有警告时不该显示成故障红
+const diagTone = computed(() => {
+  const d = summary.value.diagnostics || {}
+  if (d.critical) return 'critical'
+  if (d.warning) return 'warning'
+  return 'ok'
+})
+// 首包 1.5s 内视为正常，超出才提示，避免把 0.240s 也染成警告色
+const latencyTone = computed(() => {
+  const v = summary.value.avg_first_media_latency
+  if (v == null) return 'na'
+  return v > 1.5 ? 'warning' : ''
 })
 
 // 编码信息汇总（从流的 extra.ps 里取）
@@ -561,9 +566,11 @@ onMounted(async () => {
   if (store.isAnalyzing) startPoll()
   setupScrollSpy()
   window.addEventListener('alma-theme-changed', onThemeChange)
+  unbindResize = bindChartResize(charts)
 })
 onUnmounted(() => {
   stopPoll()
+  unbindResize?.()
   scrollObs?.disconnect()
   window.removeEventListener('alma-theme-changed', onThemeChange)
 })
@@ -580,60 +587,49 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
     <div v-if="!task" class="hero">
       <div class="hero-bg"></div>
       <div class="hero-in">
-        <div class="hero-tag">
-          <span class="ht-dot"></span>
-          网络抓包分析 · 协议与流媒体诊断
-        </div>
-        <h1 class="hero-h1">
-          上传抓包，<span class="hl">一次看清</span>整条链路
-        </h1>
-        <p class="hero-p">
-          通用网络报文解析打底 —— SIP / RTP / RTCP / TCP 流重组，
-          再针对视频联网场景下钻到 SDP 协商、PS 封装与视频编码还原
-        </p>
-        <div class="hero-tags">
-          <span class="hsz">PCAP / PCAPNG</span>
-          <span class="hsz">SIP · SDP</span>
-          <span class="hsz">RTP / RTCP</span>
-          <span class="hsz">PS / ES</span>
-          <span class="hsz">H.264 / H.265</span>
+        <div class="hero-copy">
+          <h1 class="hero-h1">把一次点播<br>从 INVITE 查到画面</h1>
+          <p class="hero-p">
+            SIP 协商、RTP 质量、PS 封装与 H.265 参数按同一条时间线对齐。
+            抓包里能证明的写成结论，算不出的明确标为「无法计算」。
+          </p>
+          <dl class="hero-facts">
+            <div><dt>输入</dt><dd>PCAP / PCAPNG，单文件最大 2 GB</dd></div>
+            <div><dt>对齐</dt><dd>SIP Call-ID → SDP → SSRC → RTP</dd></div>
+            <div><dt>输出</dt><dd>时序、指标、诊断、可播放预览</dd></div>
+          </dl>
         </div>
 
-        <div class="up-zone"
-             :class="{ dragging, busy: uploading }"
-             @dragover.prevent="dragging = true"
-             @dragleave.prevent="dragging = false"
-             @drop.prevent="onDrop"
-             @click="!uploading && $refs.fileInput.click()">
+        <div class="intake">
           <input ref="fileInput" type="file" accept=".pcap,.pcapng,.cap"
                  hidden @change="onPick" />
+          <button type="button" class="up-zone"
+                  :class="{ dragging, busy: uploading }"
+                  :disabled="uploading"
+                  @dragover.prevent="dragging = true"
+                  @dragleave.prevent="dragging = false"
+                  @drop.prevent="onDrop"
+                  @click="$refs.fileInput.click()">
+            <template v-if="!uploading">
+              <span class="up-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                  <polyline points="17 8 12 3 7 8"/>
+                  <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+              </span>
+              <span class="up-title">拖入抓包文件，或点击选择</span>
+              <span class="up-hint">.pcap / .pcapng · 单文件最大 2 GB</span>
+              <span class="up-key">分析在本机完成，抓包不会上传到第三方</span>
+            </template>
 
-          <template v-if="!uploading">
-            <div class="up-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                <polyline points="17 8 12 3 7 8"/>
-                <line x1="12" y1="3" x2="12" y2="15"/>
-              </svg>
-            </div>
-            <div class="up-title">拖拽抓包文件到这里，或点击选择</div>
-            <div class="up-hint">.pcap / .pcapng · 单文件最大 2GB</div>
-            <div class="up-caps">
-              <span><i class="c-sip"></i>信令解析</span>
-              <span><i class="c-rtp"></i>媒体质量</span>
-              <span><i class="c-ps"></i>码流还原</span>
-              <span><i class="c-diag"></i>故障诊断</span>
-            </div>
-          </template>
+            <span v-else class="up-progress">
+              <span class="up-title">上传中 {{ uploadPct }}%</span>
+              <span class="up-bar"><i :style="{ width: uploadPct + '%' }"></i></span>
+            </span>
+          </button>
 
-          <div v-else class="up-progress">
-            <div class="up-title">上传中 {{ uploadPct }}%</div>
-            <div class="up-bar"><i :style="{ width: uploadPct + '%' }"></i></div>
-          </div>
-        </div>
-
-        <div v-if="err" class="err-box mt-14" style="max-width:600px;margin-left:auto;margin-right:auto">
-          {{ err }}
+          <div v-if="err" class="err-box mt-14">{{ err }}</div>
         </div>
       </div>
     </div>
@@ -646,7 +642,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
             <circle cx="50" cy="50" r="42" fill="none"
                     stroke="var(--line)" stroke-width="6"/>
             <circle cx="50" cy="50" r="42" fill="none"
-                    stroke="var(--brand)" stroke-width="6"
+                    stroke="var(--info)" stroke-width="6"
                     stroke-linecap="round"
                     :stroke-dasharray="`${264 * (busyPct || task.progress) / 100} 264`"
                     transform="rotate(-90 50 50)"
@@ -720,7 +716,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
         <div class="sec-body">
           <!-- 无信令时：用媒体视角展示（纯 RTP 码流包） -->
           <div v-if="!hasSignal && mediaStats" class="kpis mb-20">
-            <div class="kpi brand">
+            <div class="kpi">
               <div class="kpi-label">报文总数</div>
               <div class="kpi-value">{{ (summary.packet_count || 0).toLocaleString() }}</div>
               <div class="kpi-sub">{{ task.file?.duration?.toFixed(1) }}s 抓包时长</div>
@@ -779,7 +775,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
           </div>
 
           <div v-if="hasSignal" class="kpis">
-            <div class="kpi brand">
+            <div class="kpi">
               <div class="kpi-label">报文总数</div>
               <div class="kpi-value">{{ (summary.packet_count || 0).toLocaleString() }}</div>
               <div class="kpi-sub">{{ task.file?.duration?.toFixed(2) }}s 抓包时长</div>
@@ -806,9 +802,9 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
               </div>
               <div class="kpi-sub">{{ summary.total_streams || 0 }} 条 RTP 流</div>
             </div>
-            <div class="kpi" :class="diagTotal ? 'critical' : 'ok'">
+            <div class="kpi" :class="diagTone">
               <div class="kpi-label">异常事件</div>
-              <div class="kpi-value" :class="diagTotal ? 'critical' : 'ok'">{{ diagTotal }}</div>
+              <div class="kpi-value" :class="diagTone">{{ diagTotal }}</div>
               <div class="kpi-sub">
                 {{ summary.diagnostics?.critical || 0 }} 严重 ·
                 {{ summary.diagnostics?.warning || 0 }} 警告
@@ -816,7 +812,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
             </div>
             <div class="kpi">
               <div class="kpi-label">首媒体包耗时</div>
-              <div class="kpi-value sm" :class="summary.avg_first_media_latency == null ? 'na' : 'warning'">
+              <div class="kpi-value sm" :class="latencyTone">
                 {{ summary.avg_first_media_latency != null
                     ? fmt(summary.avg_first_media_latency, 3) : '无法计算' }}
                 <span v-if="summary.avg_first_media_latency != null" class="kpi-unit">s</span>
@@ -845,7 +841,28 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
             </div>
             <div class="mini-card">
               <div class="mc-head">会话状态</div>
-              <div class="mc-chart" id="c-state"></div>
+              <div v-if="(summary.session_count || 0) > 2" class="mc-chart" id="c-state"></div>
+              <div v-else class="mc-summary">
+                <div class="ms-row">
+                  <span>信令成功</span>
+                  <b class="ok">{{ overview?.signal_distribution?.success || 0 }}</b>
+                </div>
+                <div class="ms-row">
+                  <span>信令失败</span>
+                  <b :class="overview?.signal_distribution?.failed ? 'crit' : ''">
+                    {{ overview?.signal_distribution?.failed || 0 }}
+                  </b>
+                </div>
+                <div class="ms-row">
+                  <span>无媒体</span>
+                  <b :class="overview?.media_distribution?.no_media ? 'crit' : ''">
+                    {{ overview?.media_distribution?.no_media || 0 }}
+                  </b>
+                </div>
+                <div class="ms-foot">
+                  共 {{ summary.session_count || 0 }} 个会话；样本太少，不画环形图
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -867,7 +884,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
           <span class="chev" :class="{ open: openSections.signal }">›</span>
         </div>
         <div v-show="openSections.signal" class="sec-body flush">
-          <table class="tbl" v-if="sessions.length">
+          <table class="tbl clickable" v-if="sessions.length">
             <thead>
               <tr>
                 <th>会话</th><th>设备 / 通道 ID</th><th>开始</th><th>时长</th>
@@ -875,7 +892,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
               </tr>
             </thead>
             <tbody>
-              <tr v-for="s in sessions" :key="s.id" @click="goSession(s.id)">
+              <tr v-for="s in sessions" :key="s.id" tabindex="0" @click="goSession(s.id)" @keydown.enter="goSession(s.id)">
                 <td class="mono">#{{ s.id }}</td>
                 <td class="mono truncate" style="max-width:220px">{{ s.device_id || '—' }}</td>
                 <td class="mono-sm">{{ s.start_time?.toFixed(2) }}s</td>
@@ -980,7 +997,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
               <div v-for="st in streams" :key="st.id" class="stream-card">
                 <div class="sc-top">
                   <span class="mono sc-ssrc">0x{{ st.ssrc?.toString(16) }}</span>
-                  <span class="badge unknown">{{ st.transport }}</span>
+                  <span class="proto">{{ st.transport }}</span>
                 </div>
                 <div class="sc-metrics">
                   <div><i>包数</i><b>{{ st.packet_count }}</b></div>
@@ -1021,7 +1038,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
             </template>
           </span>
           <span class="spacer"></span>
-          <span v-if="!codecList.length" class="badge unknown">无数据</span>
+          <span v-if="!codecList.length" class="text-na">无数据</span>
           <span class="chev" :class="{ open: openSections.codec }">›</span>
         </div>
         <div v-show="openSections.codec" class="sec-body">
@@ -1153,15 +1170,15 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
           <span class="chev" :class="{ open: openSections.packet }">›</span>
         </div>
         <div v-show="openSections.packet" class="sec-body flush">
-          <table class="tbl">
+          <table class="tbl clickable">
             <thead>
               <tr><th>#</th><th>时间</th><th>协议</th><th>源 → 目的</th><th>长度</th></tr>
             </thead>
             <tbody>
-              <tr v-for="p in packets" :key="p.id" @click="goPacket(p.packet_number)">
+              <tr v-for="p in packets" :key="p.id" tabindex="0" @click="goPacket(p.packet_number)" @keydown.enter="goPacket(p.packet_number)">
                 <td class="mono">{{ p.packet_number }}</td>
                 <td class="mono-sm">{{ p.timestamp?.toFixed(3) }}</td>
-                <td><span class="badge unknown">{{ p.protocol }}</span></td>
+                <td><span class="proto">{{ p.protocol }}</span></td>
                 <td class="mono-sm truncate" style="max-width:340px">
                   {{ p.source_ip }}:{{ p.source_port ?? '-' }} →
                   {{ p.destination_ip }}:{{ p.destination_port ?? '-' }}
@@ -1189,10 +1206,10 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
 /* ============ 上传 Hero ============ */
 .hero {
   position: relative;
-  min-height: calc(100vh - 62px);
-  display: flex; align-items: center; justify-content: center;
+  min-height: calc(100vh - 58px);
+  display: flex; align-items: center;
   overflow: hidden;
-  padding: 40px 20px;
+  padding: 48px 20px;
 }
 .hero-bg {
   position: absolute; inset: 0;
@@ -1205,120 +1222,96 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
     linear-gradient(var(--grid-line) 1px, transparent 1px),
     linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
   background-size: 56px 56px;
-  mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, #000 30%, transparent 75%);
+  mask-image: radial-gradient(ellipse 70% 62% at 50% 42%, #000 20%, transparent 72%);
 }
 .hero-in {
   position: relative; z-index: 1;
-  max-width: 720px; width: 100%;
-  text-align: center;
+  width: 100%; max-width: 1160px; margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr);
+  gap: 56px;
+  align-items: center;
 }
-.hero-tag {
-  display: inline-flex; align-items: center; gap: 7px;
-  padding: 5px 14px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 99px;
-  font-size: 11.5px; color: var(--text-3);
-  font-family: var(--font-mono);
-  margin-bottom: 22px;
-}
-.ht-dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: var(--brand);
-  box-shadow: 0 0 8px var(--brand);
-  animation: pulse 2s ease-in-out infinite;
-}
-@keyframes pulse { 50% { opacity: .4 } }
-
 .hero-h1 {
-  font-size: 40px; font-weight: 720;
-  letter-spacing: -1.6px;
-  line-height: 1.18;
+  font-size: clamp(30px, 3.4vw, 42px);
+  font-weight: 700;
+  letter-spacing: -1.4px;
+  line-height: 1.22;
   margin-bottom: 16px;
 }
-.hl {
-  background: linear-gradient(120deg, var(--brand), var(--brand-lt));
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
 .hero-p {
-  font-size: 15px; color: var(--text-3);
-  line-height: 1.75; margin-bottom: 20px;
-  max-width: 640px; margin-left: auto; margin-right: auto;
+  font-size: 14px; color: var(--text-2);
+  line-height: 1.8; max-width: 46ch;
 }
 
-.hero-tags {
-  display: flex; gap: 7px; justify-content: center;
-  flex-wrap: wrap; margin-bottom: 30px;
+/* 三条事实替代营销式标签行 */
+.hero-facts {
+  margin-top: 26px;
+  border-top: 1px solid var(--line);
 }
-.hsz {
-  font-size: 11.5px; color: var(--text-3);
-  padding: 3px 10px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 99px;
-  font-family: var(--font-mono);
-  letter-spacing: .02em;
+.hero-facts > div {
+  display: grid; grid-template-columns: 54px 1fr;
+  gap: 12px; align-items: baseline;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
 }
+.hero-facts dt { font-size: 11.5px; color: var(--text-4); }
+.hero-facts dd { font-size: 12.5px; color: var(--text-2); font-family: var(--font-mono); }
 
+.intake { position: relative; }
 .up-zone {
-  border: 2px dashed var(--line-strong);
-  border-radius: var(--radius-xl);
+  display: block; width: 100%;
+  text-align: center;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-lg);
   background: var(--surface);
-  padding: 52px 36px;
+  padding: 46px 28px;
+  font-family: inherit;
+  color: inherit;
   cursor: pointer;
-  transition: all var(--dur) var(--ease);
+  transition: border-color var(--dur) var(--ease),
+              background-color var(--dur) var(--ease);
 }
-.up-zone:hover, .up-zone.dragging {
-  border-color: var(--brand);
-  background: var(--brand-soft);
-  transform: translateY(-2px);
-  box-shadow: var(--glow-brand);
+.up-zone:hover:not(:disabled), .up-zone.dragging {
+  border-color: var(--line-3);
+  background: var(--surface-2);
 }
-.up-zone.busy { cursor: default; transform: none; }
+.up-zone.busy { cursor: default; }
 .up-icon {
-  width: 62px; height: 62px; margin: 0 auto 18px;
-  border-radius: 16px;
-  background: var(--brand-soft);
-  border: 1px solid var(--brand-line);
+  width: 46px; height: 46px; margin: 0 auto 18px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
   display: flex; align-items: center; justify-content: center;
-  color: var(--brand-lt);
+  color: var(--text-2);
 }
-.up-icon svg { width: 28px; height: 28px; }
-.up-title { font-size: 16px; font-weight: 550; margin-bottom: 8px; }
-.up-hint { font-size: 12.5px; color: var(--text-3); }
-.up-caps {
-  display: flex; gap: 18px; justify-content: center;
-  margin-top: 22px; flex-wrap: wrap;
-}
-.up-caps span {
-  display: inline-flex; align-items: center; gap: 6px;
+.up-icon svg { width: 22px; height: 22px; }
+.up-title { display: block; font-size: 15px; font-weight: 550; margin-bottom: 7px; }
+.up-hint { display: block; font-size: 12px; color: var(--text-3); }
+.up-key {
+  display: block; margin-top: 20px;
   font-size: 11.5px; color: var(--text-4);
 }
-.up-caps i {
-  width: 6px; height: 6px; border-radius: 2px; display: inline-block;
-}
-.c-sip { background: var(--ds); }
-.c-rtp { background: var(--ok); }
-.c-ps { background: var(--warning); }
-.c-diag { background: var(--brand); }
-
-.up-progress { max-width: 380px; margin: 0 auto; }
+.up-progress { display: block; max-width: 380px; margin: 0 auto; }
 .up-bar {
-  height: 6px; background: var(--surface-3);
+  display: block; height: 5px; background: var(--surface-3);
   border-radius: 99px; overflow: hidden; margin-top: 16px;
 }
 .up-bar i {
   display: block; height: 100%;
-  background: linear-gradient(90deg, var(--brand), var(--brand-lt));
-  border-radius: 99px;
+  background: var(--brand);
   transition: width .3s var(--ease);
+}
+@media (max-width: 900px) {
+  .hero { padding: 32px 16px; min-height: auto; }
+  .hero-in { grid-template-columns: 1fr; gap: 30px; }
+  .hero-h1 { font-size: 30px; letter-spacing: -1px; }
+  .hero-p { font-size: 13.5px; }
 }
 
 /* ============ 分析中 ============ */
 .analyzing-wrap {
-  min-height: calc(100vh - 62px);
+  min-height: calc(100vh - 58px);
   display: flex; align-items: center; justify-content: center;
   padding: 40px 20px;
 }
@@ -1329,7 +1322,6 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
   padding: 44px 56px;
   text-align: center;
   min-width: 420px;
-  box-shadow: var(--shadow);
 }
 .an-ring { position: relative; width: 128px; height: 128px; margin: 0 auto 24px; }
 .an-ring svg { width: 100%; height: 100%; }
@@ -1368,18 +1360,29 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
 }
 .an-step.done { color: var(--text-2); }
 .an-step.done .as-dot { background: var(--ok); }
-.an-step.now { color: var(--brand-lt); font-weight: 600; }
+.an-step.now { color: var(--text); font-weight: 600; }
 .an-step.now .as-dot {
-  background: var(--brand);
-  box-shadow: 0 0 10px var(--brand);
-  animation: pulse 1.2s ease-in-out infinite;
+  background: var(--info);
+  box-shadow: 0 0 0 3px var(--info-soft);
+  animation: pulse 1.4s ease-in-out infinite;
 }
 
 .fail-wrap { max-width: 600px; margin: 60px auto; }
 
 /* ============ 滚动导航 ============ */
+@media (max-width: 1080px) {
+  .spy { margin: -20px -16px 18px; padding: 0 16px; }
+}
+@media (max-width: 720px) {
+  .spy { overflow-x: auto; scrollbar-width: none; }
+  .spy::-webkit-scrollbar { display: none; }
+  .spy-in { height: 42px; gap: 0; min-width: max-content; }
+  .spy-btn { height: 42px; padding: 0 11px; white-space: nowrap; font-size: 12px; }
+  .spy-btn.on::after { left: 11px; right: 11px; bottom: 0; }
+  .spy-file { display: none; }
+}
 .spy {
-  position: sticky; top: 62px; z-index: 50;
+  position: sticky; top: 58px; z-index: 50;
   background: color-mix(in srgb, var(--bg) 88%, transparent);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--line);
@@ -1403,19 +1406,23 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
   position: relative;
 }
 .spy-btn:hover { color: var(--text); background: var(--surface); }
-.spy-btn.on {
-  color: var(--brand-lt);
-  font-weight: 600;
-}
+.spy-btn.on { color: var(--text); font-weight: 600; }
 .spy-btn.on::after {
   content: ''; position: absolute;
   left: 14px; right: 14px; bottom: -1px; height: 2px;
-  background: var(--brand);
-  border-radius: 2px;
+  background: var(--text-3);
 }
 .spy-file { color: var(--text-4); max-width: 280px; margin-right: 10px; }
 
 /* ============ 区块 ============ */
+/* 单次错峰进场：同一屏的区块依次出现，不做逐卡 hover 位移 */
+section.rise:nth-of-type(2) { animation-delay: .05s; }
+section.rise:nth-of-type(3) { animation-delay: .10s; }
+section.rise:nth-of-type(4) { animation-delay: .15s; }
+section.rise:nth-of-type(5) { animation-delay: .20s; }
+section.rise:nth-of-type(6) { animation-delay: .25s; }
+section.rise:nth-of-type(7) { animation-delay: .30s; }
+
 .clickable { cursor: pointer; user-select: none; }
 .clickable:hover { background: var(--surface-3); }
 .chev {
@@ -1425,20 +1432,38 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
 }
 .chev.open { transform: rotate(90deg); }
 
+/* 图表是报告的"栏"，不是再套一层卡片 */
 .mini-card {
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  overflow: hidden;
+  border-top: 1px solid var(--line-2);
+  min-width: 0;
 }
 .mc-head {
-  padding: 11px 15px;
-  font-size: 12px; font-weight: 600;
-  color: var(--text-2);
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 0 8px;
+  font-size: 12px; font-weight: 550;
+  color: var(--text-3);
   border-bottom: 1px solid var(--line);
 }
-.mc-chart { height: 190px; }
-.mc-chart.lg { height: 230px; }
+.mc-chart { height: 180px; margin-top: 6px; }
+.mc-chart.lg { height: 218px; }
+.mc-summary { padding: 12px 0 4px; }
+.ms-row {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px; color: var(--text-3);
+}
+.ms-row b {
+  font-family: var(--font-mono);
+  font-size: 15px; font-weight: 600;
+  color: var(--text);
+}
+.ms-row b.ok { color: var(--ok); }
+.ms-row b.crit { color: var(--critical); }
+.ms-foot {
+  margin-top: 10px;
+  font-size: 11px; color: var(--text-4); line-height: 1.55;
+}
 
 
 /* 视频区 */
@@ -1490,13 +1515,9 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 14px 16px;
-  transition: all var(--dur) var(--ease);
+  transition: border-color var(--dur) var(--ease);
 }
-.stream-card:hover {
-  border-color: var(--line-strong);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-sm);
-}
+.stream-card:hover { border-color: var(--line-strong); }
 .sc-top {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 12px;
@@ -1520,7 +1541,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
 }
 .sb-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--ds), var(--brand));
+  background: var(--info);
   border-radius: 99px;
   transition: width .5s var(--ease);
 }

@@ -322,10 +322,7 @@ watch(() => store.currentTaskId, loadCfg, { immediate: true })
         <div class="ae-desc">
           配置后即可让 AI 结合本次抓包结果，定位故障卡点并给出排查建议
         </div>
-        <button class="btn ds" @click="openPanel()">
-          <img src="/brand/deepseek-white.svg" alt="" class="ico" />
-          配置 API Key
-        </button>
+        <button class="btn primary" @click="openPanel()">配置 API Key</button>
       </div>
 
       <!-- 未分析 -->
@@ -337,10 +334,7 @@ watch(() => store.currentTaskId, loadCfg, { immediate: true })
           </div>
         </div>
         <div class="as-cta">
-          <button class="think-btn" @click="run">
-            <img src="/brand/deepseek-white.svg" alt="" class="tb-ico" />
-            深度思考
-          </button>
+          <button class="btn primary lg" @click="run">深度思考</button>
           <div class="cta-hint">
             AI 将读取上述 {{ facts[0].v }} 条报文的分析结果，梳理信令与媒体的关联
           </div>
@@ -440,20 +434,17 @@ watch(() => store.currentTaskId, loadCfg, { immediate: true })
   overflow: hidden;
   position: relative;
 }
-/* 双品牌渐变顶边 */
+/* AI 标识：一条 2px 蓝色顶边 */
 .ai-sec::before {
   content: '';
-  position: absolute; top: 0; left: 0; right: 0; height: 2.5px;
-  background: linear-gradient(90deg, var(--ds), var(--ds-lt) 40%,
-              var(--brand) 75%, var(--brand-lt));
+  position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: var(--ds);
 }
 
 /* 头部 */
 .as-head {
   display: flex; align-items: center; gap: 12px;
-  padding: 16px 20px;
-  background: linear-gradient(180deg,
-    color-mix(in srgb, var(--ds) 6%, transparent), transparent);
+  padding: 15px 20px;
   border-bottom: 1px solid var(--line);
 }
 .sec-num {
@@ -467,13 +458,13 @@ watch(() => store.currentTaskId, loadCfg, { immediate: true })
   font-family: var(--font-mono);
 }
 .as-logo {
-  width: 34px; height: 34px; flex: none;
-  border-radius: 9px;
-  background: linear-gradient(135deg, var(--ds-soft), var(--brand-soft));
-  border: 1px solid var(--ds-line);
+  width: 30px; height: 30px; flex: none;
+  border-radius: 7px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
   display: flex; align-items: center; justify-content: center;
 }
-.as-logo img { width: 18px; height: auto; }
+.as-logo img { width: 16px; height: auto; }
 .as-title-wrap { line-height: 1.3; }
 .as-title {
   font-size: 15px; font-weight: 680;
@@ -490,10 +481,10 @@ watch(() => store.currentTaskId, loadCfg, { immediate: true })
 /* 空状态 */
 .as-empty {
   text-align: center;
-  padding: 32px 24px;
+  padding: 22px 24px 20px;
 }
 .ae-icon {
-  width: 48px; height: 48px; margin: 0 auto 14px;
+  width: 40px; height: 40px; margin: 0 auto 12px;
   border-radius: 13px;
   background: var(--ds-soft);
   border: 1px solid var(--ds-line);
@@ -537,25 +528,6 @@ watch(() => store.currentTaskId, loadCfg, { immediate: true })
 .af b.critical { color: var(--critical); }
 
 .as-cta { text-align: center; padding: 6px 0 4px; }
-.think-btn {
-  display: inline-flex; align-items: center; gap: 9px;
-  height: 44px; padding: 0 28px;
-  border-radius: var(--radius);
-  border: none;
-  background: linear-gradient(135deg, var(--ds), var(--ds-dk) 50%, var(--brand));
-  color: #fff;
-  font-family: inherit;
-  font-size: 14px; font-weight: 600;
-  cursor: pointer;
-  box-shadow: 0 4px 20px rgba(77, 107, 254, .3);
-  transition: all var(--dur) var(--ease);
-}
-.think-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 28px rgba(77, 107, 254, .42);
-  filter: brightness(1.08);
-}
-.tb-ico { height: 15px; width: auto; }
 .cta-hint {
   font-size: 11.5px; color: var(--text-4);
   margin-top: 12px;
@@ -563,8 +535,8 @@ watch(() => store.currentTaskId, loadCfg, { immediate: true })
 
 /* 思考 */
 .think {
-  background: linear-gradient(180deg, var(--ds-soft), transparent);
-  border: 1px solid var(--ds-line);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   overflow: hidden;
   margin-bottom: 18px;
@@ -582,7 +554,7 @@ watch(() => store.currentTaskId, loadCfg, { immediate: true })
   50% { transform: translateY(-3px) }
 }
 .think.done .whale { animation: none; }
-.th-title { font-size: 12.5px; font-weight: 600; color: var(--ds-lt); }
+.th-title { font-size: 12.5px; font-weight: 600; color: var(--text-2); }
 .th-dots { display: inline-flex; gap: 3px; }
 .th-dots i {
   width: 3.5px; height: 3.5px; border-radius: 50%;
@@ -616,12 +588,7 @@ watch(() => store.currentTaskId, loadCfg, { immediate: true })
 .tstep.active { color: var(--text-2); }
 .tstep.active .sdot {
   border-color: var(--ds);
-  animation: ringPulse 1.2s ease infinite;
-}
-@keyframes ringPulse {
-  0% { box-shadow: 0 0 0 0 rgba(77,107,254,.5) }
-  70% { box-shadow: 0 0 0 6px rgba(77,107,254,0) }
-  100% { box-shadow: 0 0 0 0 rgba(77,107,254,0) }
+  animation: dotPulse 1.4s ease-in-out infinite;
 }
 .tstep.done { color: var(--text-2); }
 .tstep.done .sdot { background: var(--ds); border-color: var(--ds); }
@@ -636,18 +603,20 @@ watch(() => store.currentTaskId, loadCfg, { immediate: true })
 
 /* 结论卡 */
 .conclusion {
-  border-radius: var(--radius);
+  border-radius: 0;
   overflow: hidden;
-  border: 1px solid var(--brand-line);
-  background: linear-gradient(135deg, var(--brand-soft), transparent 60%);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--text-3);
+  background: var(--surface-2);
   margin-bottom: 16px;
 }
 .cc-label {
   display: flex; align-items: center; gap: 7px;
   padding: 10px 16px;
-  background: var(--brand-soft);
-  border-bottom: 1px solid var(--brand-line);
-  font-size: 12px; font-weight: 650;
+  background: transparent;
+  border-bottom: 1px solid var(--line);
+  font-size: 11.5px; font-weight: 600;
+  color: var(--text-3);
   color: var(--brand-lt);
 }
 .cc-label svg { width: 14px; height: 14px; }
@@ -669,8 +638,7 @@ watch(() => store.currentTaskId, loadCfg, { immediate: true })
 .findings { margin-bottom: 16px; }
 .fd-label {
   font-size: 11px; color: var(--text-4);
-  letter-spacing: .4px; margin-bottom: 9px;
-  text-transform: uppercase;
+  margin-bottom: 8px;
 }
 .fd-list { display: flex; flex-direction: column; gap: 8px; }
 .fd {

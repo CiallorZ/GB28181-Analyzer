@@ -78,7 +78,7 @@ const phases = computed(() => {
   add('180 Ringing', ringing, 'prov')
   add('200 OK', ok, 'ok')
   add('ACK', ack, 'ok')
-  add('BYE', bye, 'warn')
+  add('BYE', bye, 'prov')
   add('200 OK', byeOk, 'ok')
 
   // 计算相邻间隔
@@ -195,10 +195,10 @@ onMounted(loadSessions)
             <span class="sec-sub">{{ filtered.length }} 条</span>
             <span class="spacer"></span>
             <span class="legend">
-              <i style="background:#4D6BFE"></i>请求
-              <i style="background:#22c55e"></i>2xx
-              <i style="background:#7d8b9a"></i>1xx
-              <i style="background:#f0453a"></i>错误
+              <i style="background:var(--info)"></i>请求
+              <i style="background:var(--ok)"></i>2xx
+              <i style="background:var(--text-4)"></i>1xx
+              <i style="background:var(--critical)"></i>错误
             </span>
           </div>
           <div class="sec-body tight">
@@ -288,9 +288,7 @@ onMounted(loadSessions)
                     @click="onPick(m)">
                   <td class="mono-sm">{{ m.timestamp.toFixed(3) }}</td>
                   <td>
-                    <span class="badge" :class="m.is_request
-                      ? (m.method === 'INVITE' ? 'info' : m.method === 'BYE' ? 'warning' : 'unknown')
-                      : (String(m.status_code).startsWith('2') ? 'ok' : 'critical')">
+                    <span class="method" :class="!m.is_request && /^[45]/.test(String(m.status_code)) ? 'bad' : ''">
                       {{ m.is_request ? m.method : m.status_code }}
                     </span>
                   </td>
@@ -314,9 +312,6 @@ onMounted(loadSessions)
 </template>
 
 <style scoped>
-.h1 { font-size: 22px; font-weight: 680; letter-spacing: -.5px; }
-.sub { font-size: 12.5px; color: var(--text-3); margin-top: 4px; }
-
 .layout {
   display: grid;
   grid-template-columns: 232px 1fr;
@@ -354,8 +349,8 @@ onMounted(loadSessions)
 }
 .sess:hover { background: var(--surface-2); }
 .sess.on {
-  background: var(--brand-soft);
-  border-left: 2px solid var(--brand);
+  background: var(--surface-3);
+  border-left: 2px solid var(--text-3);
   padding-left: 11px;
 }
 .se-top {
@@ -369,7 +364,7 @@ onMounted(loadSessions)
 .lat-chip {
   font-size: 12px; color: var(--text-3);
 }
-.lat-chip b { color: var(--brand-lt); font-family: var(--font-mono); }
+.lat-chip b { color: var(--text-2); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 
 .phase-strip {
   display: flex; gap: 0;
@@ -394,9 +389,9 @@ onMounted(loadSessions)
   z-index: 2;
   transition: all .2s;
 }
-.ph.info .ph-dot { background: var(--info); box-shadow: 0 0 0 1.5px var(--info), 0 0 10px rgba(61,155,233,.5); }
-.ph.ok .ph-dot { background: var(--ok); box-shadow: 0 0 0 1.5px var(--ok), 0 0 10px rgba(34,197,94,.5); }
-.ph.warn .ph-dot { background: var(--warning); box-shadow: 0 0 0 1.5px var(--warning), 0 0 10px rgba(240,160,32,.5); }
+.ph.info .ph-dot { background: var(--info); box-shadow: 0 0 0 1.5px var(--info); }
+.ph.ok .ph-dot { background: var(--ok); box-shadow: 0 0 0 1.5px var(--ok); }
+.ph.warn .ph-dot { background: var(--warning); box-shadow: 0 0 0 1.5px var(--warning); }
 .ph.prov .ph-dot { background: var(--text-3); box-shadow: 0 0 0 1.5px var(--text-3); }
 
 .ph-line {
@@ -411,9 +406,8 @@ onMounted(loadSessions)
 }
 .ph-time { font-size: 11px; color: var(--text-4); }
 .ph-delta {
-  font-size: 10.5px; color: var(--brand-lt);
-  background: var(--brand-soft);
-  padding: 0 5px; border-radius: 3px;
+  font-size: 10.5px; color: var(--text-3);
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
 }
 
 .legend {
@@ -428,22 +422,30 @@ onMounted(loadSessions)
 /* 消息详情 */
 .msg-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: 10px 24px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0 24px;
+  border-top: 1px solid var(--line);
 }
-.msg-grid > div { display: flex; gap: 10px; font-size: 12.5px; align-items: baseline; }
+.msg-grid > div {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 9px 0; border-bottom: 1px solid var(--line);
+}
 .msg-grid > div.wide { grid-column: 1 / -1; }
-.msg-grid span { color: var(--text-3); width: 82px; flex: none; font-size: 12px; }
-.msg-grid b { color: var(--text-2); font-weight: 500; word-break: break-all; }
+.msg-grid span { color: var(--text-4); font-size: 11.5px; }
+.msg-grid b { color: var(--text); font-weight: 500; font-size: 12.5px; word-break: break-all; }
 
-.sdp-block { margin-top: 18px; padding-top: 16px; border-top: 1px dashed var(--line); }
+.sdp-block { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
 .blk-title {
-  font-size: 12px; color: var(--text-3);
-  font-weight: 600; margin-bottom: 10px;
-  letter-spacing: .3px;
+  font-size: 11.5px; color: var(--text-4);
+  margin-bottom: 6px;
 }
+.method {
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--text-2);
+  letter-spacing: .01em;
+}
+.method.bad { color: var(--critical); }
 .body-pre {
-  background: var(--bg-2);
+  background: var(--surface-2);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   padding: 12px 14px;

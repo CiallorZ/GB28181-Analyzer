@@ -602,18 +602,18 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
                 'code': 'tcp_frame_truncated',
                 'level': 'warning',
                 'message': 'TCP 流 %s 末尾有一帧长度超出抓包范围，'
-                           '该帧未计入媒体统计' % sid,
+                           '该帧未计入媒体统计' % (meta.get('stream_id') or sid),
             })
 
-        # RFC4571 里没有逐包时间，用 TCP 段的到达时间近似：
-        # 按包序号等比分配到该流的抓包时间窗内
+        # RFC4571 里没有逐包时间，用该方向负载段的到达时间近似：
+        # 按包序号等比分配到 t0..t1 窗口内
         t0 = meta.get('ts') or 0.0
-        # 取所有段的相对时间范围
-        spread = _tcp_time_spread(path, sid)
-        for i, p in enumerate(pkts):
-            if spread and len(pkts) > 1:
-                p.arrival = spread[0] + (spread[1] - spread[0]) * i / (len(pkts) - 1)
-            else:
+        first, last = entry.get('t0'), entry.get('t1')
+        if first is not None and last is not None and len(pkts) > 1 and last > first:
+            for i, p in enumerate(pkts):
+                p.arrival = first + (last - first) * i / (len(pkts) - 1)
+        else:
+            for i, p in enumerate(pkts):
                 p.arrival = t0 + i * 0.001
 
         key = (pkts[0].ssrc, meta.get('src_ip'), meta.get('src_port'),
@@ -686,21 +686,6 @@ def _run_rebuild(pkts, task, tag, st):
         log.exception('媒体流 %s 重建失败（不影响主流程）', tag)
         return None
 
-
-
-def _tcp_time_spread(path: str, stream_id: str):
-    """取某个 TCP 流的首末包相对时间，用于给 RFC4571 包分配到达时间"""
-    try:
-        rows = capture.extract_fields(path, ['frame.time_relative'],
-                                      'tcp.stream==%s' % stream_id)
-        vals = [float(r[0]) for r in rows if r and r[0]]
-        if len(vals) >= 2:
-            return (min(vals), max(vals))
-    except Exception as e:
-        # 拿不到时间范围时上层会用等间隔估算，属于降级而非失败
-        # 但要留痕，否则排查时间戳问题时看不出这里降级过
-        log.debug('TCP 流 %s 时间范围获取失败（%s），将用等间隔估算', stream_id, e)
-    return None
 
 
 _CODEC_ALIASES = {'h264': 'H.264', 'avc': 'H.264',

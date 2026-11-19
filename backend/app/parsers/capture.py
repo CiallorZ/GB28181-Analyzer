@@ -357,11 +357,15 @@ def extract_fields(path: str, fields: list[str], display_filter: str | None = No
 # RTP 抽取（自研，不依赖 tshark 的 rtp 解码器）
 # ---------------------------------------------------------------
 def dump_tcp_segments(path: str) -> dict:
-    """导出所有 TCP 负载段，按 stream 聚合
+    """导出 TCP 负载段，按「stream + 方向」聚合
 
-    返回 {stream_id: {seq: bytes}}
-    用于自研 RFC4571 解析 —— tshark 的 rtp 过滤器对
-    TCP 承载的 RTP 需要手工 -d 参数，且只能识别部分包。
+    返回 {key: {segs: {seq: bytes}, meta: {...}, t0, t1}}
+    key 形如 ``"3:10.0.0.1:5060->10.0.0.2:5060"``。
+
+    一个 tcp.stream 天然是双向的，两个方向各有独立的 seq 空间。
+    混在一起按 seq 排序时，反向数据会被判成"空洞"，reassemble_tcp
+    会补出几百 KB 的零字节，RFC4571 随之错位。这里按方向拆开，
+    并顺手记录该方向负载段的起止时间，调用方不必再跑一次 tshark。
     """
     if not TSHARK:
         raise CaptureError('未找到 tshark')
@@ -377,15 +381,22 @@ def dump_tcp_segments(path: str) -> dict:
         try:
             seq = int(seq_s)
             data = bytes.fromhex(re.sub(r'[^0-9a-fA-F]', '', hexpay))
+            ts = float(ts_s) if ts_s else 0.0
         except (ValueError, TypeError):
             continue
-        entry = streams.setdefault(sid, {
-            'segs': {}, 'meta': {}
+        if not data:
+            continue
+        key = '%s:%s:%s->%s:%s' % (sid, sip, sport, dip, dport)
+        entry = streams.setdefault(key, {
+            'segs': {}, 'meta': {}, 't0': None, 't1': None
         })
         entry['segs'][seq] = data
+        entry['t0'] = ts if entry['t0'] is None else min(entry['t0'], ts)
+        entry['t1'] = ts if entry['t1'] is None else max(entry['t1'], ts)
         if not entry['meta']:
             entry['meta'] = {
-                'ts': float(ts_s) if ts_s else 0.0,
+                'ts': ts,
+                'stream_id': sid,
                 'src_ip': sip, 'src_port': int(sport) if sport else None,
                 'dst_ip': dip, 'dst_port': int(dport) if dport else None,
             }

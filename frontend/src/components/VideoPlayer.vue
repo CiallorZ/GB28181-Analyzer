@@ -204,18 +204,14 @@ watch(() => props.stream.id, () => {
   position: relative;
   width: 52px; height: 52px;
   border-radius: 50%;
-  background: rgba(215, 13, 25, .88);
+  background: rgba(10, 14, 19, .74);
+  border: 1px solid rgba(255, 255, 255, .35);
   color: #fff;
   display: flex; align-items: center; justify-content: center;
   padding-left: 3px;
-  box-shadow: 0 4px 24px rgba(215, 13, 25, .45);
-  transition: all var(--dur) var(--ease);
+  transition: transform var(--dur) var(--ease), background-color var(--dur) var(--ease);
 }
-.vp-cover:hover .vp-play {
-  transform: scale(1.12);
-  background: var(--brand);
-  box-shadow: 0 6px 32px rgba(215, 13, 25, .6);
-}
+.vp-cover:hover .vp-play { transform: scale(1.06); background: rgba(10, 14, 19, .9); }
 .vp-play svg { width: 22px; height: 22px; }
 
 .vp-badge {

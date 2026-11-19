@@ -120,13 +120,20 @@ onMounted(async () => {
 .h1 { font-size: 20px; font-weight: 600; }
 .sub { font-size: 12.5px; color: var(--text-3); margin-top: 3px; }
 .kv-grid {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 11px 22px;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 26px;
+  border-top: 1px solid var(--line);
 }
-.kv-grid > div { display: flex; gap: 12px; font-size: 12.5px; align-items: baseline; }
+.kv-grid > div {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
 .kv-grid > div.full { grid-column: 1 / -1; }
-.kv-grid span { color: var(--text-3); width: 92px; flex: none; font-size: 11.5px; }
-.kv-grid b { color: var(--text-2); font-weight: 500; word-break: break-all; }
+.kv-grid span { color: var(--text-4); width: auto; font-size: 11.5px; }
+.kv-grid b { color: var(--text); font-weight: 500; font-size: 13px; font-family: var(--font-mono); word-break: break-all; }
+@media (max-width: 860px) { .kv-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .kv-grid { grid-template-columns: 1fr; } }
 .count-badge {
   font-size: 11px; padding: 1px 7px; border-radius: 99px;
   background: var(--panel-3); color: var(--text-3);

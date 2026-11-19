@@ -518,10 +518,10 @@ def _check_media(sessions: list, streams: list, by_session: dict) -> list[Diagno
                 severity=WARNING,
                 evidence_level=SUSPECTED,
                 title='抓到 RTP 但视频重建失败',
-                description=('流 SSRC=%08x 共 %d 个包，视频重建失败：%s'
+                description=('流 SSRC=%08x 共 %d 个包，重建出的码流无法被解码器接受；'
+                             '具体错误见下方证据。'
                              % (st.get('ssrc') or 0,
-                                st.get('packet_count') or 0,
-                                str(st.get('rebuild_error'))[:160])),
+                                st.get('packet_count') or 0)),
                 session_id=sid, stream_id=st_id, device_id=dev,
                 timestamp=st.get('start_time'),
                 evidence={'packet_count': st.get('packet_count'),

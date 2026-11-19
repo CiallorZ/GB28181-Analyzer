@@ -139,7 +139,7 @@ watch(() => route.query.number, (v) => {
                 <td class="num">{{ fmtTime(p.timestamp) }}</td>
                 <td class="mono-sm truncate">{{ p.source_ip }}</td>
                 <td class="mono-sm truncate">{{ p.destination_ip }}</td>
-                <td><span class="badge unknown">{{ p.protocol }}</span></td>
+                <td><span class="proto">{{ p.protocol }}</span></td>
                 <td class="num">{{ p.length }}</td>
               </tr>
             </tbody>
@@ -221,24 +221,22 @@ watch(() => route.query.number, (v) => {
 </template>
 
 <style scoped>
-.packets-page { padding: 20px 24px 24px; height: 100%; display: flex; flex-direction: column; }
-.h1 { font-size: 20px; font-weight: 600; }
-.sub { font-size: 12.5px; color: var(--text-3); margin-top: 3px; }
-.inp {
-  height: 30px; width: 130px; padding: 0 10px;
-  background: var(--bg-2); border: 1px solid var(--border);
-  border-radius: var(--radius-sm); color: var(--text);
-  font-size: 12.5px; font-family: inherit;
+.packets-page {
+  padding: 26px 28px 24px; max-width: 1720px; margin: 0 auto;
+  height: 100%; display: flex; flex-direction: column;
 }
-.inp.sm { width: 78px; }
-.inp:focus { outline: none; border-color: var(--accent); }
 
 .tri-pane {
   flex: 1; min-height: 0;
-  display: grid; grid-template-columns: 340px 1fr 260px;
+  display: grid; grid-template-columns: 440px minmax(0, 1fr) 250px;
   gap: 12px;
 }
-@media (max-width: 1500px) { .tri-pane { grid-template-columns: 300px 1fr 220px; } }
+@media (max-width: 1500px) { .tri-pane { grid-template-columns: 390px minmax(0, 1fr) 220px; } }
+@media (max-width: 1080px) {
+  .packets-page { height: auto; }
+  .tri-pane { grid-template-columns: 1fr; }
+  .pane { min-height: 320px; }
+}
 
 .pane {
   background: var(--panel); border: 1px solid var(--border);
@@ -274,20 +272,18 @@ watch(() => route.query.number, (v) => {
   padding: 5px 8px; border-bottom: 1px solid var(--border);
   color: var(--text-2);
 }
-.pkt-tbl tbody tr:hover { background: var(--panel-2); cursor: pointer; }
-.pkt-tbl tbody tr.active { background: var(--accent-bg); }
+.pkt-tbl tbody tr { cursor: pointer; }
+.pkt-tbl tbody tr:hover { background: var(--surface-2); }
+.pkt-tbl tbody tr.active { background: var(--surface-3); }
+.pkt-tbl tbody tr.active td:first-child { box-shadow: inset 2px 0 0 var(--text-3); }
 .pkt-tbl td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.pane-info .empty { text-align: left; padding: 14px 12px; }
 
-.seg { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
-.seg button {
-  padding: 2px 9px; font-size: 11.5px; background: var(--panel-3);
-  border: none; color: var(--text-3); cursor: pointer; font-family: inherit;
-}
-.seg button.on { background: var(--accent); color: #fff; }
+
 
 .layer { margin-bottom: 12px; }
 .layer-name {
-  font-size: 12px; font-weight: 600; color: var(--accent);
+  font-size: 11.5px; font-weight: 600; color: var(--text-3);
   padding: 4px 0; border-bottom: 1px solid var(--border); margin-bottom: 5px;
 }
 .layer-fields { display: flex; flex-direction: column; gap: 1px; }
@@ -320,8 +316,8 @@ watch(() => route.query.number, (v) => {
 .info-row.full { flex-direction: column; gap: 3px; }
 
 .err-box {
-  background: var(--critical-bg); border-left: 3px solid var(--critical);
-  border-radius: var(--radius); padding: 12px 14px; font-size: 13px;
+  background: var(--critical-soft); border-left: 2px solid var(--critical);
+  border-radius: 0; padding: 10px 12px; font-size: 12.5px;
   color: var(--critical); margin-bottom: 14px;
 }
 </style>

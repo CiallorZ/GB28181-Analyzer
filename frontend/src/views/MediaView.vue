@@ -1,6 +1,8 @@
 <script setup>
-import { ref, onMounted, computed, nextTick } from 'vue'
-import * as echarts from 'echarts'
+import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
+import echarts from '../utils/chart'
+import { chartPalette, seriesPalette } from '../utils/chartTheme'
+import { bindChartResize } from '../utils/chartResize'
 import { api } from '../api/client'
 import PageNav from '../components/PageNav.vue'
 import { useTaskStore } from '../stores/task'
@@ -14,12 +16,8 @@ const activeMetric = ref('bitrate')
 const hasSignal = ref(true)
 
 const charts = {}
-const C = {
-  brand: '#D70D19', ds: '#4D6BFE', ok: '#22c55e',
-  warn: '#f0a020', crit: '#f0453a', info: '#3d9be9',
-  dim: '#6b7a8d', line: '#1e2836'
-}
-const PALETTE = [C.ds, C.ok, C.warn, C.info, '#9b59f0', C.brand, C.dim]
+let C = chartPalette()
+let PALETTE = seriesPalette()
 
 function chart(id, opt) {
   const el = document.getElementById(id)
@@ -87,6 +85,8 @@ async function load() {
 }
 
 function render() {
+  C = chartPalette()
+  PALETTE = seriesPalette()
   // 1. 码率趋势（多流）
   const brSeries = streams.value
     .map((st, i) => {
@@ -105,27 +105,27 @@ function render() {
     grid: { left: 52, right: 16, top: 26, bottom: 26 },
     tooltip: {
       trigger: 'axis',
-      backgroundColor: '#18212d', borderColor: '#2b3849',
-      textStyle: { color: '#e8eef6', fontSize: 11 }
+      backgroundColor: C.tipBg, borderColor: C.tipBorder,
+      textStyle: { color: C.tipText, fontSize: 11 }
     },
     legend: {
       top: 0, right: 0, itemWidth: 8, itemHeight: 8,
-      textStyle: { color: '#6b7a8d', fontSize: 9 },
+      textStyle: { color: C.dim, fontSize: 11 },
       data: brSeries.map(s => s.name)
     },
     xAxis: {
       type: 'value', name: '秒',
-      nameTextStyle: { color: '#47535f', fontSize: 9 },
+      nameTextStyle: { color: C.faint, fontSize: 10 },
       axisLine: { lineStyle: { color: C.line } },
       axisTick: { show: false },
-      axisLabel: { color: C.dim, fontSize: 9 },
+      axisLabel: { color: C.dim, fontSize: 10.5 },
       splitLine: { lineStyle: { color: C.line, type: 'dashed' } }
     },
     yAxis: {
       type: 'value', name: 'kbps',
-      nameTextStyle: { color: '#47535f', fontSize: 9 },
+      nameTextStyle: { color: C.faint, fontSize: 10 },
       axisLine: { show: false }, axisTick: { show: false },
-      axisLabel: { color: C.dim, fontSize: 9 },
+      axisLabel: { color: C.dim, fontSize: 10.5 },
       splitLine: { lineStyle: { color: C.line, type: 'dashed' } }
     },
     series: brSeries
@@ -149,27 +149,27 @@ function render() {
     grid: { left: 52, right: 16, top: 26, bottom: 26 },
     tooltip: {
       trigger: 'axis',
-      backgroundColor: '#18212d', borderColor: '#2b3849',
-      textStyle: { color: '#e8eef6', fontSize: 11 }
+      backgroundColor: C.tipBg, borderColor: C.tipBorder,
+      textStyle: { color: C.tipText, fontSize: 11 }
     },
     legend: {
       top: 0, right: 0, itemWidth: 8, itemHeight: 8,
-      textStyle: { color: '#6b7a8d', fontSize: 9 },
+      textStyle: { color: C.dim, fontSize: 11 },
       data: jSeries.map(s => s.name)
     },
     xAxis: {
       type: 'value', name: '秒',
-      nameTextStyle: { color: '#47535f', fontSize: 9 },
+      nameTextStyle: { color: C.faint, fontSize: 10 },
       axisLine: { lineStyle: { color: C.line } },
       axisTick: { show: false },
-      axisLabel: { color: C.dim, fontSize: 9 },
+      axisLabel: { color: C.dim, fontSize: 10.5 },
       splitLine: { lineStyle: { color: C.line, type: 'dashed' } }
     },
     yAxis: {
       type: 'value', name: 'ms',
-      nameTextStyle: { color: '#47535f', fontSize: 9 },
+      nameTextStyle: { color: C.faint, fontSize: 10 },
       axisLine: { show: false }, axisTick: { show: false },
-      axisLabel: { color: C.dim, fontSize: 9 },
+      axisLabel: { color: C.dim, fontSize: 10.5 },
       splitLine: { lineStyle: { color: C.line, type: 'dashed' } }
     },
     series: jSeries
@@ -187,8 +187,8 @@ function render() {
     backgroundColor: 'transparent',
     grid: { left: 52, right: 16, top: 22, bottom: 26 },
     tooltip: {
-      backgroundColor: '#18212d', borderColor: '#2b3849',
-      textStyle: { color: '#e8eef6', fontSize: 11 },
+      backgroundColor: C.tipBg, borderColor: C.tipBorder,
+      textStyle: { color: C.tipText, fontSize: 11 },
       formatter: (p) => {
         const st = streams.value[p.value[1]]
         return `流 0x${st?.ssrc?.toString(16) || '?'}<br/>` +
@@ -197,10 +197,10 @@ function render() {
     },
     xAxis: {
       type: 'value', name: '秒',
-      nameTextStyle: { color: '#47535f', fontSize: 9 },
+      nameTextStyle: { color: C.faint, fontSize: 10 },
       axisLine: { lineStyle: { color: C.line } },
       axisTick: { show: false },
-      axisLabel: { color: C.dim, fontSize: 9 },
+      axisLabel: { color: C.dim, fontSize: 10.5 },
       splitLine: { lineStyle: { color: C.line, type: 'dashed' } }
     },
     yAxis: {
@@ -208,7 +208,7 @@ function render() {
       data: streams.value.map((s, i) => '0x' + (s.ssrc ? s.ssrc.toString(16) : i)),
       axisLine: { lineStyle: { color: C.line } },
       axisTick: { show: false },
-      axisLabel: { color: C.dim, fontSize: 9, fontFamily: 'monospace' }
+      axisLabel: { color: C.dim, fontSize: 10.5, fontFamily: 'monospace' }
     },
     series: [{
       type: 'scatter',
@@ -250,7 +250,18 @@ const stats = computed(() => {
 
 const fmt = (v, d = 2) => v == null ? '—' : Number(v).toFixed(d)
 
-onMounted(load)
+let unbindResize = null
+onMounted(async () => {
+  await load()
+  unbindResize = bindChartResize(charts)
+})
+onUnmounted(() => unbindResize?.())
+
+// v-show 的图表在隐藏时 init 会得到 0 宽，切回来必须重新量一次
+watch(activeMetric, async (k) => {
+  await nextTick()
+  charts['c-' + k]?.resize()
+})
 </script>
 
 <template>
@@ -280,7 +291,7 @@ onMounted(load)
     <template v-else>
       <!-- 统计卡 -->
       <div class="kpis mb-12">
-        <div class="kpi brand">
+        <div class="kpi">
           <div class="kpi-label">RTP 流</div>
           <div class="kpi-value">{{ stats.total }}</div>
           <div class="kpi-sub">{{ stats.totalPackets.toLocaleString() }} 个包</div>
@@ -354,7 +365,7 @@ onMounted(load)
               <tbody>
                 <tr v-for="st in streams" :key="st.id">
                   <td class="mono">0x{{ st.ssrc?.toString(16) }}</td>
-                  <td><span class="badge unknown">{{ st.transport }}</span></td>
+                  <td><span class="proto">{{ st.transport }}</span></td>
                   <td class="num">{{ st.packet_count }}</td>
                   <td class="num">{{ st.avg_bitrate != null ? fmt(st.avg_bitrate, 0) : '—' }}</td>
                   <td class="num" :class="st.jitter_avg > 50 ? 'text-warning' : ''">
@@ -420,28 +431,6 @@ onMounted(load)
 .sub { font-size: 12px; color: var(--text-3); margin-top: 3px; }
 .chart-lg { height: 240px; }
 .hint-inline { font-size: 11.5px; color: var(--text-4); font-weight: 400; }
-
-.seg {
-  display: flex;
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-.seg button {
-  padding: 4px 14px;
-  background: var(--panel-2);
-  border: none;
-  color: var(--text-3);
-  font-size: 12px;
-  font-family: inherit;
-  cursor: pointer;
-  transition: .13s;
-}
-.seg button:hover { color: var(--text-2); }
-.seg button.on {
-  background: var(--brand);
-  color: #fff;
-}
 
 .notes { display: flex; flex-direction: column; gap: 13px; }
 .note-item { padding-left: 11px; border-left: 2px solid var(--line-2); }
