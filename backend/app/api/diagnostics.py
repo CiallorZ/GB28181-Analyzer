@@ -14,6 +14,7 @@ from ..core.config import settings
 from ..core.db import get_db
 from ..models.entities import AnalysisTask, DiagnosticEvent, PacketIndex
 from ..parsers import capture
+from ..services.diagnosis import severity_order_clause
 from ..schemas import task as S
 
 router = APIRouter(tags=['diagnostics'])
@@ -34,13 +35,10 @@ def list_diagnostics(task_id: int, page: int = 1, page_size: int = 50,
         stmt = stmt.where(DiagnosticEvent.rule_id == rule_id)
 
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
-    order = {
-        'critical': 0, 'warning': 1, 'info': 2, 'unknown': 3,
-    }
     rows = db.scalars(
-        stmt.offset((page - 1) * page_size).limit(page_size)).all()
-    rows = sorted(rows, key=lambda r: (order.get(r.severity, 9),
-                                       r.timestamp or 0))
+        stmt.order_by(severity_order_clause(DiagnosticEvent.severity),
+                      DiagnosticEvent.timestamp)
+        .offset((page - 1) * page_size).limit(page_size)).all()
 
     return S.DiagnosticList(
         total=total, page=page, page_size=page_size,

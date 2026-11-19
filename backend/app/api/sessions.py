@@ -12,6 +12,7 @@ from ..models.entities import (
     BusinessSession, DiagnosticEvent, MediaMetric, MediaStream, SipMessage,
 )
 from ..schemas import task as S
+from ..services.diagnosis import severity_order_clause
 
 router = APIRouter(tags=['sessions'])
 
@@ -217,7 +218,8 @@ def session_diagnostics(session_id: int, db: Session = Depends(get_db)):
     rows = db.scalars(
         select(DiagnosticEvent)
         .where(DiagnosticEvent.session_id == session_id)
-        .order_by(DiagnosticEvent.severity, DiagnosticEvent.timestamp)).all()
+        .order_by(severity_order_clause(DiagnosticEvent.severity),
+                  DiagnosticEvent.timestamp)).all()
     return S.DiagnosticList(
         total=len(rows), page=1, page_size=len(rows) or 1,
         items=[S.DiagnosticOut.model_validate(r) for r in rows])

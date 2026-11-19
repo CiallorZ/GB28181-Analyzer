@@ -47,6 +47,10 @@ def _find_tool(name: str, env_key: str) -> str | None:
             r'C:\Program Files\ffmpeg\bin\ffprobe.exe',
             r'D:\Program Files\ffmpeg-7.0.2-full_build\bin\ffprobe.exe',
         ],
+        'capinfos': [
+            r'C:\Program Files\Wireshark\capinfos.exe',
+            r'D:\Program Files\Wireshark\capinfos.exe',
+        ],
     }.get(name, [])
     for c in candidates:
         if os.path.isfile(c):
@@ -55,6 +59,7 @@ def _find_tool(name: str, env_key: str) -> str | None:
 
 
 TSHARK = _find_tool('tshark', 'TSHARK_PATH')
+CAPINFOS = _find_tool('capinfos', 'CAPINFOS_PATH')
 FFMPEG = _find_tool('ffmpeg', 'FFMPEG_PATH')
 FFPROBE = _find_tool('ffprobe', 'FFPROBE_PATH')
 
@@ -133,8 +138,14 @@ def inspect_file(path: str) -> FileInfo:
         info.warnings.append('文件头不是标准 pcap/pcapng 魔数，可能不是抓包文件')
 
     # capinfos 拿整体信息
-    capinfos = os.path.join(os.path.dirname(TSHARK or ''), 'capinfos.exe')
-    if os.path.isfile(capinfos):
+    capinfos = CAPINFOS
+    if not capinfos and TSHARK:
+        for name in ('capinfos', 'capinfos.exe'):
+            cand = os.path.join(os.path.dirname(TSHARK), name)
+            if os.path.isfile(cand):
+                capinfos = cand
+                break
+    if capinfos and os.path.isfile(capinfos):
         # -T -M 输出：第一行是表头，第二行是数据，都用 tab 分隔
         r = _run([capinfos, '-T', '-M', path], 120, 'capinfos')
         if r.returncode == 0:

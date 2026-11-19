@@ -88,6 +88,12 @@ class SdpInfo:
         }
 
 
+def make_dialog_key(call_id: str, from_tag: str, to_tag: str) -> str:
+    """Dialog 键的唯一构造入口，所有调用方必须用这里，避免排序规则不一致"""
+    tags = sorted([from_tag or '', to_tag or ''])
+    return '%s|%s|%s' % (call_id or '', tags[0], tags[1])
+
+
 @dataclass
 class SipInfo:
     """单条 SIP 消息（M03）"""
@@ -133,8 +139,7 @@ class SipInfo:
 
     def dialog_key(self) -> str:
         """Dialog 唯一键：Call-ID + From-Tag + To-Tag（排序后，保证双向一致）"""
-        tags = tuple(sorted([self.from_tag or '', self.to_tag or '']))
-        return '%s|%s|%s' % (self.call_id, tags[0], tags[1])
+        return make_dialog_key(self.call_id, self.from_tag, self.to_tag)
 
     def transaction_key(self) -> str:
         """事务键：Via branch + CSeq method"""
@@ -351,6 +356,11 @@ def build_message(raw_header: str, raw_body: bytes, meta: dict) -> SipInfo | Non
 
     raw_header : msg_hdr（tshark 给的是从 Via 开始的头部，不含起始行）
     raw_body   : 正文原始字节
+
+    注意：tshark 的 `sip.msg_body` 是 FT_NONE 的存在标记（值为 "1"），
+    不是十六进制正文；真正的正文通常附在 `sip.msg_hdr` 的空白行之后。
+    所以这里必须先从 msg_hdr 里把正文拆出来，否则所有 SDP/MANSCDP 都解析不到。
+
     meta       : {packet_number, timestamp, src_ip, src_port, dst_ip, dst_port,
                   request_line, status_line, status_code}
     """
@@ -363,7 +373,15 @@ def build_message(raw_header: str, raw_body: bytes, meta: dict) -> SipInfo | Non
         destination_port=meta.get('dst_port'),
     )
 
-    header_text = (raw_header or '').replace('\\r\\n', '\r\n')
+    raw = (raw_header or '').replace('\\r\\n', '\r\n')
+    header_text = raw
+    for sep in ('\r\n\r\n', '\n\n'):
+        if sep in raw:
+            head, _, tail = raw.partition(sep)
+            header_text = head
+            if tail and not raw_body:
+                raw_body = tail.encode('utf-8', errors='replace')
+            break
     # tshark 的 msg_hdr 可能不含起始行，用单独的字段补
     req_line = (meta.get('request_line') or '').strip()
     stat_line = (meta.get('status_line') or '').strip()

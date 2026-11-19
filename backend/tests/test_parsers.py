@@ -150,6 +150,29 @@ class TestSipParser:
         assert m.via_branch == 'z9hG4bK123'
         assert m.sdp is not None
 
+    def test_body_embedded_in_msg_hdr(self):
+        """tshark 的 msg_hdr 会带正文；必须拆出来，否则 SDP 永远为空"""
+        hdr = (
+            'Via: SIP/2.0/UDP 10.0.0.1:5060;branch=z9hG4bK1\r\n'
+            'From: <sip:a@1>;tag=abc\r\n'
+            'To: <sip:b@2>\r\n'
+            'Call-ID: embedded-body\r\n'
+            'CSeq: 1 INVITE\r\n'
+            'Content-Type: application/sdp\r\n'
+            'Content-Length: 96\r\n'
+            '\r\n'
+            'v=0\r\nc=IN IP4 10.0.0.1\r\ny=00001234\r\n'
+            'm=video 8808 RTP/AVP 96\r\n'
+        )
+        m = sip_parser.build_message(
+            hdr, b'', self._meta(request_line='INVITE sip:b@2 SIP/2.0'))
+        assert m.body.startswith('v=0')
+        assert m.sdp is not None
+        assert m.sdp.y_ssrc == '00001234'
+        # 正文里的 a=/m= 行不能被当成头域
+        assert 'y' not in m.headers
+        assert 'm' not in m.headers
+
     def test_response_200(self):
         hdr = (
             'Via: SIP/2.0/UDP 10.0.0.1:5060;branch=z9hG4bK123\r\n'
@@ -355,6 +378,29 @@ class TestRfc4571:
         assert off == 1158
         assert len(pkts) == 10
 
+    def test_packet_larger_than_2048_is_kept(self):
+        """I 帧常有 4KB+，旧实现把上限写成 2048 会整帧丢弃"""
+        big = self._rtp(0, payload=b'Y' * 4000)
+        buf = self._frame(big) + b''.join(
+            self._frame(self._rtp(i)) for i in range(1, 6))
+        got = rtp_analyzer.parse_rfc4571_ex(buf)
+        assert got is not None
+        _off, pkts, stats = got
+        assert len(pkts) == 6
+        assert pkts[0].size == 4012          # 12 字节头 + 4000 载荷
+        assert stats['truncated'] == 0
+
+    def test_truncated_tail_is_reported(self):
+        """长度字段超出缓冲区：已完整帧保留，且显式标记截断"""
+        frames = b''.join(self._frame(self._rtp(i)) for i in range(5))
+        # 声明 1000 字节，实际只给 100 字节
+        buf = frames + (1000).to_bytes(2, 'big') + b'Z' * 100
+        got = rtp_analyzer.parse_rfc4571_ex(buf)
+        assert got is not None
+        _off, pkts, stats = got
+        assert len(pkts) == 5
+        assert stats['truncated'] == 1
+
     def test_garbage_returns_none(self):
         assert rtp_analyzer.parse_rfc4571(b'\x00' * 500) is None
 
@@ -433,6 +479,23 @@ class TestSessionBuilder:
         assert d.ack_time == 10.25
         assert d.bye_time == 50.0
         assert d.final_code == 200
+
+    def test_dialog_key_matches_message_key(self):
+        """响应/ACK/BYE 的 dialog_key 必须与归并出的 Dialog.key 一致"""
+        msgs = self._invite_flow()
+        d = session_builder.build_dialogs(msgs)[0]
+        for m in msgs[1:]:
+            assert m.dialog_key() == d.key
+        # INVITE 请求没有 To-Tag，键天然不同，必须靠回退规则关联
+        assert msgs[0].dialog_key() != d.key
+
+    def test_invite_request_resolves_dialog_by_fallback(self):
+        from app.services.analyzer import _match_dialog_id
+
+        msgs = self._invite_flow()
+        d = session_builder.build_dialogs(msgs)[0]
+        dialog_map = {d.key: 7}
+        assert _match_dialog_id(msgs[0], dialog_map, {'dialog-1': 7}) == 7
 
     def test_session_signal_success(self):
         dialogs = session_builder.build_dialogs(self._invite_flow())
@@ -631,3 +694,83 @@ class TestDiagnosis:
         from app.services import diagnosis
         assert diagnosis.diagnose({'sessions': [], 'streams': [],
                                    'messages': [], 'limits': []}) == []
+
+
+# ============================================================
+# PS/ES：帧数必须按访问单元（AU）而不是 NAL 计
+# ============================================================
+class TestEsFrameCounting:
+    @staticmethod
+    def _es(*nals):
+        return b''.join(b'\x00\x00\x00\x01' + n for n in nals)
+
+    def test_h264_multislice_counts_one_frame(self):
+        """一帧 = 参数集 + 多个 slice；按 NAL 计会把帧数放大"""
+        from app.parsers import ps_parser
+
+        aud = b'\x09\xf0'
+        sps = b'\x67\x42\x00\x1e'
+        pps = b'\x68\xce'
+        idr_slice0 = b'\x65\xb0'          # first_mb=0, slice_type=2 (I)
+        idr_slice1 = b'\x65\x0b\x80'      # first_mb=10, slice_type=0
+        p_slice = b'\x41\xc0'             # first_mb=0, slice_type=0 (P)
+        b_slice = b'\x41\xa0'             # first_mb=0, slice_type=1 (B)
+
+        es = self._es(aud, sps, pps, idr_slice0, idr_slice1,
+                      aud, p_slice, aud, b_slice)
+        info = ps_parser.analyze_es(es)
+
+        assert info.codec == 'H.264'
+        assert info.frame_count == 3
+        assert (info.i_frame_count, info.p_frame_count,
+                info.b_frame_count) == (1, 1, 1)
+        assert info.keyframe_count == 1
+        assert len(info.frame_sizes) == 3
+        # 第一帧应包含 SPS/PPS 与两个 slice NAL
+        assert info.frame_sizes[0] == (
+            len(aud) + len(sps) + len(pps)
+            + len(idr_slice0) + len(idr_slice1) + 5 * 4)
+
+    def test_h265_slice_flag_groups_frame(self):
+        from app.parsers import ps_parser
+
+        vps = b'\x40\x01'
+        sps = b'\x42\x01'
+        pps = b'\x44\x01'
+        idr = b'\x26\x01\x80'             # type 19, first_slice_segment=1
+        idr_slice2 = b'\x26\x01\x00'      # 同一帧的第二个 slice
+        trail = b'\x02\x01\x80'           # type 1, 新的一帧
+
+        info = ps_parser.analyze_es(self._es(vps, sps, pps, idr,
+                                             idr_slice2, trail))
+        assert info.codec == 'H.265'
+        assert info.frame_count == 2
+        assert info.i_frame_count == 1
+        assert info.p_frame_count == 1
+
+    def test_pes_header_is_stripped_at_correct_offset(self):
+        """PES 头从 packet_length 之后开始，不能拿 seg[0] 当标志字节"""
+        from app.parsers import ps_parser
+
+        seg = (b'\x00\x00'          # PES_packet_length = 0（视频常见）
+               + b'\x84\x00'        # '10' + PES_priority，不是恰好 0x80
+               + b'\x05'            # PES_header_data_length
+               + b'\x21\x00\x01\x00\x01'   # 5 字节 PTS
+               + b'ESDATA')
+        assert ps_parser._pes_payload(seg) == b'ESDATA'
+
+    def test_analyze_ps_extracts_es_without_header_junk(self):
+        from app.parsers import ps_parser
+
+        aud = b'\x09\xf0'
+        idr = b'\x65\xb0'
+        es = b''.join(b'\x00\x00\x00\x01' + n for n in (aud, idr))
+        pes = (b'\x00\x00\x01\xe0' + b'\x00\x00'
+               + b'\x80\x00\x00' + es)
+        payload = b'\x00\x00\x01\xba' + b'\x00' * 10 + pes
+
+        out = ps_parser.analyze_ps([payload], [0.0])
+        assert out.has_ps
+        assert out.video.frame_count == 1
+        assert out.video.i_frame_count == 1
+        assert sum(out.video.frame_sizes) == len(es)

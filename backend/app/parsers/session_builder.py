@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 
-from .sip_parser import PROVISIONAL_CODES, SipInfo
+from .sip_parser import PROVISIONAL_CODES, SipInfo, make_dialog_key
 
 
 @dataclass
@@ -125,7 +125,9 @@ def build_dialogs(messages: list[SipInfo]) -> list[DialogInfo]:
                 from_tag = m.from_tag
                 break
 
-        d = DialogInfo(key='%s|%s|%s' % (call_id, from_tag, to_tag),
+        # 与 SipInfo.dialog_key() 保持同一构造：tag 排序后再拼。
+        # 否则请求（To-Tag 为空）与响应算出的键不同，SIP 消息永远回填不上 dialog_id。
+        d = DialogInfo(key=make_dialog_key(call_id, from_tag, to_tag),
                        call_id=call_id, from_tag=from_tag, to_tag=to_tag)
         d.messages = msgs
 

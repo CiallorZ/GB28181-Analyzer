@@ -357,35 +357,50 @@ def _iter_nal(data: bytes):
             yield data[begin:end]
 
 
+def _h264_slice_head(nal: bytes):
+    """读取 H.264 slice header 的头两个字段：first_mb_in_slice / slice_type"""
+    if len(nal) < 2:
+        return None
+    data = _remove_emulation(nal[1:])
+    try:
+        first_mb, pos = _read_ue(data, 0)
+        slice_type, pos = _read_ue(data, pos)
+        return first_mb, slice_type
+    except Exception:
+        return None
+
+
+def _h265_first_slice(nal: bytes) -> bool:
+    """H.265 slice_segment_header 的第一个 bit 就是 first_slice_segment_in_pic_flag"""
+    if len(nal) < 3:
+        return False
+    data = _remove_emulation(nal[2:])
+    return bool(data and (data[0] & 0x80))
+
+
 def analyze_es(es: bytes, start_time: float = 0.0) -> VideoInfo:
     """分析 ES 数据，识别编码与帧结构
 
     es: 拼接后的视频 ES 数据（多个 PES 的 payload 相连）
+
+    帧数以 **访问单元（AU / 编码图像）** 为单位，而不是 NAL 数量：
+    一帧通常由 SPS/PPS/SEI + 多个 slice NAL 组成，按 NAL 计数会把帧数
+    放大若干倍，帧率、I/P/B 比例随之全部失真。
     """
     info = VideoInfo()
     if not es:
         info.warnings.append('没有视频 ES 数据')
         return info
 
-    nal_count = 0
+    # ---- 第一遍：判定编码、参数集 ----
     h264_score = 0
     h265_score = 0
     sps_parsed = None
-    keyframe_positions = []
-    byte_pos = 0
 
     for nal in _iter_nal(es):
         if not nal:
             continue
-        nal_count += 1
-        if len(info.frame_sizes) < 3000:
-            info.frame_sizes.append(len(nal))
-
         b0 = nal[0]
-
-        # 判断是 H.264 还是 H.265
-        # H.264: nal_type = b0 & 0x1F, 参数集 7/8, IDR 5
-        # H.265: nal_type = (b0 >> 1) & 0x3F, 参数集 32/33/34, IDR 19/20
         h264_type = b0 & 0x1F
         h265_type = (b0 >> 1) & 0x3F
 
@@ -403,13 +418,6 @@ def analyze_es(es: bytes, start_time: float = 0.0) -> VideoInfo:
                 info.has_sps = True
         elif h264_type == 8:
             info.has_pps = True
-        elif h264_type == 5:
-            info.has_idr = True
-            info.keyframe_count += 1
-            info.i_frame_count += 1
-            keyframe_positions.append(byte_pos)
-        elif h264_type == 1:
-            info.p_frame_count += 1
 
         if h265_type == 32:
             info.has_vps = True
@@ -420,17 +428,6 @@ def analyze_es(es: bytes, start_time: float = 0.0) -> VideoInfo:
                 info.has_sps = True
         elif h265_type == 34:
             info.has_pps = True
-        elif h265_type in (19, 20):
-            info.has_idr = True
-            info.keyframe_count += 1
-            info.i_frame_count += 1
-            keyframe_positions.append(byte_pos)
-        elif h265_type == 1:
-            info.p_frame_count += 1
-
-        byte_pos += len(nal) + 4
-
-    info.frame_count = nal_count
 
     # 判定编码
     if h265_score > h264_score:
@@ -452,6 +449,81 @@ def analyze_es(es: bytes, start_time: float = 0.0) -> VideoInfo:
         if info.codec:
             info.warnings.append(
                 '未找到可解析的 SPS：抓包可能起始于 GOP 中间，缺少参数集')
+
+    # ---- 第二遍：按访问单元计帧 ----
+    if not info.codec:
+        return info
+
+    keyframe_positions = []
+    au_bytes = 0          # 当前 AU 已累计字节
+    prefix_bytes = 0      # AU 之前、属于下一帧的参数集/SEI 字节
+    au_kind = None        # 'I' / 'P' / 'B'
+    au_start = 0
+    byte_pos = 0
+    have_au = False
+
+    def _flush():
+        if not have_au:
+            return
+        info.frame_count += 1
+        if len(info.frame_sizes) < 3000:
+            info.frame_sizes.append(au_bytes)
+        if au_kind == 'I':
+            info.i_frame_count += 1
+            info.keyframe_count += 1
+            keyframe_positions.append(au_start)
+        elif au_kind == 'B':
+            info.b_frame_count += 1
+        else:
+            info.p_frame_count += 1
+
+    for nal in _iter_nal(es):
+        if not nal:
+            continue
+        size = len(nal) + 4
+        b0 = nal[0]
+        new_pic = False
+        kind = None
+
+        if info.codec == 'H.264':
+            t = b0 & 0x1F
+            is_vcl = 1 <= t <= 5
+            if is_vcl:
+                head = _h264_slice_head(nal)
+                if head is not None and head[0] == 0:
+                    new_pic = True
+                    if t == 5:
+                        kind = 'I'
+                    else:
+                        st = head[1] % 5
+                        kind = 'I' if st == 2 else ('B' if st == 1 else 'P')
+                if t == 5:
+                    info.has_idr = True
+        else:
+            t = (b0 >> 1) & 0x3F
+            is_vcl = t <= 31
+            if is_vcl and _h265_first_slice(nal):
+                new_pic = True
+                kind = 'I' if 16 <= t <= 23 else 'P'
+                if t in (19, 20):
+                    info.has_idr = True
+
+        if new_pic:
+            _flush()
+            au_bytes = prefix_bytes + size
+            prefix_bytes = 0
+            au_kind = kind
+            au_start = byte_pos
+            have_au = True
+        elif is_vcl and have_au:
+            au_bytes += size
+        else:
+            # AUD/SPS/PPS/SEI 属于"下一帧"的前缀，不能算进当前帧
+            prefix_bytes += size
+
+        byte_pos += size
+
+    _flush()
 
     # 关键帧间隔（按字节位置换算成时间不可靠，这里只给间隔的字节跨度）
     if len(keyframe_positions) >= 2:
@@ -523,11 +595,7 @@ def analyze_ps(payloads: list, timestamps: list | None = None) -> PsAnalysis:
             while pos >= 0:
                 seg_start = pos + 4
                 nxt = pay.find(PES_VIDEO, seg_start)
-                seg = pay[seg_start:nxt if nxt > 0 else len(pay)]
-                # 跳过 PES 扩展头
-                if len(seg) > 3 and seg[0] == 0x80:
-                    hdr_len = seg[2]
-                    seg = seg[3 + hdr_len:]
+                seg = _pes_payload(pay[seg_start:nxt if nxt > 0 else len(pay)])
                 if seg:
                     if keyframe_time is None and timestamps and idx < len(timestamps):
                         if (b'\x00\x00\x01\x65' in seg or b'\x00\x00\x00\x01\x65' in seg
@@ -544,11 +612,7 @@ def analyze_ps(payloads: list, timestamps: list | None = None) -> PsAnalysis:
                 pos = pay.find(marker)
                 if pos < 0:
                     continue
-                seg = pay[pos + 4:]
-                if len(seg) > 3 and seg[0] == 0x80:
-                    hdr_len = seg[2]
-                    seg = seg[3 + hdr_len:]
-                audio_es += seg
+                audio_es += _pes_payload(pay[pos + 4:])
                 break
 
     # 视频分析
@@ -568,6 +632,22 @@ def analyze_ps(payloads: list, timestamps: list | None = None) -> PsAnalysis:
         out.warnings.append('载荷中未发现 PS 包头，可能不是 MPEG-PS 封装')
 
     return out
+
+
+def _pes_payload(seg: bytes) -> bytes:
+    """剥掉 PES 头，返回 ES 载荷
+
+    seg 从 PES_packet_length 开始（调用方已经吃掉 00 00 01 Ex）：
+      [0:2] packet_length  [2] '10'+flags  [3] flags2  [4] header_data_length
+    旧实现把 seg[0] 当标志字节，整体错位 2 字节：长度字段和 PES 头会混进
+    ES，导致 NAL 尺寸偏大、极少数情况下出现伪起始码。这里按 MPEG-2 布局取。
+    """
+    if len(seg) < 5:
+        return b''
+    if (seg[2] & 0xC0) != 0x80:        # 不是 MPEG-2 PES 头（MPEG-1 流不处理）
+        return seg
+    hdr_len = seg[4]
+    return seg[5 + hdr_len:]
 
 
 def _guess_audio_codec(data: bytes) -> str | None:

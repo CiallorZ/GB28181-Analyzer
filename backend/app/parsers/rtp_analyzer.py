@@ -357,13 +357,21 @@ def reassemble_tcp(segments: dict) -> bytes:
     return bytes(out)
 
 
-def parse_rfc4571(buf: bytes, max_scan: int = 8000, min_pkts: int = 3):
-    """扫描对齐偏移并解析 RFC4571 帧（2 字节长度 + RTP 包）
+MAX_RTP_PACKET = 65535     # RFC4571 的长度字段是 2 字节，上限就是 65535
 
-    返回 (offset, [RtpPacket...]) 或 None
+
+def parse_rfc4571_ex(buf: bytes, max_scan: int = 8000, min_pkts: int = 3):
+    """扫描对齐偏移并解析 RFC4571 帧，返回 (offset, pkts, stats) 或 None
 
     为什么不能从偏移 0 开始：抓包起点往往不在 RTP 包边界上，
     实测遇到过偏移 1158 / 1829 字节的情况。
+
+    stats:
+      truncated —— 最后一帧的长度字段超出缓冲区（抓包被截断），
+                   这类帧不能算作解析成功，但必须让上层知道"少算了"。
+
+    早期实现把长度上限写成 2048，导致 I 帧（通常 4KB~60KB）被静默跳过，
+    TCP 承载的码率/帧数因此系统性偏小。
     """
     best = None
     limit = min(max_scan, max(0, len(buf) - 14))
@@ -372,9 +380,14 @@ def parse_rfc4571(buf: bytes, max_scan: int = 8000, min_pkts: int = 3):
             continue
         o = off
         pkts = []
+        truncated = 0
         while o + 2 <= len(buf):
             L = int.from_bytes(buf[o:o + 2], 'big')
-            if L < 12 or L > 2048 or o + 2 + L > len(buf):
+            if L < 12 or L > MAX_RTP_PACKET:
+                break
+            if o + 2 + L > len(buf):
+                if pkts:                      # 已经有完整帧，尾部这帧才算截断
+                    truncated = 1
                 break
             pp = buf[o + 2:o + 2 + L]
             if (pp[0] >> 6) != 2:
@@ -390,10 +403,19 @@ def parse_rfc4571(buf: bytes, max_scan: int = 8000, min_pkts: int = 3):
             ))
             o += 2 + L
         if len(pkts) >= min_pkts and (best is None or len(pkts) > len(best[1])):
-            best = (off, pkts)
+            best = (off, pkts, {'truncated': truncated})
             if len(pkts) > 400:               # 已足够确认对齐正确
                 break
     return best
+
+
+def parse_rfc4571(buf: bytes, max_scan: int = 8000, min_pkts: int = 3):
+    """兼容旧调用：只返回 (offset, pkts)"""
+    got = parse_rfc4571_ex(buf, max_scan=max_scan, min_pkts=min_pkts)
+    if not got:
+        return None
+    off, pkts, _stats = got
+    return off, pkts
 
 
 # ---------------------------------------------------------------

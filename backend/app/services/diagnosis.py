@@ -75,6 +75,25 @@ RULES = {
 # ---------------------------------------------------------------
 # 各规则的检测逻辑
 # ---------------------------------------------------------------
+def severity_order_clause(column):
+    """SQL 层的严重级别排序：critical > warning > info > unknown
+
+    SQLite/PostgreSQL 都会按枚举名称（CRITICAL/INFO/WARNING）的字母序排序，
+    直接 order_by(severity) 会把 WARNING 排到 INFO 后面；诊断列表必须在
+    SQL 里排好序再分页，否则第一页可能看不到 critical。
+    """
+    from sqlalchemy import case
+
+    from ..models.entities import DiagnosticSeverity
+
+    return case(
+        (column == DiagnosticSeverity.CRITICAL, 0),
+        (column == DiagnosticSeverity.WARNING, 1),
+        (column == DiagnosticSeverity.INFO, 2),
+        else_=9,
+    )
+
+
 def diagnose(task_data: dict) -> list[Diagnostic]:
     """对一次分析任务做全量诊断
 

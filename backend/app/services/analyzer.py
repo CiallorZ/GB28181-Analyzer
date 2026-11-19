@@ -147,6 +147,27 @@ def _mark_failed(db: Session, task_id: int, message: str, stage: str):
         log.exception('写入任务 #%s 失败状态时出错', task_id)
 
 
+def _match_dialog_id(info, dialog_map: dict, callid_only: dict) -> int | None:
+    """给 SIP 消息找所属 Dialog
+
+    1. 精确键（Call-ID + 排序后的 From/To-Tag）
+    2. 请求方向的 To-Tag 为空，用 (Call-ID, From-Tag, '') 回退
+    3. 仍找不到且该 Call-ID 只对应一个 Dialog 时，按 Call-ID 兜底
+
+    第 2/3 步是必需的：INVITE 请求本身没有 To-Tag，只靠精确键会让
+    "谁发起了这次点播"永远丢关联。
+    """
+    did = dialog_map.get(info.dialog_key())
+    if did is not None:
+        return did
+    if info.from_tag:
+        did = dialog_map.get(sip_parser.make_dialog_key(
+            info.call_id, info.from_tag, ''))
+        if did is not None:
+            return did
+    return callid_only.get(info.call_id)
+
+
 def _run(db: Session, task: AnalysisTask):
     files = task.files
     if not files:
@@ -239,9 +260,14 @@ def _run(db: Session, task: AnalysisTask):
     db.commit()
 
     # 回填 SIP 消息的 dialog_id
+    callid_counts: dict = {}
+    for d in dialogs:
+        callid_counts[d.call_id] = callid_counts.get(d.call_id, 0) + 1
+    callid_only = {d.call_id: dialog_map[d.key] for d in dialogs
+                   if callid_counts[d.call_id] == 1}
+
     for m in sip_msgs:
-        key = m['info'].dialog_key()
-        did = dialog_map.get(key)
+        did = _match_dialog_id(m['info'], dialog_map, callid_only)
         if did:
             db.execute(
                 SipMessage.__table__.update()
@@ -296,7 +322,7 @@ def _run(db: Session, task: AnalysisTask):
 
     # ---------------- 5. RTP 分析 ----------------
     _set_progress(db, task, '分析 RTP 媒体流', 60)
-    streams_raw = _analyze_rtp(db, task, path)
+    streams_raw, media_limits = _analyze_rtp(db, task, path)
 
     # 关联媒体到会话
     stream_dicts = [{'id': r.id, 'ssrc': r.ssrc, 'src_port': r.source_port,
@@ -337,6 +363,7 @@ def _run(db: Session, task: AnalysisTask):
     limits = session_builder.detect_capture_limits(sessions, 
                                                    [m['info'] for m in sip_msgs],
                                                    packets)
+    limits.extend(media_limits)
     task_payload = {
         'sessions': [_session_dict(s, sid) for s, sid in session_rows],
         'streams': [_stream_dict(r) for r in streams_raw],
@@ -465,7 +492,8 @@ def _load_sip(db: Session, task: AnalysisTask, path: str, packets: list) -> list
     return out
 
 
-def _analyze_rtp(db: Session, task: AnalysisTask, path: str) -> list[MediaStream]:
+def _analyze_rtp(db: Session, task: AnalysisTask,
+                 path: str) -> tuple[list[MediaStream], list[dict]]:
     """抽取 RTP 并做质量分析
 
     UDP：一个数据报 = 一个 RTP 包，直接用
@@ -524,6 +552,7 @@ def _analyze_rtp(db: Session, task: AnalysisTask, path: str) -> list[MediaStream
     except capture.CaptureError:
         tcp_streams = {}
 
+    tcp_limits = []
     for sid, entry in tcp_streams.items():
         segs = entry.get('segs') or {}
         meta = entry.get('meta') or {}
@@ -532,12 +561,19 @@ def _analyze_rtp(db: Session, task: AnalysisTask, path: str) -> list[MediaStream
         buf = rtp_analyzer.reassemble_tcp(segs)
         if len(buf) < 100:
             continue
-        got = rtp_analyzer.parse_rfc4571(buf)
+        got = rtp_analyzer.parse_rfc4571_ex(buf)
         if not got:
             continue
-        _offset, pkts = got
+        _offset, pkts, tcp_stats = got
         if len(pkts) < 3:
             continue
+        if tcp_stats.get('truncated'):
+            tcp_limits.append({
+                'code': 'tcp_frame_truncated',
+                'level': 'warning',
+                'message': 'TCP 流 %s 末尾有一帧长度超出抓包范围，'
+                           '该帧未计入媒体统计' % sid,
+            })
 
         # RFC4571 里没有逐包时间，用 TCP 段的到达时间近似：
         # 按包序号等比分配到该流的抓包时间窗内
@@ -576,7 +612,7 @@ def _analyze_rtp(db: Session, task: AnalysisTask, path: str) -> list[MediaStream
             streams.append(row)
 
     db.commit()
-    return streams
+    return streams, tcp_limits
 
 
 def _run_ps_analysis(pkts, st):
