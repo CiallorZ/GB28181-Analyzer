@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
 from dataclasses import dataclass
 
 from ..parsers import capture
@@ -184,35 +185,43 @@ def transcode(ps_path: str, mp4_path: str, poster_path: str | None = None
     if not capture.FFMPEG:
         return False, '未找到 ffmpeg，无法转码'
 
-    cmd = [
-        capture.FFMPEG, '-hide_banner', '-loglevel', 'error',
-        # 容忍码流瑕疵，不因单帧错误中断
-        '-err_detect', 'ignore_err',
-        # 参考帧缺失时丢弃坏帧，而不是输出花屏
-        '-fflags', '+genpts+discardcorrupt',
-        '-i', ps_path,
-        '-an',                          # 只要视频轨
-        '-c:v', 'libx264',
-        '-preset', 'veryfast',          # 比 medium 快约 2 倍，画质差异可忽略
-        '-crf', '24',
-        '-vf', TRANSCODE_SCALE,
-        '-pix_fmt', 'yuv420p',          # 浏览器兼容
-        '-movflags', '+faststart',
-        '-t', str(MAX_SECONDS),
-        '-y', mp4_path,
-    ]
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True,
-                           errors='replace', timeout=FFMPEG_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        return False, '转码超时（%d 秒）' % FFMPEG_TIMEOUT
+    # 先在目标目录内写临时文件，失败时保留已有预览，避免把旧文件当作本次结果。
+    output_dir = os.path.dirname(os.path.abspath(mp4_path))
+    with tempfile.TemporaryDirectory(prefix='.transcode-', dir=output_dir) as tmp:
+        temporary_mp4 = os.path.join(tmp, 'output.mp4')
+        cmd = [
+            capture.FFMPEG, '-hide_banner', '-loglevel', 'error',
+            # 容忍码流瑕疵，不因单帧错误中断
+            '-err_detect', 'ignore_err',
+            # 参考帧缺失时丢弃坏帧，而不是输出花屏
+            '-fflags', '+genpts+discardcorrupt',
+            '-i', ps_path,
+            '-an',                          # 只要视频轨
+            '-c:v', 'libx264',
+            '-preset', 'veryfast',          # 比 medium 快约 2 倍，画质差异可忽略
+            '-crf', '24',
+            '-vf', TRANSCODE_SCALE,
+            '-pix_fmt', 'yuv420p',          # 浏览器兼容
+            '-movflags', '+faststart',
+            '-t', str(MAX_SECONDS),
+            '-y', temporary_mp4,
+        ]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True,
+                               errors='replace', timeout=FFMPEG_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            return False, '转码超时（%d 秒）' % FFMPEG_TIMEOUT
 
-    if not (os.path.exists(mp4_path) and os.path.getsize(mp4_path) > 1024):
-        err = (r.stderr or '').strip()[:400]
-        return False, '转码失败：%s' % (err or '输出为空')
+        valid_output = os.path.exists(temporary_mp4) and os.path.getsize(temporary_mp4) > 1024
+        if r.returncode != 0 or not valid_output:
+            err = (r.stderr or '').strip()[:400]
+            return False, '转码失败：%s' % (err or '输出为空')
+        os.replace(temporary_mp4, mp4_path)
 
     # 封面：优先取第 1 秒，短视频退回第一帧
     if poster_path:
+        if os.path.exists(poster_path):
+            os.remove(poster_path)
         for ss in ('1', '0'):
             try:
                 subprocess.run(

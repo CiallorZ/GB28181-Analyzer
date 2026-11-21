@@ -33,16 +33,44 @@ def test_source_probe_overrides_misidentified_elementary_stream():
         'codec': 'MPEG2VIDEO', 'width': 320, 'height': 240}
 
 
-def test_source_media_falls_back_to_rebuild():
+def test_source_media_does_not_infer_source_from_transcoded_preview():
     ps = SimpleNamespace(video=_video())
     rb = SimpleNamespace(codec='h264', width=1280, height=724)
     assert analyzer._source_media(ps, rb) == {
-        'codec': 'H.264', 'width': 1280, 'height': 724}
+        'codec': None, 'width': None, 'height': None}
+
+
+def test_conflicting_source_codec_does_not_borrow_sps_dimensions():
+    ps = SimpleNamespace(video=_video(codec='H.264', width=16, height=16))
+    rb = SimpleNamespace(codec='h264', width=320, height=240,
+                         source_codec='mpeg2video', source_width=None, source_height=None)
+    assert analyzer._source_media(ps, rb) == {
+        'codec': 'MPEG2VIDEO', 'width': None, 'height': None}
 
 
 def test_source_media_without_any_hint():
     assert analyzer._source_media(None, None) == {
         'codec': None, 'width': None, 'height': None}
+
+
+def test_failed_transcode_does_not_reuse_or_overwrite_old_preview(tmp_path, monkeypatch):
+    output = tmp_path / 'preview.mp4'
+    poster = tmp_path / 'poster.jpg'
+    output.write_bytes(b'old-preview' * 200)
+    poster.write_bytes(b'old-poster')
+    monkeypatch.setattr(capture, 'FFMPEG', 'ffmpeg')
+
+    def fail_with_partial_output(cmd, **_kwargs):
+        from pathlib import Path
+        Path(cmd[-1]).write_bytes(b'partial-output' * 200)
+        return SimpleNamespace(returncode=1, stderr='invalid input')
+
+    monkeypatch.setattr(rebuild.subprocess, 'run', fail_with_partial_output)
+    ok, error = rebuild.transcode('source.ps', str(output), str(poster))
+    assert not ok and 'invalid input' in error
+    assert output.read_bytes() == b'old-preview' * 200
+    assert poster.read_bytes() == b'old-poster'
+    assert sorted(p.name for p in tmp_path.iterdir()) == ['poster.jpg', 'preview.mp4']
 
 
 @pytest.mark.skipif(not (capture.FFMPEG and capture.FFPROBE),
