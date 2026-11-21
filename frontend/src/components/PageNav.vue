@@ -39,7 +39,8 @@ const items = computed(() => {
       </svg>
     </button>
 
-    <nav class="crumbs">
+    <div class="heading">
+    <nav class="crumbs" aria-label="面包屑">
       <template v-for="(c, i) in items" :key="i">
         <router-link v-if="c.to && i < items.length - 1" :to="c.to" class="crumb">
           {{ c.label }}
@@ -53,6 +54,7 @@ const items = computed(() => {
       <h1 class="t">{{ title }}</h1>
       <div v-if="sub" class="s">{{ sub }}</div>
     </div>
+    </div>
 
     <span class="spacer"></span>
     <div class="acts">
@@ -63,8 +65,8 @@ const items = computed(() => {
 
 <style scoped>
 .pnav {
-  display: flex; align-items: center; gap: 12px;
-  padding: 14px 0 18px;
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 0 22px;
   flex-wrap: wrap;
 }
 .back {
@@ -96,9 +98,10 @@ a.crumb:hover { color: var(--text); text-decoration: none; }
 .crumb.cur { color: var(--text); font-weight: 500; }
 .sep { color: var(--text-4); font-size: 10px; }
 
-.pnav-title { margin-left: 6px; }
+.heading { min-width: 0; }
+.pnav-title { margin-top: 5px; }
 .pnav-title .t {
-  font-size: 18px; font-weight: 650;
+  font-size: 22px; font-weight: 700;
   letter-spacing: -.4px; line-height: 1.25;
 }
 .pnav-title .s {
@@ -106,5 +109,6 @@ a.crumb:hover { color: var(--text); text-decoration: none; }
   margin-top: 3px;
 }
 .spacer { flex: 1; }
-.acts { display: flex; align-items: center; gap: 8px; }
+.acts { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 720px) { .acts { flex-basis: 100%; } .pnav { align-items: flex-start; } }
 </style>

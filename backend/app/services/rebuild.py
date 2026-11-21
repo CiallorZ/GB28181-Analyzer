@@ -43,6 +43,9 @@ class RebuildResult:
     height: int | None = None
     fps: float | None = None
     codec: str | None = None
+    source_codec: str | None = None
+    source_width: int | None = None
+    source_height: int | None = None
     error: str | None = None
     aligned: bool = False
     ps_bytes: int = 0
@@ -270,6 +273,11 @@ def rebuild_stream(pkts, out_dir: str, tag: str,
 
     with open(ps_path, 'wb') as f:
         f.write(ps)
+
+    source = probe(ps_path)
+    res.source_codec = source.get('codec')
+    res.source_width = source.get('width')
+    res.source_height = source.get('height')
 
     ok, err = transcode(ps_path, mp4_path, poster_path)
     if not ok:

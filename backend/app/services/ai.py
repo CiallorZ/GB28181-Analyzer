@@ -5,7 +5,7 @@ DeepSeek AI 分析（P2 功能，但接口层已就绪）
 
 安全边界（PRD 明令）：
 - 只发送**解析后的结构化摘要**，绝不发送抓包原始字节
-- SIP 中的敏感字段（IP、设备 ID）在摘要里保留，但不发报文原文
+- 摘要隐藏文件名、设备 ID、协商地址与自由文本；不发送报文原文
 - Key 只存本机文件，不回传给前端明文
 """
 from __future__ import annotations
@@ -16,11 +16,14 @@ import ssl
 import urllib.error
 import urllib.request
 
+from sqlalchemy import func
+
 from ..core.config import settings
 from ..core.security import validate_ai_base_url
 from ..models.entities import (
     AnalysisTask, BusinessSession, DiagnosticEvent, MediaStream, SipMessage,
 )
+from .diagnosis import RULES, severity_order_clause
 
 DEFAULT_BASE = 'https://api.deepseek.com'
 
@@ -104,13 +107,13 @@ def build_context(db, task_id: int) -> str:
     lines = []
     lines.append('## 抓包基本信息')
     if cf:
-        lines.append('- 文件名：%s' % cf.filename)
-        lines.append('- 报文总数：%s' % (cf.packet_count or '未知'))
+        lines.append('- 文件名：已隐藏')
+        lines.append('- 报文总数：%s' % (cf.packet_count if cf.packet_count is not None else '未知'))
         lines.append('- 抓包时长：%s 秒' % (round(cf.duration, 3)
-                                        if cf.duration else '未知'))
+                                        if cf.duration is not None else '未知'))
         lines.append('- 链路类型：%s' % (cf.link_type or '未知'))
         if cf.warnings:
-            lines.append('- 解析警告：%s' % '；'.join(str(w) for w in cf.warnings))
+            lines.append('- 解析警告：%d 条（详情已隐藏）' % len(cf.warnings))
 
     lines.append('')
     lines.append('## 总体统计')
@@ -132,29 +135,40 @@ def build_context(db, task_id: int) -> str:
                 .filter(BusinessSession.task_id == task_id)
                 .order_by(BusinessSession.start_time)
                 .limit(8).all())
+    session_total = db.query(func.count(BusinessSession.id)).filter(
+        BusinessSession.task_id == task_id).scalar() or 0
     if sessions:
         lines.append('')
-        lines.append('## 点播会话（最多列 8 个）')
+        lines.append('## 点播会话（列出 %d / %d 个，按开始时间）' % (len(sessions), session_total))
+        devices = {}
+        addresses = {}
         for x in sessions:
-            dur = ('%.2fs' % x.total_duration) if x.total_duration else '未知'
+            dur = ('%.2fs' % x.total_duration) if x.total_duration is not None else '未知'
             fml = ('%.3fs' % x.first_media_latency
                    if x.first_media_latency is not None else '无法计算')
+            if x.device_id:
+                devices.setdefault(x.device_id, '设备%d' % (len(devices) + 1))
+            if x.negotiated_ip:
+                addresses.setdefault(x.negotiated_ip, '地址%d' % (len(addresses) + 1))
             lines.append(
                 '- 会话#%d 设备=%s 信令=%s 媒体=%s 结束=%s 时长=%s '
                 '端口=%s:%s/%s Subject_SSRC=%s SDP_y_SSRC=%s 首媒体=%s'
-                % (x.id, x.device_id or '未知', _enum_val(x.signal_status),
+                % (x.id, devices.get(x.device_id, '未知'), _enum_val(x.signal_status),
                    _enum_val(x.media_status), _enum_val(x.end_reason), dur,
-                   x.negotiated_ip or '?', x.negotiated_port or '?',
+                   addresses.get(x.negotiated_ip, '未知'), x.negotiated_port or '?',
                    x.negotiated_transport or '?',
                    x.subject_ssrc or '空', x.sdp_ssrc or '空', fml))
 
     # 媒体流明细
     streams = (db.query(MediaStream)
                .filter(MediaStream.task_id == task_id)
+               .order_by(MediaStream.id)
                .limit(8).all())
+    stream_total = db.query(func.count(MediaStream.id)).filter(
+        MediaStream.task_id == task_id).scalar() or 0
     if streams:
         lines.append('')
-        lines.append('## 媒体流（最多列 8 条）')
+        lines.append('## 媒体流（列出 %d / %d 条）' % (len(streams), stream_total))
         for r in streams:
             lines.append(
                 '- SSRC=0x%08x %s %s→%s 包数=%d 码率=%s kbps 抖动=%s ms '
@@ -170,40 +184,46 @@ def build_context(db, task_id: int) -> str:
     # 诊断
     events = (db.query(DiagnosticEvent)
               .filter(DiagnosticEvent.task_id == task_id)
+              .order_by(severity_order_clause(DiagnosticEvent.severity), DiagnosticEvent.timestamp,
+                        DiagnosticEvent.id)
               .limit(30).all())
+    event_total = db.query(func.count(DiagnosticEvent.id)).filter(
+        DiagnosticEvent.task_id == task_id).scalar() or 0
     if events:
         lines.append('')
-        lines.append('## 诊断结论')
+        lines.append('## 诊断结论（列出 %d / %d 条，按严重程度）' % (len(events), event_total))
         for e in events:
-            lines.append('- [%s][%s] %s %s：%s' % (
-                e.severity, e.evidence_level, e.rule_id,
-                e.title, (e.description or '')[:200]))
+            lines.append('- [%s][%s] %s %s（详细描述已隐藏）' % (
+                _enum_val(e.severity), _enum_val(e.evidence_level), e.rule_id,
+                RULES.get(e.rule_id, '未知规则')))
 
     # SIP 概况
-    msgs = (db.query(SipMessage)
-            .filter(SipMessage.task_id == task_id).all())
-    if msgs:
-        methods = {}
-        codes = {}
-        for m in msgs:
-            if m.is_request and m.method:
-                methods[m.method] = methods.get(m.method, 0) + 1
-            elif m.status_code:
-                codes[str(m.status_code)] = codes.get(str(m.status_code), 0) + 1
+    sip_total = db.query(func.count(SipMessage.id)).filter(SipMessage.task_id == task_id).scalar() or 0
+    if sip_total:
+        methods = (db.query(SipMessage.method, func.count(SipMessage.id))
+                   .filter(SipMessage.task_id == task_id, SipMessage.is_request.is_(True),
+                           SipMessage.method.is_not(None))
+                   .group_by(SipMessage.method).all())
+        codes = (db.query(SipMessage.status_code, func.count(SipMessage.id))
+                 .filter(SipMessage.task_id == task_id, SipMessage.is_request.is_not(True),
+                         SipMessage.status_code.is_not(None))
+                 .group_by(SipMessage.status_code).all())
         lines.append('')
         lines.append('## SIP 概况')
-        lines.append('- 消息总数：%d' % len(msgs))
+        lines.append('- 消息总数：%d' % sip_total)
         lines.append('- 方法分布：%s' % ', '.join(
-            '%s×%d' % (k, v) for k, v in sorted(methods.items())))
+            '%s×%d' % (k, v) for k, v in sorted(methods)))
         lines.append('- 响应码分布：%s' % ', '.join(
-            '%s×%d' % (k, v) for k, v in sorted(codes.items())))
+            '%s×%d' % (k, v) for k, v in sorted(codes)))
 
     lines.append('')
     lines.append('## 分析局限（必须遵守）')
     lines.append('- 以上数据仅来自单一抓包点，不代表端到端网络状况')
     lines.append('- SIP 成功不等于媒体成功，更不等于客户端看到画面')
-    lines.append('- 本系统 P0 未实现视频解码，不能判断画面是否可播')
+    lines.append('- 视频重建结果不等于客户端实际播放成功；缺少播放证据时不能判断客户端是否看到画面')
     lines.append('- 无法计算的指标已明确标注，不要臆造数值')
+    lines.append('- 摘要可能只列出部分会话、媒体流和诊断；不能将未列出的内容视为不存在')
+    lines.append('- 文件名、设备标识、协商地址和自由文本已隐藏；设备与地址别名仅在本摘要内有效')
 
     return '\n'.join(lines)
 
@@ -215,7 +235,7 @@ SYSTEM_PROMPT = '''你是一名资深的 GB/T 28181 视频监控联网与国标�
 1. 只使用摘要中给出的数据。摘要里没有的信息，明确说"数据不足以判断"
 2. 区分三个层面：信令是否建立、媒体是否传输、画面是否可播放。
    不要把 SIP 200 OK 当成播放成功
-3. 引用具体数值时精确引用（设备 ID、SSRC、端口、耗时、包数）
+3. 引用具体数值时精确引用；设备与地址使用摘要中的别名，不能猜测原始值
 4. 结论要能追溯到摘要中的证据；给出判断依据
 5. 用 Markdown 组织，结构清晰但不要过度分层
 6. 篇幅控制在 700 字以内，信息密度优先
@@ -299,6 +319,7 @@ def _post(body: dict, on_delta=None) -> str:
             resp.close()
 
     parts = []
+    completed = False
     try:
         for raw in resp:
             line = raw.decode('utf-8', 'replace').strip()
@@ -306,6 +327,7 @@ def _post(body: dict, on_delta=None) -> str:
                 continue
             chunk = line[5:].strip()
             if chunk == '[DONE]':
+                completed = True
                 break
             try:
                 j = json.loads(chunk)
@@ -322,15 +344,17 @@ def _post(body: dict, on_delta=None) -> str:
     finally:
         resp.close()
 
+    if not completed:
+        raise RuntimeError('模型连接中断，响应不完整，请重试')
     text = ''.join(parts)
     if not text.strip():
         raise RuntimeError('模型没有返回内容')
     return text
 
 
-def analyze(db, task_id: int, on_delta=None) -> str:
+def analyze(db, task_id: int, on_delta=None, context=None) -> str:
     cfg = load_config()
-    ctx = build_context(db, task_id)
+    ctx = context if context is not None else build_context(db, task_id)
     if not ctx.strip():
         raise RuntimeError('没有可供分析的数据')
 
@@ -351,12 +375,12 @@ def analyze(db, task_id: int, on_delta=None) -> str:
     return _post(body, on_delta)
 
 
-def chat(db, task_id: int, history: list, question: str, on_delta=None) -> str:
+def chat(db, task_id: int, history: list, question: str, on_delta=None, context=None) -> str:
     if not (question or '').strip():
         raise RuntimeError('问题不能为空')
 
     cfg = load_config()
-    ctx = build_context(db, task_id)
+    ctx = context if context is not None else build_context(db, task_id)
 
     msgs = [
         {'role': 'system', 'content': SYSTEM_PROMPT + CHAT_SUFFIX},
@@ -384,7 +408,7 @@ def chat(db, task_id: int, history: list, question: str, on_delta=None) -> str:
 
 def test_connection() -> str:
     cfg = load_config()
-    if not cfg.get('api_key'):
+    if not _api_key(cfg):
         raise RuntimeError('尚未填写 API Key')
     body = {
         'model': cfg.get('model') or DEFAULT_MODEL,

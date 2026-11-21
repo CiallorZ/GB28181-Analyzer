@@ -9,7 +9,7 @@
    ============================================================ */
 
 :root {
-  --app-header-height: 59px;
+  --app-header-height: 68px;
   /* ---- 品牌：中国铁塔 ---- */
   --brand: #D9121F;
   --brand-dk: #A80D17;
@@ -61,7 +61,7 @@
 }
 
 @media (max-width: 650px) {
-  :root { --app-header-height: 89px; }
+  :root { --app-header-height: 96px; }
 }
 
 /* ============================================================
@@ -70,21 +70,23 @@
 :root, :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: #0A0E13;
-  --bg-2: #0D1219;
-  --surface: #10161D;
-  --surface-2: #141C25;
-  --surface-3: #1A2430;
-  --surface-4: #22303D;
+  --bg: #171416;
+  --bg-2: #1B1719;
+  --surface: #211D1F;
+  --surface-2: #292325;
+  --surface-3: #362C2F;
+  --surface-4: #47373A;
+  --flow: #FF7277;
+  --flow-soft: rgba(217, 18, 31, .15);
 
-  --line: #1E2A36;
-  --line-2: #2A3846;
-  --line-strong: #3A4A5A;
+  --line: #3A3032;
+  --line-2: #4B3D40;
+  --line-strong: #6B5559;
 
   --text: #E6EDF3;
-  --text-2: #A7B4C2;
-  --text-3: #7D8B99;
-  --text-4: #5C6A78;
+  --text-2: #C3BABC;
+  --text-3: #B8ABAD;
+  --text-4: #A9989B;
 
   /* 操作色：与告警红分离 */
   --ink-btn: #E6EDF3;
@@ -106,21 +108,23 @@
 :root[data-theme="light"] {
   color-scheme: light;
 
-  --bg: #F5F3EF;
+  --bg: #F4F3F2;
   --bg-2: #FFFFFF;
   --surface: #FFFFFF;
-  --surface-2: #FAF9F6;
-  --surface-3: #F0EDE7;
-  --surface-4: #E7E3DC;
+  --surface-2: #F9F7F7;
+  --surface-3: #F1E9EA;
+  --surface-4: #E7DADC;
+  --flow: #B20C19;
+  --flow-soft: rgba(192, 11, 22, .08);
 
-  --line: #E8E3DB;
-  --line-2: #DCD6CC;
-  --line-strong: #BEB6A9;
+  --line: #EAE3E3;
+  --line-2: #DDD4D5;
+  --line-strong: #BCA9AB;
 
   --text: #0F1720;
   --text-2: #47535F;
   --text-3: #66717D;
-  --text-4: #646E78;
+  --text-4: #5C6B79;
 
   --brand: #C00B16;
   --brand-dk: #97080F;
@@ -244,7 +248,7 @@ code, .mono {
    ============================================================ */
 .sec {
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-2);
   border-radius: var(--radius-lg);
   overflow: hidden;
 }
@@ -281,19 +285,20 @@ code, .mono {
    却从未定义，导致内容直接铺在背景上。与 .sec 同一套语言。 */
 .card {
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-2);
   border-radius: var(--radius-lg);
   overflow: hidden;
   min-width: 0;
 }
 .card-head {
   display: flex; align-items: center; gap: 10px;
-  min-height: 46px;
-  padding: 11px 16px;
+  min-height: 52px;
+  padding: 13px 18px;
   border-bottom: 1px solid var(--line);
-  font-size: 13px; font-weight: 550;
+  font-size: 14px; font-weight: 650;
   color: var(--text);
 }
+.card-head::before { content: ''; width: 3px; height: 14px; flex: none; border-radius: 2px; background: var(--brand); }
 .card-body { padding: 16px; }
 .card-body.tight { padding: 0; }
 
@@ -446,15 +451,15 @@ code, .mono {
 
 /* ---- 类型 ---- */
 .btn.primary {
-  background: var(--ink-btn);
-  border-color: var(--ink-btn);
-  color: var(--ink-btn-text);
+  background: var(--brand-dk);
+  border-color: var(--brand-dk);
+  color: #fff;
   font-weight: 600;
 }
 .btn.primary:hover:not(:disabled) {
-  background: var(--ink-btn-hover);
-  border-color: var(--ink-btn-hover);
-  color: var(--ink-btn-text);
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
 }
 
 .btn.ds {
@@ -603,8 +608,8 @@ code, .mono {
 .inp::placeholder { color: var(--text-4); }
 .inp:focus {
   outline: none;
-  border-color: var(--brand-line);
-  box-shadow: 0 0 0 3px var(--brand-soft);
+  border-color: var(--flow);
+  box-shadow: 0 0 0 3px var(--flow-soft);
 }
 .inp.sm { height: 28px; font-size: 12px; padding: 0 9px; }
 select.inp { cursor: pointer; }

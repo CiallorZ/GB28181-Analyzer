@@ -7,17 +7,18 @@
  * （HTML 命名空间），浏览器会丢弃这些节点，导致图形不显示。
  * 用 v-html 注入由字符串拼出的 SVG 才能保证命名空间正确。
  */
-import { ref, computed } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 
 const props = defineProps({
   messages: { type: Array, default: () => [] }
 })
 const emit = defineEmits(['select'])
 
-const hovered = ref(null)
+const svgContainer = ref(null)
 const selected = ref(null)
 const zoom = ref(1)
 const ROW_H = 30
+watch(() => props.messages, () => { selected.value = null })
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
@@ -33,6 +34,7 @@ const parties = computed(() => {
     if (m.source_ip && !seen.includes(m.source_ip)) seen.push(m.source_ip)
     if (m.destination_ip && !seen.includes(m.destination_ip)) seen.push(m.destination_ip)
   })
+  if (list.some(m => !m.source_ip || !m.destination_ip)) seen.push('')
   return seen.map((ip) => {
     const sentInvite = list.some(m =>
       m.method === 'INVITE' && m.is_request && m.source_ip === ip)
@@ -41,12 +43,12 @@ const parties = computed(() => {
     let label = '端点', color = 'var(--text-4)'
     if (sentInvite) { label = '点播方'; color = 'var(--info)' }
     else if (recvInvite) { label = '被点播方'; color = 'var(--text-2)' }
-    return { ip, label, color }
+    return { ip, label: ip ? label : '未知端点', color }
   })
 })
 
 function laneX(ip, list) {
-  const i = list.findIndex(p => p.ip === ip)
+  const i = list.findIndex(p => p.ip === (ip || ''))
   if (i < 0) return 500
   if (list.length === 1) return 500
   const pad = 110
@@ -104,9 +106,9 @@ const svgHtml = computed(() => {
       fill="var(--surface-2)" stroke="var(--line-2)" stroke-width="1"/>`)
     out.push(`<circle cx="${x - 46}" cy="27" r="4" fill="${p.color}"/>`)
     out.push(`<text x="${x + 4}" y="24" text-anchor="middle"
-      fill="#eaf0f7" font-size="10.5" font-weight="600">${esc(p.label)}</text>`)
+      fill="var(--text)" font-size="13" font-weight="600">${esc(p.label)}</text>`)
     out.push(`<text x="${x + 4}" y="37" text-anchor="middle"
-      fill="#4a5567" font-size="9" font-family="monospace">${esc(p.ip)}</text>`)
+      fill="var(--text-3)" font-size="11.5" font-family="monospace">${esc(p.ip || '地址缺失')}</text>`)
   })
 
   // 消息行
@@ -116,7 +118,7 @@ const svgHtml = computed(() => {
     const x1 = laneX(m.source_ip, list)
     const x2 = laneX(m.destination_ip, list)
     const key = !!(m.method && KEY_METHODS.has(m.method))
-    const hl = hovered.value === i || selected.value === i
+    const hl = selected.value === i
 
     // 行底
     if (hl) {
@@ -125,7 +127,9 @@ const svgHtml = computed(() => {
     }
 
     // 连线
-    out.push(`<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}"
+    if (x1 === x2) {
+      out.push(`<path d="M${x1} ${y} h28 v10 h-28" fill="none" stroke="${st.color}" stroke-width="1.4" marker-end="url(#${st.marker})"/>`)
+    } else out.push(`<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}"
       stroke="${st.color}" stroke-width="${key ? 2 : 1.4}"
       opacity="${hl ? 1 : .84}" marker-end="url(#${st.marker})"/>`)
 
@@ -136,13 +140,13 @@ const svgHtml = computed(() => {
     out.push(`<rect x="${lx}" y="${y - 9}" width="60" height="17" rx="4"
       fill="${st.color}" opacity="${key ? .16 : .09}"/>`)
     out.push(`<text x="${tx}" y="${y + 3}" text-anchor="middle"
-      fill="${st.color}" font-size="9.5" font-family="monospace"
+      fill="${st.color}" font-size="12" font-family="monospace"
       font-weight="600">${esc(st.label)}</text>`)
 
     // 时间
     if (m.timestamp != null) {
       out.push(`<text x="994" y="${y + 3}" text-anchor="end"
-        fill="#4a5567" font-size="9" font-family="monospace">${
+        fill="var(--text-3)" font-size="11.5" font-family="monospace">${
           Number(m.timestamp).toFixed(3)}s</text>`)
     }
 
@@ -158,10 +162,10 @@ const svgHtml = computed(() => {
     // 透明热区（承接鼠标事件）
     out.push(`<rect class="hit" data-idx="${i}" x="0" y="${y - 12}"
       width="1000" height="${ROW_H - 4}" fill="transparent"
-      style="cursor:pointer"/>`)
+      role="button" tabindex="0" aria-label="${esc(st.label)}，报文 ${esc(m.packet_id || '未知')}，${esc(m.source_ip || '未知端点')} 到 ${esc(m.destination_ip || '未知端点')}" style="cursor:pointer"/>`)
   })
 
-  return `<svg class="ladder-svg" viewBox="0 0 1000 ${H}"
+  return `<svg class="ladder-svg" viewBox="0 0 1000 ${H}" role="group" aria-label="SIP 信令交互，共 ${msgs.length} 条消息"
     style="height:${H * zoom.value}px;width:100%;display:block"
     xmlns="http://www.w3.org/2000/svg">${out.join('')}</svg>`
 })
@@ -179,12 +183,12 @@ function onSvgClick(e) {
   }
 }
 
-function onSvgMove(e) {
-  const t = e.target
-  if (t && t.classList?.contains('hit')) {
-    hovered.value = Number(t.dataset.idx)
-  } else {
-    hovered.value = null
+function onSvgKey(e) {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target?.classList?.contains('hit')) {
+    e.preventDefault()
+    const index = e.target.dataset.idx
+    onSvgClick(e)
+    nextTick(() => svgContainer.value?.querySelector(`.hit[data-idx="${index}"]`)?.focus())
   }
 }
 
@@ -201,16 +205,15 @@ function onWheel(e) {
     <div class="ladder-tools">
       <span class="lt-hint">Ctrl + 滚轮缩放</span>
       <span class="spacer"></span>
-      <button class="btn icon xs" @click="zoom = Math.max(0.6, +(zoom - 0.1).toFixed(1))">−</button>
+      <button class="btn icon xs" aria-label="缩小时序图" @click="zoom = Math.max(0.6, +(zoom - 0.1).toFixed(1))">−</button>
       <span class="lt-zoom mono">{{ Math.round(zoom * 100) }}%</span>
-      <button class="btn icon xs" @click="zoom = Math.min(2, +(zoom + 0.1).toFixed(1))">+</button>
+      <button class="btn icon xs" aria-label="放大时序图" @click="zoom = Math.min(2, +(zoom + 0.1).toFixed(1))">+</button>
       <button class="btn icon xs" @click="zoom = 1">重置</button>
     </div>
 
     <div class="ladder-scroll">
       <!-- eslint-disable-next-line vue/no-v-html -->
-      <div v-html="svgHtml" @click="onSvgClick" @mousemove="onSvgMove"
-           @mouseleave="hovered = null"></div>
+      <div ref="svgContainer" v-html="svgHtml" @click="onSvgClick" @keydown="onSvgKey"></div>
     </div>
 
     <div v-if="!messages.length" class="empty">
@@ -246,4 +249,7 @@ function onWheel(e) {
     linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
   background-size: 40px 40px;
 }
+.ladder-scroll > div { min-width: 700px; }
+.ladder-scroll :deep(.hit:focus-visible) { outline: 2px solid var(--brand); outline-offset: -2px; }
+.ladder-scroll :deep(.hit:hover) { fill: var(--surface-3); fill-opacity: .28; }
 </style>

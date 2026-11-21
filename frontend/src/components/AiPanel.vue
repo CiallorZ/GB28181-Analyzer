@@ -8,8 +8,9 @@
  *   2. 深度思考动画 → 流式报告
  *   3. 报告后可直接追问
  */
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, reactive, computed, watch, nextTick, onUnmounted } from 'vue'
 import { api } from '../api/client'
+import AiContextPreview from './AiContextPreview.vue'
 import { useTaskStore } from '../stores/task'
 import { renderMd } from '../utils/markdown'
 
@@ -19,7 +20,14 @@ const emit = defineEmits(['update:open'])
 const store = useTaskStore()
 
 const tab = ref('report')
+const drawerRef = ref(null)
+let previousFocus = null
 const report = ref('')
+const previewOpen = ref(false)
+const reportContextHash = ref('')
+let reportController = null
+let chatController = null
+onUnmounted(() => { reportController?.abort(); chatController?.abort() })
 const running = ref(false)
 const thinkOpen = ref(true)
 const thinkDone = ref(false)
@@ -32,6 +40,13 @@ const chat = ref([])
 const question = ref('')
 const chatBusy = ref(false)
 const chatBox = ref(null)
+const questionInput = ref(null)
+const suggestedQuestions = ['信令在哪一步出现异常？', '优先检查哪些配置？', '如何验证媒体流是否正常？']
+
+function useSuggestion(text) {
+  question.value = text
+  nextTick(() => questionInput.value?.focus())
+}
 
 const cfg = ref({ has_key: false, key_hint: '', model: '', base_url: '' })
 const keyInput = ref('')
@@ -41,7 +56,7 @@ const cfgMsg = ref('')
 const cfgBusy = ref(false)
 const testing = ref(false)
 
-const PLAN = ['读取分析结果', '梳理信令与媒体关联', '定位故障卡点', '生成排查报告']
+const PLAN = ['等待模型响应', '接收分析结果']
 
 const canAnalyze = computed(() =>
   store.task && store.task.status === 'completed')
@@ -64,6 +79,17 @@ const facts = computed(() => {
 })
 
 const close = () => emit('update:open', false)
+
+function onDrawerKeydown(event) {
+  if (event.key === 'Escape') { event.preventDefault(); close(); return }
+  if (event.key !== 'Tab') return
+  const controls = [...(drawerRef.value?.querySelectorAll('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), a[href], [tabindex="0"]') || [])]
+    .filter(element => element.getClientRects().length)
+  if (!controls.length) { event.preventDefault(); drawerRef.value?.focus(); return }
+  const first = controls[0], last = controls[controls.length - 1]
+  if (event.shiftKey && (document.activeElement === first || document.activeElement === drawerRef.value)) { event.preventDefault(); last.focus() }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+}
 
 async function loadCfg() {
   try {
@@ -110,77 +136,62 @@ async function testConn() {
 function startThinking() {
   thinkOpen.value = true
   thinkDone.value = false
-  thinkTitle.value = '正在深度思考'
+  thinkTitle.value = '等待模型响应'
   steps.value = PLAN.map(t => ({ text: t, state: 'wait', time: '' }))
+  steps.value[0].state = 'active'
   elapsed.value = 0
   const t0 = Date.now()
-  let cur = 0
-  steps.value[0].state = 'active'
-
-  const timer = setInterval(() => {
-    elapsed.value = ((Date.now() - t0) / 1000).toFixed(1)
-    if (cur >= 2) return
-    steps.value[cur].state = 'done'
-    steps.value[cur].time = elapsed.value + 's'
-    cur++
-    steps.value[cur].state = 'active'
-  }, 850)
-
+  const timer = setInterval(() => { elapsed.value = ((Date.now() - t0) / 1000).toFixed(1) }, 200)
   return {
     toReport() {
-      clearInterval(timer)
-      for (let i = 0; i < 3; i++) {
-        if (steps.value[i].state !== 'done') {
-          steps.value[i].state = 'done'
-          steps.value[i].time = elapsed.value + 's'
-        }
-      }
-      steps.value[3].state = 'active'
+      steps.value[0].state = 'done'
+      steps.value[1].state = 'active'
+      thinkTitle.value = '正在接收结果'
     },
     finish() {
       clearInterval(timer)
-      steps.value.forEach(s => {
-        s.state = 'done'
-        if (!s.time) s.time = elapsed.value + 's'
-      })
+      steps.value.forEach(s => { s.state = 'done' })
       thinkDone.value = true
-      thinkTitle.value = '深度思考完成'
-      setTimeout(() => { thinkOpen.value = false }, 2400)
+      thinkTitle.value = '分析完成'
     },
     fail() {
       clearInterval(timer)
       thinkDone.value = true
-      thinkTitle.value = '思考中断'
+      thinkTitle.value = '分析中断'
     }
   }
 }
 
 /* ---- 报告 ---- */
-async function runAnalyze() {
+async function runAnalyze(contextHash) {
+  previewOpen.value = false
   if (running.value || !canAnalyze.value) return
   if (!cfg.value.has_key) { tab.value = 'config'; return }
 
   running.value = true
   err.value = ''
   report.value = ''
+  reportContextHash.value = ''
   chat.value = []
   const think = startThinking()
+  reportController = new AbortController()
 
   try {
     const res = await fetch(`/api/v1/ai/analyze/${store.currentTaskId}`, {
       method: 'POST',
+      signal: reportController.signal,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ force: true })
+      body: JSON.stringify({ context_hash: contextHash })
     })
     if (!res.ok || !res.body) {
       let m = 'HTTP ' + res.status
-      try { const j = await res.json(); if (j.error) m = j.error } catch { /* 非 JSON 响应 */ }
+      try { const j = await res.json(); if (j.error || j.detail) m = j.error || j.detail } catch { /* 非 JSON 响应 */ }
       throw new Error(m)
     }
 
     const reader = res.body.getReader()
     const dec = new TextDecoder()
-    let buf = '', acc = '', first = true
+    let buf = '', acc = '', first = true, completed = false
 
     while (true) {
       const { done, value } = await reader.read()
@@ -204,53 +215,61 @@ async function runAnalyze() {
           acc += j.t || ''
           report.value = acc
         } else if (ev === 'done') {
+          completed = true
           report.value = j.text || acc
         } else if (ev === 'error') {
           throw new Error(j.error || '分析失败')
         }
       }
     }
-    if (!report.value.trim()) report.value = '模型没有返回内容'
+    if (!completed) throw new Error('连接中断，分析结果可能不完整，请重试')
+    if (!report.value.trim()) throw new Error('模型没有返回内容')
+    reportContextHash.value = contextHash
     think.finish()
   } catch (e) {
+    report.value = ''
     err.value = e.message
     think.fail()
   } finally {
     running.value = false
+    reportController = null
   }
 }
 
 /* ---- 追问 ---- */
 async function sendQuestion() {
   const q = question.value.trim()
-  if (!q || chatBusy.value || !store.currentTaskId) return
+  if (!q || chatBusy.value || running.value || !reportContextHash.value || !store.currentTaskId) return
 
   question.value = ''
-  chat.value.push({ role: 'user', content: q })
-  const history = chat.value.slice(0, -1).map(m => ({
+  const userMessage = reactive({ role: 'user', content: q })
+  chat.value.push(userMessage)
+  const history = chat.value.slice(0, -1).filter(m => !m.failed).map(m => ({
     role: m.role, content: m.content
   }))
-  const slot = { role: 'assistant', content: '', streaming: true }
+  const slot = reactive({ role: 'assistant', content: '', streaming: true })
   chat.value.push(slot)
   chatBusy.value = true
+  chatController = new AbortController()
   await nextTick()
   scrollChat()
 
   try {
     const res = await fetch(`/api/v1/ai/chat/${store.currentTaskId}`, {
       method: 'POST',
+      signal: chatController.signal,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question: q, history })
+      body: JSON.stringify({ question: q, history, context_hash: reportContextHash.value })
     })
     if (!res.ok || !res.body) {
       let m = 'HTTP ' + res.status
-      try { const j = await res.json(); if (j.error) m = j.error } catch { /* 非 JSON 响应 */ }
+      try { const j = await res.json(); if (j.error || j.detail) m = j.error || j.detail } catch { /* 非 JSON 响应 */ }
       throw new Error(m)
     }
 
     const reader = res.body.getReader()
     const dec = new TextDecoder()
-    let buf = '', acc = ''
+    let buf = '', acc = '', completed = false
 
     while (true) {
       const { done, value } = await reader.read()
@@ -273,18 +292,23 @@ async function sendQuestion() {
           slot.content = acc
           scrollChat()
         } else if (ev === 'done') {
+          completed = true
           slot.content = j.text || acc
         } else if (ev === 'error') {
           throw new Error(j.error || '对话失败')
         }
       }
     }
-    if (!slot.content.trim()) slot.content = '（无返回内容）'
+    if (!completed) throw new Error('连接中断，回答不完整，请重试')
+    if (!slot.content.trim()) throw new Error('模型没有返回内容')
   } catch (e) {
+    userMessage.failed = true
+    slot.failed = true
     slot.content = '对话失败：' + e.message
   } finally {
     slot.streaming = false
     chatBusy.value = false
+    chatController = null
     scrollChat()
   }
 }
@@ -301,7 +325,10 @@ function copyReport() {
 }
 
 watch(() => props.open, async (v) => {
-  if (!v) return
+  if (!v) { previousFocus?.focus?.(); previousFocus = null; return }
+  previousFocus = document.activeElement
+  await nextTick()
+  drawerRef.value?.focus()
   const before = cfg.value.has_key
   await loadCfg()
   if (!cfg.value.has_key) tab.value = 'config'
@@ -313,7 +340,7 @@ watch(() => props.open, async (v) => {
   <Teleport to="body">
     <Transition name="slide">
       <div v-if="open" class="mask" @click.self="close">
-        <aside class="drawer">
+        <aside ref="drawerRef" class="drawer" role="dialog" aria-modal="true" aria-label="DeepSeek 智能分析" tabindex="-1" @keydown="onDrawerKeydown">
           <!-- 双品牌头部 -->
           <div class="head">
             <div class="head-in">
@@ -396,6 +423,7 @@ watch(() => props.open, async (v) => {
             </div>
 
             <template v-else>
+              <AiContextPreview v-if="previewOpen" :task-id="store.currentTaskId" @cancel="previewOpen = false" @confirm="runAnalyze" />
               <!-- 分析事实（AI 的依据） -->
               <div class="facts">
                 <div class="facts-title">本次分析事实</div>
@@ -417,10 +445,10 @@ watch(() => props.open, async (v) => {
                   AI 将基于上述事实，分析信令与媒体的关联关系，
                   指出最可能的问题位置并给出可验证的排查步骤
                 </div>
-                <button class="btn primary lg" @click="runAnalyze"
+                <button class="btn primary lg" @click="previewOpen = true"
                         :disabled="running || !cfg.has_key">
-                  <img src="/brand/deepseek.svg" alt="" class="btn-ico" />
-                  深度思考
+                  <img src="/brand/deepseek-white.svg" alt="" class="btn-ico" />
+                  查看发送内容
                 </button>
                 <div v-if="!cfg.has_key" class="hint mt-10">需要先配置 API Key</div>
               </div>
@@ -448,7 +476,7 @@ watch(() => props.open, async (v) => {
               <div v-if="report" class="report">
                 <div class="r-tools">
                   <button class="btn-mini" @click="copyReport">复制</button>
-                  <button class="btn-mini" @click="runAnalyze" :disabled="running">
+                  <button class="btn-mini" @click="previewOpen = true" :disabled="running">
                     重新分析
                   </button>
                 </div>
@@ -471,18 +499,26 @@ watch(() => props.open, async (v) => {
                     </div>
                   </div>
                 </div>
+                <div class="chat-prompts" v-if="!chat.length && reportContextHash && !running">
+                  <span>继续探索</span>
+                  <div class="prompt-list">
+                    <button v-for="prompt in suggestedQuestions" :key="prompt" @click="useSuggestion(prompt)">{{ prompt }} <span aria-hidden="true">↗</span></button>
+                  </div>
+                </div>
                 <div class="chat-in">
-                  <textarea v-model="question" rows="1"
+                  <textarea ref="questionInput" v-model="question" rows="1" aria-label="输入追问"
+                            :disabled="running || !reportContextHash"
                             placeholder="继续追问，例如：这个 SSRC 要去哪里改？"
                             @keydown.enter.exact.prevent="sendQuestion"></textarea>
-                  <button class="send" @click="sendQuestion"
-                          :disabled="chatBusy || !question.trim()">
+                  <button class="send" @click="sendQuestion" aria-label="发送追问"
+                          :disabled="chatBusy || running || !reportContextHash || !question.trim()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
                       <line x1="22" y1="2" x2="11" y2="13"/>
                       <polygon points="22 2 15 22 11 13 2 9 22 2"/>
                     </svg>
                   </button>
                 </div>
+                <div class="chat-hint">Enter 发送 · Shift + Enter 换行 · 请勿输入敏感信息</div>
               </div>
             </template>
           </div>
@@ -531,18 +567,19 @@ watch(() => props.open, async (v) => {
 }
 .logos { display: flex; align-items: center; }
 .lg-ds { height: 20px; width: auto; }
-.head-txt { line-height: 1.35; }
+.head-txt { line-height: 1.35; min-width: 0; }
 .head-name {
   font-size: 14px; font-weight: 600;
   color: var(--text); letter-spacing: -.1px;
 }
 .head-sub {
   font-size: 10.5px; color: var(--text-4);
-  display: flex; align-items: center; gap: 5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .dot-brand {
+  display: inline-block;
   width: 5px; height: 5px; border-radius: 50%;
-  background: var(--ds); opacity: .9;
+  background: var(--ds); opacity: .9; vertical-align: middle; margin-right: 4px;
 }
 .hbtn {
   width: 28px; height: 28px;
@@ -604,7 +641,7 @@ watch(() => props.open, async (v) => {
 }
 .fact { text-align: center; }
 .fact i {
-  display: block; font-size: 9.5px;
+  display: block; font-size: 11px;
   color: var(--text-4); font-style: normal;
   margin-bottom: 2px;
 }
@@ -618,6 +655,8 @@ watch(() => props.open, async (v) => {
 
 /* 起始 */
 .start { padding: 40px 26px 26px; text-align: center; }
+.drawer .btn.primary { background: var(--ds-dk); border-color: var(--ds-dk); color: #fff; }
+.drawer .btn.primary:hover:not(:disabled) { background: var(--ds); border-color: var(--ds); }
 .start-icon {
   width: 56px; height: 56px; margin: 0 auto 16px;
   border-radius: 15px;
@@ -736,7 +775,7 @@ watch(() => props.open, async (v) => {
   background: var(--surface-3);
   padding: 1.5px 6px; border-radius: 4px;
   font-family: var(--font-mono); font-size: 11px;
-  color: #e2c08d;
+  color: var(--warning);
 }
 .md :deep(table) {
   width: 100%; border-collapse: collapse;
@@ -765,6 +804,13 @@ watch(() => props.open, async (v) => {
   display: flex; flex-direction: column; gap: 12px;
 }
 .chat-log:empty { display: none; }
+.chat-prompts { padding: 14px 16px 0; }
+.chat-prompts > span { color: var(--text-3); font-size: 11px; font-weight: 600; letter-spacing: .04em; }
+.prompt-list { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
+.prompt-list button { padding: 7px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface-2); color: var(--text-2); font: inherit; font-size: 11px; cursor: pointer; transition: border-color .18s, color .18s, transform .18s; }
+.prompt-list button:hover { border-color: var(--ds); color: var(--ds); transform: translateY(-1px); }
+.prompt-list button span { color: var(--ds); margin-left: 3px; }
+.chat-hint { padding: 0 16px 13px; color: var(--text-3); font-size: 10px; }
 .cmsg { display: flex; gap: 9px; }
 .cmsg.user { flex-direction: row-reverse; }
 .cav {
@@ -789,7 +835,7 @@ watch(() => props.open, async (v) => {
 }
 .cmsg.assistant .cbub {
   background: var(--ds-soft);
-  border: 1px solid rgba(77,107,254,.16);
+  border: 1px solid var(--ds-line);
   color: var(--text-2);
 }
 .cmsg.user .cbub {
@@ -808,13 +854,13 @@ watch(() => props.open, async (v) => {
   background: var(--surface-3);
   padding: 1px 4px; border-radius: 3px;
   font-family: var(--font-mono);
-  font-size: 10.5px; color: #e2c08d;
+  font-size: 10.5px; color: var(--warning);
 }
 .cbub :deep(ul) { margin: 5px 0 5px 16px; }
 
 .chat-in {
   display: flex; gap: 9px; align-items: flex-end;
-  padding: 12px 16px 16px;
+  padding: 12px 16px 7px;
 }
 .chat-in textarea {
   flex: 1;

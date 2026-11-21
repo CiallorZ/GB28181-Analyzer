@@ -83,21 +83,26 @@ async def upload_file(file: UploadFile = File(...),
         dest.unlink(missing_ok=True)
         raise HTTPException(400, '上传的文件为空')
 
-    task = AnalysisTask(
-        name=name,
-        status=TaskStatus.PENDING,
-        configuration={},
-    )
-    db.add(task)
-    db.flush()
+    try:
+        task = AnalysisTask(
+            name=name,
+            status=TaskStatus.PENDING,
+            configuration={},
+        )
+        db.add(task)
+        db.flush()
 
-    cf = CaptureFile(
-        task_id=task.id, filename=name,
-        stored_path=str(dest), file_size=size,
-        file_format=ext.lstrip('.'), checksum=sha.hexdigest(),
-    )
-    db.add(cf)
-    db.commit()
+        cf = CaptureFile(
+            task_id=task.id, filename=name,
+            stored_path=str(dest), file_size=size,
+            file_format=ext.lstrip('.'), checksum=sha.hexdigest(),
+        )
+        db.add(cf)
+        db.commit()
+    except Exception:
+        db.rollback()
+        dest.unlink(missing_ok=True)
+        raise
     db.refresh(task)
 
     return S.UploadResult(task_id=task.id, file_id=cf.id,

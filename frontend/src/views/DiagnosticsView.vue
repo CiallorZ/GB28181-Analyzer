@@ -40,6 +40,7 @@ const ruleName = computed(() => {
 })
 
 const sevOrder = { critical: 0, warning: 1, info: 2, unknown: 3 }
+const severityLabel = { critical: '严重', warning: '警告', info: '提示', unknown: '未知' }
 const sorted = computed(() =>
   [...items.value].sort((a, b) =>
     (sevOrder[a.severity] ?? 9) - (sevOrder[b.severity] ?? 9)))
@@ -111,8 +112,8 @@ onMounted(load)
       <!-- 诊断列表 -->
       <div class="diag-list">
         <div v-for="d in sorted" :key="d.id" class="diag-card" :class="d.severity">
-          <div class="diag-head" @click="toggle(d.id)">
-            <span class="badge" :class="d.severity">{{ d.severity }}</span>
+          <button class="diag-head" type="button" :aria-expanded="!!expanded[d.id]" @click="toggle(d.id)">
+            <span class="badge" :class="d.severity">{{ severityLabel[d.severity] || d.severity }}</span>
             <span class="rule-id mono">{{ d.rule_id }}</span>
             <span class="diag-title">{{ d.title }}</span>
             <span class="spacer"></span>
@@ -120,7 +121,7 @@ onMounted(load)
               {{ EV_LABEL[d.evidence_level] || d.evidence_level }}
             </span>
             <span class="toggle">{{ expanded[d.id] ? '▾' : '▸' }}</span>
-          </div>
+          </button>
 
           <div class="diag-body">
             <div class="diag-desc">{{ d.description }}</div>
@@ -132,9 +133,9 @@ onMounted(load)
               <span v-if="d.timestamp != null" class="meta-item">
                 时间 <b class="mono">{{ d.timestamp.toFixed(3) }}s</b>
               </span>
-              <span v-if="d.session_id" class="meta-item link" @click="goSession(d.session_id)">
+              <button v-if="d.session_id" class="meta-item link" type="button" @click="goSession(d.session_id)">
                 会话 #{{ d.session_id }} →
-              </span>
+              </button>
             </div>
 
             <div v-if="expanded[d.id]">
@@ -153,8 +154,8 @@ onMounted(load)
               <div v-if="d.related_packet_ids?.length" class="block">
                 <div class="block-label">关联报文</div>
                 <div class="row" style="gap:6px;flex-wrap:wrap">
-                  <a v-for="p in d.related_packet_ids.slice(0, 20)" :key="p"
-                     class="pkt-link mono" @click="goPacket(store.currentTaskId, p)">#{{ p }}</a>
+                  <button v-for="p in d.related_packet_ids.slice(0, 20)" :key="p"
+                     type="button" class="pkt-link mono" @click="goPacket(store.currentTaskId, p)">#{{ p }}</button>
                 </div>
               </div>
             </div>
@@ -189,12 +190,11 @@ onMounted(load)
 .ev-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .ev-label { font-size: 11.5px; color: var(--text-4); }
 
-.diag-list { display: flex; flex-direction: column; gap: 0; border-top: 1px solid var(--line); }
+.diag-list { display: flex; flex-direction: column; gap: 10px; }
 .diag-card {
-  background: transparent; border: none;
-  border-bottom: 1px solid var(--line);
-  border-left: 2px solid transparent;
-  border-radius: 0;
+  background: var(--surface); border: 1px solid var(--line-2);
+  border-left: 3px solid var(--line-strong);
+  border-radius: 7px; overflow: hidden;
 }
 .diag-card.critical { border-left-color: var(--critical); }
 .diag-card.warning { border-left-color: var(--warning); }
@@ -202,14 +202,15 @@ onMounted(load)
 
 .diag-head {
   display: flex; align-items: center; gap: 10px;
-  padding: 11px 14px 11px 14px; cursor: pointer;
+  width:100%; border:0; background:transparent; color:var(--text); font:inherit; text-align:left;
+  padding: 14px 16px; cursor: pointer;
 }
 .diag-head:hover { background: var(--surface-2); }
 .rule-id { font-size: 11px; color: var(--text-4); }
 .diag-title { font-size: 13px; font-weight: 550; }
 .toggle { color: var(--text-4); font-size: 11px; width: 12px; text-align: center; }
 
-.diag-body { padding: 0 14px 13px 14px; }
+.diag-body { padding: 0 16px 16px; }
 .diag-desc { font-size: 12.5px; color: var(--text-2); line-height: 1.7; max-width: 104ch; }
 
 .meta-row {
@@ -217,7 +218,7 @@ onMounted(load)
   font-size: 11.5px; color: var(--text-4);
 }
 .meta-item b { color: var(--text-2); font-weight: 500; }
-.meta-item.link { color: var(--text-2); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--line-3); }
+.meta-item.link { color: var(--brand-lt); cursor: pointer; background:none; border:0; padding:0; font:inherit; text-decoration: underline; text-underline-offset: 2px; }
 .meta-item.link:hover { text-decoration-color: currentColor; }
 
 .block { margin-top: 12px; }
@@ -231,8 +232,8 @@ onMounted(load)
 }
 .pkt-link {
   font-family: var(--font-mono); font-size: 11.5px; padding: 1px 4px;
-  color: var(--text-2); cursor: pointer;
-  border-bottom: 1px solid var(--line-3);
+  color: var(--brand-lt); cursor: pointer; background:transparent; border:0;
+  border-bottom: 1px solid var(--line-2);
 }
 .pkt-link:hover { color: var(--text); border-bottom-color: currentColor; }
 .err-box {

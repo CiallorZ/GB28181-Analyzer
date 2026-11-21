@@ -14,6 +14,8 @@ const sid = Number(route.params.id)
 const session = ref(null)
 const sip = ref([])
 const timeline = ref([])
+const showAllEvents = ref(false)
+const visibleTimeline = computed(() => showAllEvents.value ? timeline.value : timeline.value.slice(0, 30))
 const streams = ref([])
 const metrics = ref([])
 const diagnostics = ref([])
@@ -272,6 +274,30 @@ onUnmounted(() => unbindResize?.())
         </div>
       </div>
 
+      <section class="card mb-16" aria-labelledby="event-timeline-title">
+        <div class="card-head">
+          <span id="event-timeline-title">信令与媒体事件</span>
+          <span class="count-badge">{{ timeline.length }} 条</span>
+          <span class="spacer"></span>
+          <button v-if="timeline.length > 30" class="btn-mini" @click="showAllEvents = !showAllEvents">
+            {{ showAllEvents ? '收起' : '查看全部' }}
+          </button>
+        </div>
+        <ol v-if="visibleTimeline.length" class="event-timeline">
+          <li v-for="(event, index) in visibleTimeline" :key="`${event.type}-${event.timestamp}-${index}`">
+            <time class="event-time mono">{{ fmt(event.timestamp, 3) }}s</time>
+            <span class="event-dot" :class="event.severity"></span>
+            <div class="event-content">
+              <strong>{{ event.label }}</strong>
+              <p>{{ event.detail }}</p>
+            </div>
+            <button v-if="event.packet_id || event.related_packet_ids?.length" class="btn-mini"
+                    @click="gotoPacket(event.packet_id || event.related_packet_ids[0])">查看报文</button>
+          </li>
+        </ol>
+        <div v-else class="empty">没有可定位时间的事件</div>
+      </section>
+
       <!-- SIP 时序图 -->
       <div class="card mb-16">
         <div class="card-head">
@@ -490,6 +516,16 @@ onUnmounted(() => unbindResize?.())
 </template>
 
 <style scoped>
+.event-timeline { list-style: none; padding: 8px 18px 16px; }
+.event-timeline li { display: grid; grid-template-columns: 76px 10px minmax(0,1fr) auto; gap: 12px; align-items: baseline; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.event-timeline li:last-child { border-bottom: 0; }
+.event-time { color: var(--text-3); font-size: 12px; }
+.event-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--flow); }
+.event-dot.warning { background: var(--warning); }
+.event-dot.critical { background: var(--critical); }
+.event-content { min-width: 0; overflow-wrap: anywhere; }
+.event-content p { color: var(--text-2); font-size: 12px; }
+@media (max-width: 600px) { .event-timeline li { grid-template-columns: 62px 8px minmax(0,1fr); gap: 8px; } .event-timeline button { grid-column: 3; justify-self: start; } }
 .h1 { font-size: 19px; font-weight: 600; }
 .sub { font-size: 12px; color: var(--text-3); margin-top: 3px; }
 .sep { color: var(--text-4); margin: 0 5px; }

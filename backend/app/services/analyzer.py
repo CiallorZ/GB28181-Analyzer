@@ -715,7 +715,7 @@ def _normalize_codec(raw: str | None) -> str | None:
 
 
 def _source_media(ps, rb) -> dict:
-    """源编码与源分辨率：PS/SPS 为准，重建产物只作兜底
+    """源编码与源分辨率：源流探测优先，PS/SPS 和预览作兜底
 
     转码产物统一是 H.264，且预览会缩到 1280 宽。若直接把 ffprobe
     结果写进 codec/width/height，H.265 的 2688×1520 源会显示成
@@ -723,11 +723,14 @@ def _source_media(ps, rb) -> dict:
     """
     v = ps.video if ps and getattr(ps, 'video', None) else None
     return {
-        'codec': ((v.codec if v and v.codec else None)
+        'codec': (_normalize_codec(getattr(rb, 'source_codec', None))
+                  or (v.codec if v and v.codec else None)
                   or _normalize_codec(rb.codec if rb else None)),
-        'width': ((v.width if v and v.width else None)
+        'width': (getattr(rb, 'source_width', None)
+                  or (v.width if v and v.width else None)
                   or (rb.width if rb and rb.width else None)),
-        'height': ((v.height if v and v.height else None)
+        'height': (getattr(rb, 'source_height', None)
+                   or (v.height if v and v.height else None)
                    or (rb.height if rb and rb.height else None)),
     }
 

@@ -25,6 +25,14 @@ def test_source_media_prefers_ps_over_rebuild():
         'codec': 'H.265', 'width': 2688, 'height': 1520}
 
 
+def test_source_probe_overrides_misidentified_elementary_stream():
+    ps = SimpleNamespace(video=_video(codec='H.264', width=16, height=16))
+    rb = SimpleNamespace(codec='h264', width=320, height=240,
+                         source_codec='mpeg2video', source_width=320, source_height=240)
+    assert analyzer._source_media(ps, rb) == {
+        'codec': 'MPEG2VIDEO', 'width': 320, 'height': 240}
+
+
 def test_source_media_falls_back_to_rebuild():
     ps = SimpleNamespace(video=_video())
     rb = SimpleNamespace(codec='h264', width=1280, height=724)

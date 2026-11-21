@@ -47,6 +47,22 @@ def _count_old_results(db, task_id):
     return (1 if s else 0) + (1 if m else 0)
 
 
+def test_upload_cleans_file_when_database_flush_fails(db, tmp_path, monkeypatch):
+    import asyncio
+    import io
+    from fastapi import UploadFile
+    from app.api import tasks
+
+    monkeypatch.setattr(tasks.settings, 'UPLOAD_DIR', tmp_path)
+    def fail_flush():
+        raise RuntimeError('database unavailable')
+    monkeypatch.setattr(db, 'flush', fail_flush)
+    upload = UploadFile(filename='test.pcap', file=io.BytesIO(b'\xd4\xc3\xb2\xa1' + b'\x00' * 24))
+    with pytest.raises(RuntimeError, match='database unavailable'):
+        asyncio.run(tasks.upload_file(upload, db))
+    assert list(tmp_path.iterdir()) == []
+
+
 # ---------------------------------------------------------------
 # 1. 并发触发
 # ---------------------------------------------------------------

@@ -437,6 +437,18 @@ class TestRfc4571:
     def test_garbage_returns_none(self):
         assert rtp_analyzer.parse_rfc4571(b'\x00' * 500) is None
 
+    def test_changing_ssrc_does_not_form_one_stream(self):
+        buf = b''.join(self._frame(self._rtp(i, ssrc=100 + i)) for i in range(3))
+        assert rtp_analyzer.parse_rfc4571(buf) is None
+
+    def test_csrc_extension_and_padding_are_removed_from_payload(self):
+        base = bytearray(self._rtp(1, payload=b''))
+        base[0] = 0xb1  # padding, extension, one CSRC
+        packet = bytes(base) + b'\x00' * 4 + b'\x10\x00\x00\x01' + b'\x00' * 4 + b'PS' + b'\x00\x02'
+        got = rtp_analyzer.parse_rfc4571(self._frame(packet) * 3)
+        assert got is not None
+        assert got[1][0].payload == b'PS'
+
     def test_tcp_reassembly_in_order(self):
         segs = {100: b'AAA', 103: b'BBB', 106: b'CCC'}
         assert rtp_analyzer.reassemble_tcp(segs) == b'AAABBBCCC'
@@ -561,6 +573,46 @@ class TestSessionBuilder:
         sessions = session_builder.build_sessions(dialogs, [invite])
         assert sessions[0].signal_status == 'incomplete'
 
+    def test_nonstandard_provisional_response_is_not_final(self):
+        from copy import deepcopy
+
+        invite, ok, *_ = self._invite_flow()
+        queued = deepcopy(ok)
+        queued.status_code = 182
+        queued.timestamp = 10.1
+        queued.packet_number = 6
+        dialog = session_builder.build_dialogs([invite, queued, ok])[0]
+        assert dialog.provisional_time == 10.1
+        assert dialog.final_code == 200
+        assert session_builder.build_sessions([dialog], [invite, queued, ok])[0].signal_status == 'success'
+
+        dialog = session_builder.build_dialogs([invite, queued])[0]
+        assert dialog.final_code is None
+        assert session_builder.build_sessions([dialog], [invite, queued])[0].signal_status == 'incomplete'
+
+    def test_bye_provisional_response_is_not_successful_termination(self):
+        from copy import deepcopy
+
+        messages = self._invite_flow()
+        provisional = deepcopy(messages[-1])
+        provisional.status_code = 100
+        dialog = session_builder.build_dialogs(messages[:-1] + [provisional])[0]
+        assert session_builder.build_sessions([dialog], messages)[0].end_reason == 'abnormal'
+
+    def test_media_timing_is_unknown_when_capture_times_are_missing(self):
+        session = session_builder.SessionInfo(start_time=0.0, end_time=10.0, sdp_ssrc='1234')
+        stream = {'ssrc': 1234, 'start_time': None, 'end_time': None}
+        session_builder.link_media([session], [stream])
+        assert session.media_status == 'received'
+        assert session.first_media_latency is None
+        assert session.media_duration is None
+
+        session = session_builder.SessionInfo(start_time=0.0, end_time=10.0, sdp_ssrc='1234')
+        stream = {'ssrc': 1234, 'start_time': 1.0, 'end_time': None}
+        session_builder.link_media([session], [stream])
+        assert session.first_media_latency == 1.0
+        assert session.media_duration is None
+
     def test_invite_failure_code(self):
         base_meta = {'src_ip': '10.0.0.1', 'src_port': 5060,
                      'dst_ip': '10.0.0.2', 'dst_port': 5060,
@@ -601,6 +653,19 @@ class TestSessionBuilder:
         assert s.media_status == 'received'
         assert len(s.media_stream_keys) == 1
         assert s.first_media_latency == 1.0
+
+    def test_missing_transport_is_not_matching_evidence(self):
+        session = session_builder.SessionInfo(start_time=0.0, end_time=10.0)
+        stream = {'ssrc': 3, 'start_time': 1.0, 'end_time': 2.0}
+        session_builder.link_media([session], [stream])
+        assert session.media_status == 'no_media'
+        assert session.media_stream_keys == []
+
+    def test_missing_stream_times_do_not_count_as_time_overlap(self):
+        session = session_builder.SessionInfo(start_time=0.0, end_time=10.0,
+                                               negotiated_transport='UDP')
+        stream = {'ssrc': 3, 'transport': 'UDP', 'start_time': None, 'end_time': None}
+        assert session_builder._match_score(session, stream) == 15
 
 
 # ============================================================

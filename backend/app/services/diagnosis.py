@@ -391,7 +391,7 @@ def _check_sdp(sessions: list) -> list[Diagnostic]:
                 severity=CRITICAL,
                 evidence_level=SUSPECTED,
                 title='信令成功但未发现 RTP 媒体',
-                description=('设备 %s 的 INVITE 已收到 200 OK 并完成 ACK，'
+                description=('设备 %s 的 INVITE 已收到成功最终响应，'
                              '但抓包中没有任何对应的 RTP 包。'
                              'SDP 协商的是 %s:%s（%s）。'
                              % (dev or '未知',
@@ -546,28 +546,27 @@ def _check_media(sessions: list, streams: list, by_session: dict) -> list[Diagno
                                      '确认音视频是否共用 SSRC'],
                 ))
 
-        # MED-008 抓到 RTP 但解不出画面
-        # 注意：P0 版本只做 RTP 层统计，未实现 PS/ES 解封装与视频解码，
-        # 此时 has_video 恒为 False 属于能力边界，不是故障。
-        # 只有明确尝试过重建且失败（rebuild_error 非空）才报此规则。
+        # 仅在实际重建失败时报告；错误也可能来自工具环境或超时。
         if st.get('rebuild_error'):
             out.append(Diagnostic(
                 rule_id='MED-008',
                 severity=WARNING,
                 evidence_level=SUSPECTED,
                 title='抓到 RTP 但视频重建失败',
-                description=('流 SSRC=%08x 共 %d 个包，重建出的码流无法被解码器接受；'
-                             '具体错误见下方证据。'
+                description=('流 SSRC=%08x 共 %d 个包，视频重建未成功；'
+                             '请结合错误证据区分工具环境、超时与码流问题。'
                              % (st.get('ssrc') or 0,
                                 st.get('packet_count') or 0)),
                 session_id=sid, stream_id=st_id, device_id=dev,
                 timestamp=st.get('start_time'),
                 evidence={'packet_count': st.get('packet_count'),
                           'rebuild_error': st.get('rebuild_error')},
-                possible_causes=['抓包起点在 GOP 中间，缺少 SPS/PPS',
+                possible_causes=['FFmpeg 不可用或重建超时',
+                                 '抓包起点在 GOP 中间，缺少 SPS/PPS',
                                  'PS 封装不规范',
                                  '使用了不支持的编码格式'],
-                recommendations=['从关键帧位置重新抓包',
+                recommendations=['先检查重建错误和 FFmpeg 状态',
+                                 '从关键帧位置重新抓包',
                                  '检查 PS 封装的参数集是否完整'],
             ))
     return out

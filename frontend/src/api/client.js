@@ -64,6 +64,7 @@ export const api = {
   packet: (id) => client.get(`/packets/${id}`).then(r => r.data),
 
   // DeepSeek
+  aiContext: (taskId) => client.get(`/ai/context/${taskId}`).then(r => r.data),
   aiConfig: () => client.get('/ai/config').then(r => r.data),
   aiSaveConfig: (body) => client.post('/ai/config', body).then(r => r.data),
   aiTest: () => client.post('/ai/test').then(r => r.data)

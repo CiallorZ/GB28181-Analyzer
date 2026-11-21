@@ -16,6 +16,7 @@ import { useTaskStore } from '../stores/task'
 import VideoPlayer from '../components/VideoPlayer.vue'
 import AiSummarySection from '../components/AiSummarySection.vue'
 import CaptureIntake from '../components/CaptureIntake.vue'
+import CaptureFlow from '../components/CaptureFlow.vue'
 
 const router = useRouter()
 const store = useTaskStore()
@@ -255,7 +256,7 @@ function renderMediaCharts() {
   if (!streams.value.length) return
   const t = themeColors()
   /* --- 4. 码率趋势 --- */
-  const PALETTE = [C.ds, C.ok, C.warn, C.info, '#9b59f0', C.brand]
+  const PALETTE = [C.brand, C.info, C.ok, C.warn, '#9b59f0', C.ds]
   const trendStreams = streams.value.slice(0, TREND_LIMIT)
   const streamLabel = st => `#${st.id}${st.ssrc == null ? '' : ' · 0x' + st.ssrc.toString(16)}`
   const brSeries = trendStreams.map((st, i) => {
@@ -580,6 +581,17 @@ const EV_CLS = { confirmed: 'ok', suspected: 'warning', insufficient: 'unknown' 
 const SEV_CLS = { critical: 'critical', warning: 'warning', info: 'info', unknown: 'unknown' }
 const priorityFindings = computed(() => diagnostics.value
   .filter(d => d.severity === 'critical' || d.severity === 'warning').slice(0, 3))
+const flowStages = computed(() => {
+  const s = summary.value
+  const d = s.diagnostics || {}
+  const alerts = (d.critical || 0) + (d.warning || 0)
+  return [
+    { key: 'signal', label: '信令会话', value: s.session_count != null ? `${s.session_count} 个会话` : '暂无数据', detail: 'SIP / SDP', available: hasSignal.value },
+    { key: 'media', label: '媒体传输', value: `${streams.value.length} 条流`, detail: 'RTP / TCP', available: hasMedia.value },
+    { key: 'codec', label: '视频重建', value: `${playableStreams.value.length} 条可预览`, detail: '仅代表本机重建结果', available: hasCodec.value },
+    { key: 'diag', label: '诊断事件', value: `${alerts} 条严重或警告`, detail: '查看规则与证据', available: hasDiag.value, tone: d.critical ? 'critical' : d.warning ? 'warning' : '' }
+  ]
+})
 
 const fmt = (v, d = 2) => v == null ? null : Number(v).toFixed(d)
 
@@ -756,6 +768,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
         </div>
       </nav>
 
+      <CaptureFlow v-if="overview && !loadingResults" :stages="flowStages" @navigate="scrollTo" />
       <section v-if="priorityFindings.length" class="sec mb-20 findings" aria-labelledby="findings-title">
         <div class="sec-head">
           <h2 id="findings-title" class="sec-title">优先排查</h2>
@@ -777,6 +790,14 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
             <router-link v-else-if="d.session_id" :to="`/sessions/${d.session_id}`">查看会话 →</router-link>
           </li>
         </ul>
+      </section>
+      <section v-else-if="!loadingResults && !err" class="sec mb-20 findings" aria-labelledby="findings-empty-title">
+        <div class="sec-head">
+          <h2 id="findings-empty-title" class="sec-title">优先排查</h2>
+          <span class="spacer"></span>
+          <router-link to="/diagnostics" class="btn-mini">全部诊断 →</router-link>
+        </div>
+        <p class="findings-empty">当前规则未发现严重或警告事件。结论仅覆盖已实现的规则和本次抓包范围，不能据此确认端到端正常。</p>
       </section>
 
       <!-- ===== 1. 总览 ===== -->
@@ -1279,7 +1300,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
 
       <!-- ===== AI 分析概览 ===== -->
       <section id="sec-ai" class="rise mt-14 mb-20">
-        <AiSummarySection :num="secNums.ai" />
+        <AiSummarySection :key="store.currentTaskId" :num="secNums.ai" />
       </section>
 
       <!-- 底部局限声明 -->
@@ -1331,6 +1352,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
 .findings li:first-child { border-top: 0; }
 .findings p, .findings a { font-size: 12px; }
 .findings p { color: var(--text-2); }
+.findings-empty { padding: 16px 18px; line-height: 1.6; }
 .findings li a { white-space: nowrap; }
 .evidence-links { display: flex; flex-wrap: wrap; gap: 4px 10px; }
 @media (max-width: 600px) {
@@ -1370,17 +1392,6 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
 .fail-wrap { max-width: 600px; margin: 60px auto; }
 
 /* ============ 滚动导航 ============ */
-@media (max-width: 1080px) {
-  .spy { margin: -20px -16px 18px; padding: 0 16px; }
-}
-@media (max-width: 720px) {
-  .spy { overflow-x: auto; scrollbar-width: none; }
-  .spy::-webkit-scrollbar { display: none; }
-  .spy-in { height: 42px; gap: 0; min-width: max-content; }
-  .spy-btn { height: 42px; padding: 0 11px; white-space: nowrap; font-size: 12px; }
-  .spy-btn.on::after { left: 11px; right: 11px; bottom: 0; }
-  .spy-file { display: none; }
-}
 .spy {
   position: sticky; top: var(--app-header-height); z-index: 50;
   background: color-mix(in srgb, var(--bg) 88%, transparent);
@@ -1407,13 +1418,24 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
   position: relative;
 }
 .spy-btn:hover { color: var(--text); background: var(--surface); }
-.spy-btn.on { color: var(--text); font-weight: 600; }
+.spy-btn.on { color: var(--brand-lt); font-weight: 650; }
 .spy-btn.on::after {
   content: ''; position: absolute;
   left: 14px; right: 14px; bottom: -1px; height: 2px;
-  background: var(--text-3);
+  background: var(--brand);
 }
 .spy-file { color: var(--text-4); max-width: 280px; margin-right: 10px; }
+@media (max-width: 1080px) {
+  .spy { margin: -20px -16px 18px; padding: 0 16px; }
+}
+@media (max-width: 720px) {
+  .spy { overflow-x: auto; scrollbar-width: none; }
+  .spy::-webkit-scrollbar { display: none; }
+  .spy-in { height: 42px; gap: 0; min-width: max-content; }
+  .spy-btn { height: 42px; padding: 0 11px; white-space: nowrap; font-size: 12px; }
+  .spy-btn.on::after { left: 11px; right: 11px; bottom: 0; }
+  .spy-file { display: none; }
+}
 
 /* 导出：挂在导航右侧，不额外占一栏；两种格式写清后缀，避免下错文件 */
 .exp { position: relative; }

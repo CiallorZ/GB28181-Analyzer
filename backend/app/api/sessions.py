@@ -148,16 +148,6 @@ def session_timeline(session_id: int, db: Session = Depends(get_db)):
             'stream_id': st.id,
             'severity': 'normal',
         })
-        if (st.max_gap or 0) > 3:
-            events.append({
-                'type': 'media',
-                'timestamp': st.start_time,
-                'label': '媒体静默 %.1fs' % (st.max_gap or 0),
-                'detail': '可能存在中断',
-                'stream_id': st.id,
-                'severity': 'warning',
-            })
-
     # 诊断事件
     for d in db.scalars(
             select(DiagnosticEvent)

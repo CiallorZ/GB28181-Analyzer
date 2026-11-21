@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 
-from .sip_parser import PROVISIONAL_CODES, SipInfo, make_dialog_key
+from .sip_parser import SipInfo, make_dialog_key
 
 
 @dataclass
@@ -167,9 +167,10 @@ def build_dialogs(messages: list[SipInfo]) -> list[DialogInfo]:
                     # 从 To 头取设备 ID
                     d.device_id = _uri_id(m.headers.get('to', ''))
             elif m.method == 'INVITE' and not m.is_request:
-                if m.status_code in PROVISIONAL_CODES and d.provisional_time is None:
-                    d.provisional_time = m.timestamp
-                elif m.status_code and m.status_code not in PROVISIONAL_CODES:
+                if m.status_code is not None and 100 <= m.status_code < 200:
+                    if d.provisional_time is None:
+                        d.provisional_time = m.timestamp
+                elif m.status_code is not None and 200 <= m.status_code <= 699:
                     if d.answer_time is None:
                         d.answer_time = m.timestamp
                         d.final_code = m.status_code
@@ -287,7 +288,7 @@ def build_sessions(dialogs: list[DialogInfo],
             s.end_time = d.bye_time
             # BYE 是否有最终响应
             has_final = any(x.method == 'BYE' and not x.is_request
-                            and x.status_code and x.status_code < 300
+                            and x.status_code is not None and 200 <= x.status_code < 300
                             for x in d.messages)
             s.end_reason = 'normal' if has_final else 'abnormal'
             if not has_final:
@@ -311,7 +312,7 @@ def build_sessions(dialogs: list[DialogInfo],
 def _judge_signal(d: DialogInfo) -> str:
     """判定信令层状态
 
-    成功：有 2xx 最终响应 + ACK
+    成功：观察到 2xx 最终响应（ACK 可能未被抓到）
     失败：有 3xx-6xx 最终响应
     不完整：只有 INVITE 没响应，或只有临时响应
     """
@@ -397,7 +398,11 @@ def link_media(sessions: list[SessionInfo], streams: list[dict]) -> None:
             if session_end is None and d is not None:
                 session_end = d.end_time
 
-            first_ts = min((st.get('start_time') or 0) for _sc, st in matched)
+            starts = [st.get('start_time') for _sc, st in matched
+                      if st.get('start_time') is not None]
+            if not starts:
+                continue
+            first_ts = min(starts)
 
             in_window = True
             if session_end is not None and first_ts > session_end:
@@ -409,10 +414,11 @@ def link_media(sessions: list[SessionInfo], streams: list[dict]) -> None:
 
             if in_window and first_ts >= s.start_time:
                 s.first_media_latency = round(first_ts - s.start_time, 3)
-                anchor = (d.ack_time or d.answer_time) if d else None
+                anchor = (d.ack_time if d.ack_time is not None else d.answer_time) if d else None
                 if anchor is not None and first_ts >= anchor:
                     s.signal_to_first_media = round(first_ts - anchor, 3)
-                ends = [st.get('end_time') or 0 for _sc, st in matched]
+                ends = [st.get('end_time') for _sc, st in matched
+                        if st.get('end_time') is not None and st.get('end_time') >= first_ts]
                 s.media_duration = round(max(ends) - first_ts, 3) if ends else None
             else:
                 # 媒体在会话窗口外，仍记录流但不给耗时指标
@@ -506,14 +512,14 @@ def _match_score(s: SessionInfo, st: dict) -> int:
             score += 40
 
     # 3) 传输方式
-    if (st.get('transport') or '').upper() == \
-            (s.negotiated_transport or '').upper():
+    if st.get('transport') and s.negotiated_transport and \
+            st['transport'].upper() == s.negotiated_transport.upper():
         score += 15
 
     # 4) 时间窗
-    st_start = st.get('start_time') or 0
-    st_end = st.get('end_time') or 0
-    if s.start_time is not None:
+    st_start = st.get('start_time')
+    st_end = st.get('end_time')
+    if s.start_time is not None and st_start is not None and st_end is not None:
         s_end = s.end_time if s.end_time is not None else s.start_time + 3600
         if st_start <= s_end + 5 and st_end >= s.start_time - 5:
             score += 30

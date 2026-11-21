@@ -66,8 +66,7 @@ onUnmounted(() => {
     <header class="bar">
       <div class="bar-in">
         <router-link to="/" class="brand" title="返回工作台">
-          <img :src="theme === 'dark' ? '/brand/logo-color-dark.png' : '/brand/logo-color-light.png'"
-               alt="中国铁塔" class="brand-logo" />
+          <img :src="theme === 'dark' ? '/brand/logo-color-dark.png' : '/brand/logo-color-light.png'" alt="中国铁塔" class="brand-logo" />
           <div class="brand-txt">
             <div class="brand-name">GB28181 Analyzer</div>
             <div class="brand-desc">视联网协议分析与流媒体质量诊断</div>
@@ -110,8 +109,8 @@ onUnmounted(() => {
           </button>
 
           <button class="ai-btn" aria-label="DeepSeek 分析" @click="store.openAiPanel()">
-            <img src="/brand/deepseek-white.svg" alt="" class="ai-ico" />
-            <span>DeepSeek 分析</span>
+            <img src="/brand/deepseek.svg" alt="" class="ai-ico" />
+            <span>AI 分析助手</span>
           </button>
 
           <router-link to="/settings" class="dep" :class="engine[1]" :title="engine[0]" :aria-label="engine[0]">
@@ -130,7 +129,7 @@ onUnmounted(() => {
       </router-view>
     </main>
 
-    <AiPanel :open="store.aiPanelOpen"
+    <AiPanel :key="store.currentTaskId" :open="store.aiPanelOpen"
              @update:open="v => v ? store.openAiPanel() : store.closeAiPanel()" />
   </div>
 </template>
@@ -141,26 +140,28 @@ onUnmounted(() => {
 /* 顶栏 */
 .bar {
   position: sticky; top: 0; z-index: 100;
-  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
   backdrop-filter: blur(16px) saturate(160%);
   border-bottom: 1px solid var(--line);
+  box-shadow: inset 0 3px 0 var(--brand);
 }
 .bar-in {
   max-width: 1720px; margin: 0 auto;
   height: calc(var(--app-header-height) - 1px); padding: 0 28px;
-  display: flex; align-items: center; gap: 20px;
+  display: flex; align-items: center; gap: 26px;
 }
-.bar-nav { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
-.bar-nav a { padding: 6px 9px; border-radius: var(--radius-sm); color: var(--text-2); font-size: 12px; }
+.bar-nav { display: flex; align-items: stretch; align-self: stretch; gap: 8px; white-space: nowrap; }
+.bar-nav a { position: relative; display:flex; align-items:center; padding: 0 12px; color: var(--text-2); font-size: 13px; font-weight: 600; }
 .bar-nav a:hover, .bar-nav .router-link-exact-active, .bar-nav .current {
-  background: var(--surface-3); color: var(--text); text-decoration: none;
+  color: var(--brand-lt); text-decoration: none;
 }
+.bar-nav .router-link-exact-active::after, .bar-nav .current::after { content:''; position:absolute; height:3px; left:10px; right:10px; bottom:0; background:var(--brand); }
 @media (max-width: 1080px) { .bar-in { padding: 0 16px; gap: 12px; } }
 
 .brand {
   display: flex; align-items: center; gap: 12px; flex: none;
-  padding: 4px 8px; margin-left: -8px;
-  border-radius: var(--radius-sm);
+  padding: 4px 24px 4px 8px; margin-left: -8px;
+  border-right: 1px solid var(--line-2);
   transition: background var(--dur) var(--ease);
 }
 .brand:hover { background: var(--surface); text-decoration: none; }
@@ -170,8 +171,9 @@ onUnmounted(() => {
 }
 .brand-txt { line-height: 1.25; }
 .brand-name {
-  font-size: 15.5px; font-weight: 700;
-  letter-spacing: -.2px;
+  font-size: 15px; font-weight: 700;
+  letter-spacing: -.35px;
+  color: var(--brand-lt);
 }
 .brand-desc {
   font-size: 11px; color: var(--text-4);
@@ -215,9 +217,9 @@ onUnmounted(() => {
   display: inline-flex; align-items: center; gap: 7px;
   height: 34px; padding: 0 14px;
   border-radius: var(--radius-sm);
-  background: #253d92;
-  border: 1px solid #253d92;
-  color: white;
+  background: var(--ds-soft);
+  border: 1px solid var(--ds-line);
+  color: var(--ds-lt);
   font-size: 12.5px; font-weight: 500;
   font-family: inherit;
   cursor: pointer;
@@ -225,8 +227,8 @@ onUnmounted(() => {
               border-color var(--dur) var(--ease);
 }
 .ai-btn:hover {
-  background: var(--ds-dk);
-  border-color: var(--ds-dk);
+  background: var(--surface-3);
+  border-color: var(--ds-lt);
 }
 .ai-ico { height: 14px; width: auto; }
 
@@ -254,10 +256,12 @@ onUnmounted(() => {
 @media (max-width: 650px) {
   .bar-in { padding: 0 12px; gap: 8px; }
   .bar-in { flex-wrap: wrap; padding-top: 8px; }
-  .bar-nav { order: 2; flex-basis: 100%; padding-bottom: 6px; }
+  .bar-nav { order: 2; flex-basis: 100%; height: 35px; gap: 6px; }
+  .bar-nav a { padding: 0 10px; }
+  .brand { border-right: 0; padding-right: 4px; }
   .brand-desc { display: none; }
   .brand-name { font-size: 13px; }
-  .brand-logo { height: 24px; }
+  .brand-logo { height: 24px; width: auto; }
   .bar-act { gap: 6px; }
   .icon-btn { width: 30px; height: 30px; }
   .ai-btn { width: 30px; padding: 0; justify-content: center; }

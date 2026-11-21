@@ -44,5 +44,5 @@ export function chartBase(extra = {}) {
 
 export function seriesPalette() {
   const c = chartPalette()
-  return [c.ds, c.ok, c.warn, c.info, '#A371F7', c.brand, c.dim]
+  return [c.brand, c.info, c.ok, c.warn, '#A371F7', c.ds, c.dim]
 }

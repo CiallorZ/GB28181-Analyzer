@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '../api/client'
 import PageNav from '../components/PageNav.vue'
@@ -22,27 +22,36 @@ const detail = ref(null)
 const detailLoading = ref(false)
 const viewMode = ref('tree')   // tree | hex
 
+let listSeq = 0
 async function load() {
   if (!store.currentTaskId) return
+  const taskId = store.currentTaskId
+  const seq = ++listSeq
   try {
-    const r = await api.packets(store.currentTaskId, {
+    const r = await api.packets(taskId, {
       page: page.value, page_size: pageSize,
       ip: ipFilter.value || undefined,
       port: portFilter.value ? Number(portFilter.value) : undefined,
       protocol: protoFilter.value || undefined,
       call_id: callIdFilter.value || undefined
     })
-    items.value = r.items
-    total.value = r.total
-  } catch (e) { err.value = e.message }
+    if (seq === listSeq && taskId === store.currentTaskId) {
+      items.value = r.items
+      total.value = r.total
+    }
+  } catch (e) { if (seq === listSeq) err.value = e.message }
 }
 
+let detailSeq = 0
 async function openPacket(p) {
+  const seq = ++detailSeq
+  const taskId = store.currentTaskId
   detailLoading.value = true
   try {
-    detail.value = await api.packet(p.id)
-  } catch (e) { err.value = e.message }
-  finally { detailLoading.value = false }
+    const result = await api.packet(p.id)
+    if (seq === detailSeq && taskId === store.currentTaskId) detail.value = result
+  } catch (e) { if (seq === detailSeq) err.value = e.message }
+  finally { if (seq === detailSeq) detailLoading.value = false }
 }
 
 // 十六进制视图：每行 16 字节 + ASCII
@@ -70,29 +79,45 @@ const selectedId = computed(() => detail.value?.id)
 
 function fmtTime(t) { return t != null ? t.toFixed(3) : '—' }
 
-onMounted(async () => {
-  await load()
-  // 支持从别的页面带 packet number 跳转
-  const num = Number(route.query.number)
-  if (num) {
+let packetLookup = 0
+async function locatePacket(value) {
+  const num = Number(value)
+  const taskId = store.currentTaskId
+  const seq = ++packetLookup
+  ++detailSeq
+  detailLoading.value = false
+  if (!Number.isInteger(num) || num < 1 || !taskId) return
+  err.value = ''
+  try {
     const hit = items.value.find(p => p.packet_number === num)
-    if (hit) openPacket(hit)
-    else {
-      // 换页查找
-      const r = await api.packets(store.currentTaskId, {
-        page: 1, page_size: 500, number_from: num, number_to: num
-      })
-      if (r.items.length) openPacket(r.items[0])
-    }
+    const result = hit ? null : await api.packets(taskId, {
+      page: 1, page_size: 1, number_from: num, number_to: num
+    })
+    if (seq !== packetLookup || taskId !== store.currentTaskId) return
+    const packet = hit || result.items[0]
+    if (packet) await openPacket(packet)
+    else err.value = `未找到报文 #${num}`
+  } catch (e) {
+    if (seq === packetLookup) err.value = e.message
   }
-})
+}
 
-watch(() => route.query.number, (v) => {
-  const num = Number(v)
-  if (!num) return
-  const hit = items.value.find(p => p.packet_number === num)
-  if (hit) openPacket(hit)
-})
+watch([() => route.query.task, () => route.query.number], async ([task, number]) => {
+  const taskId = Number(task)
+  if (Number.isInteger(taskId) && taskId > 0 && taskId !== store.currentTaskId) {
+    store.setCurrent(taskId)
+    detail.value = null
+    items.value = []
+    page.value = 1
+    await load()
+    store.loadTask(taskId).catch(() => {})
+  } else if (!items.value.length) {
+    await load()
+  }
+  if (task !== route.query.task || number !== route.query.number) return
+  if (task && Number(task) !== store.currentTaskId) return
+  await locatePacket(number)
+}, { immediate: true })
 </script>
 
 <template>
@@ -122,9 +147,9 @@ watch(() => route.query.number, (v) => {
         <div class="pane-head">
           报文列表
           <span class="spacer"></span>
-          <button class="mini" :disabled="page <= 1" @click="page--; load()">‹</button>
+          <button class="mini" aria-label="上一页" :disabled="page <= 1" @click="page--; load()">‹</button>
           <span class="mono-sm">{{ page }}</span>
-          <button class="mini" :disabled="page * pageSize >= total" @click="page++; load()">›</button>
+          <button class="mini" aria-label="下一页" :disabled="page * pageSize >= total" @click="page++; load()">›</button>
         </div>
         <div class="pane-body">
           <table class="pkt-tbl">
@@ -134,7 +159,8 @@ watch(() => route.query.number, (v) => {
             <tbody>
               <tr v-for="p in items" :key="p.id"
                   :class="{ active: selectedId === p.id }"
-                  @click="openPacket(p)">
+                  tabindex="0" :aria-selected="selectedId === p.id"
+                  @click="openPacket(p)" @keydown.enter.prevent="openPacket(p)" @keydown.space.prevent="openPacket(p)">
                 <td class="mono">{{ p.packet_number }}</td>
                 <td class="num">{{ fmtTime(p.timestamp) }}</td>
                 <td class="mono-sm truncate">{{ p.source_ip }}</td>
@@ -229,7 +255,7 @@ watch(() => route.query.number, (v) => {
 .tri-pane {
   flex: 1; min-height: 0;
   display: grid; grid-template-columns: 440px minmax(0, 1fr) 250px;
-  gap: 12px;
+  gap: 0; border:1px solid var(--line-2); border-radius:8px; overflow:hidden;
 }
 @media (max-width: 1500px) { .tri-pane { grid-template-columns: 390px minmax(0, 1fr) 220px; } }
 @media (max-width: 1080px) {
@@ -239,16 +265,19 @@ watch(() => route.query.number, (v) => {
 }
 
 .pane {
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: var(--radius); display: flex; flex-direction: column;
+  background: var(--surface); border-right: 1px solid var(--line-2);
+  display: flex; flex-direction: column;
   min-height: 0; overflow: hidden;
 }
+.pane:last-child { border-right:0; }
+@media (max-width: 1080px) { .pane { border-right:0; border-bottom:1px solid var(--line-2); } .pane:last-child { border-bottom:0; } }
 .pane-head {
   display: flex; align-items: center; gap: 8px;
-  padding: 9px 13px; background: var(--panel-2);
-  border-bottom: 1px solid var(--border);
-  font-size: 12px; font-weight: 600; flex: none;
+  min-height:48px; padding: 10px 14px; background: var(--surface);
+  border-bottom: 1px solid var(--line-2);
+  font-size: 13px; font-weight: 650; flex: none;
 }
+.pane-head::before { content:''; width:3px; height:14px; background:var(--brand); border-radius:2px; }
 .pane-body { flex: 1; overflow: auto; min-height: 0; }
 .pane-body.scroll { padding: 10px 12px; }
 
@@ -275,7 +304,8 @@ watch(() => route.query.number, (v) => {
 .pkt-tbl tbody tr { cursor: pointer; }
 .pkt-tbl tbody tr:hover { background: var(--surface-2); }
 .pkt-tbl tbody tr.active { background: var(--surface-3); }
-.pkt-tbl tbody tr.active td:first-child { box-shadow: inset 2px 0 0 var(--text-3); }
+.pkt-tbl tbody tr.active td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
+.pkt-tbl tbody tr:focus-visible { outline:2px solid var(--brand); outline-offset:-2px; }
 .pkt-tbl td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .pane-info .empty { text-align: left; padding: 14px 12px; }
 

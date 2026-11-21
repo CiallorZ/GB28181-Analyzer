@@ -3,6 +3,7 @@
 """DeepSeek AI 分析接口（SSE 流式）"""
 from __future__ import annotations
 
+import hashlib
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -27,6 +28,11 @@ class ConfigIn(BaseModel):
 class ChatIn(BaseModel):
     question: str
     history: list = []
+    context_hash: str | None = None
+
+
+class AnalyzeIn(BaseModel):
+    context_hash: str | None = None
 
 
 def _sse(event: str, data: dict) -> str:
@@ -65,14 +71,27 @@ def test_conn():
         raise HTTPException(400, str(e))
 
 
-@router.post('/analyze/{task_id}')
-def analyze_stream(task_id: int, db: Session = Depends(get_db)):
-    """真正的逐 token 流式（SSE）"""
+def _context(db: Session, task_id: int) -> str:
     task = db.get(AnalysisTask, task_id)
     if not task:
         raise HTTPException(404, '任务不存在')
     if task.status != 'completed':
         raise HTTPException(400, '任务尚未完成分析')
+    return ai.build_context(db, task_id)
+
+
+@router.get('/context/{task_id}')
+def preview_context(task_id: int, db: Session = Depends(get_db)):
+    context = _context(db, task_id)
+    return {'context': context, 'context_hash': hashlib.sha256(context.encode('utf-8')).hexdigest()}
+
+
+@router.post('/analyze/{task_id}')
+def analyze_stream(task_id: int, body: AnalyzeIn = AnalyzeIn(), db: Session = Depends(get_db)):
+    """真正的逐 token 流式（SSE）"""
+    context = _context(db, task_id)
+    if body.context_hash and body.context_hash != hashlib.sha256(context.encode('utf-8')).hexdigest():
+        raise HTTPException(409, '分析摘要已变化，请重新预览')
 
     def gen():
         # 用一个队列在同步回调与生成器之间传递增量
@@ -86,7 +105,7 @@ def analyze_stream(task_id: int, db: Session = Depends(get_db)):
             try:
                 def on_delta(t):
                     q.put(('delta', t))
-                text = ai.analyze(db, task_id, on_delta=on_delta)
+                text = ai.analyze(db, task_id, on_delta=on_delta, context=context)
                 result['text'] = text
                 q.put(('done', text))
             except RuntimeError as e:
@@ -119,11 +138,9 @@ def analyze_stream(task_id: int, db: Session = Depends(get_db)):
 
 @router.post('/chat/{task_id}')
 def chat(task_id: int, body: ChatIn, db: Session = Depends(get_db)):
-    task = db.get(AnalysisTask, task_id)
-    if not task:
-        raise HTTPException(404, '任务不存在')
-    if task.status != 'completed':
-        raise HTTPException(400, '任务尚未完成分析')
+    context = _context(db, task_id)
+    if body.context_hash and body.context_hash != hashlib.sha256(context.encode('utf-8')).hexdigest():
+        raise HTTPException(409, '分析摘要已变化，请重新分析后追问')
 
     def gen():
         import queue
@@ -136,7 +153,7 @@ def chat(task_id: int, body: ChatIn, db: Session = Depends(get_db)):
                 def on_delta(t):
                     q.put(('delta', t))
                 text = ai.chat(db, task_id, body.history, body.question,
-                               on_delta=on_delta)
+                               on_delta=on_delta, context=context)
                 q.put(('done', text))
             except RuntimeError as e:
                 q.put(('error', str(e)))

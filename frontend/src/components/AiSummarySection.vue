@@ -10,8 +10,9 @@
  *   2. 未分析     → 深度思考按钮
  *   3. 已出结果   → 结论卡 + 关键发现 + 追问入口
  */
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, reactive, computed, watch, nextTick, onUnmounted } from 'vue'
 import { api } from '../api/client'
+import AiContextPreview from './AiContextPreview.vue'
 import { useTaskStore } from '../stores/task'
 import { renderMd } from '../utils/markdown'
 
@@ -26,6 +27,11 @@ function openPanel() { store.openAiPanel() }
 const store = useTaskStore()
 
 const report = ref('')
+const previewOpen = ref(false)
+const reportContextHash = ref('')
+let reportController = null
+let chatController = null
+onUnmounted(() => { reportController?.abort(); chatController?.abort() })
 const running = ref(false)
 const thinkOpen = ref(true)
 const thinkDone = ref(false)
@@ -42,7 +48,7 @@ const chat = ref([])
 const chatBusy = ref(false)
 const chatBox = ref(null)
 
-const PLAN = ['读取分析结果', '梳理信令与媒体关联', '定位故障卡点', '生成排查报告']
+const PLAN = ['等待模型响应', '接收分析结果']
 
 const canAnalyze = computed(() =>
   store.task && store.task.status === 'completed')
@@ -106,77 +112,62 @@ async function loadCfg() {
 function startThinking() {
   thinkOpen.value = true
   thinkDone.value = false
-  thinkTitle.value = '正在深度思考'
+  thinkTitle.value = '等待模型响应'
   steps.value = PLAN.map(t => ({ text: t, state: 'wait', time: '' }))
+  steps.value[0].state = 'active'
   elapsed.value = 0
   const t0 = Date.now()
-  let cur = 0
-  steps.value[0].state = 'active'
-
-  const timer = setInterval(() => {
-    elapsed.value = ((Date.now() - t0) / 1000).toFixed(1)
-    if (cur >= 2) return
-    steps.value[cur].state = 'done'
-    steps.value[cur].time = elapsed.value + 's'
-    cur++
-    steps.value[cur].state = 'active'
-  }, 850)
-
+  const timer = setInterval(() => { elapsed.value = ((Date.now() - t0) / 1000).toFixed(1) }, 200)
   return {
     toReport() {
-      clearInterval(timer)
-      for (let i = 0; i < 3; i++) {
-        if (steps.value[i].state !== 'done') {
-          steps.value[i].state = 'done'
-          steps.value[i].time = elapsed.value + 's'
-        }
-      }
-      steps.value[3].state = 'active'
+      steps.value[0].state = 'done'
+      steps.value[1].state = 'active'
+      thinkTitle.value = '正在接收结果'
     },
     finish() {
       clearInterval(timer)
-      steps.value.forEach(s => {
-        s.state = 'done'
-        if (!s.time) s.time = elapsed.value + 's'
-      })
+      steps.value.forEach(s => { s.state = 'done' })
       thinkDone.value = true
-      thinkTitle.value = '深度思考完成'
-      setTimeout(() => { thinkOpen.value = false }, 2200)
+      thinkTitle.value = '分析完成'
     },
     fail() {
       clearInterval(timer)
       thinkDone.value = true
-      thinkTitle.value = '思考中断'
+      thinkTitle.value = '分析中断'
     }
   }
 }
 
 /* ---- 分析 ---- */
-async function run() {
+async function run(contextHash) {
+  previewOpen.value = false
   if (running.value || !canAnalyze.value) return
   if (!hasKey.value) { openPanel(); return }
 
   running.value = true
   err.value = ''
   report.value = ''
+  reportContextHash.value = ''
   chat.value = []
   const think = startThinking()
+  reportController = new AbortController()
 
   try {
     const res = await fetch(`/api/v1/ai/analyze/${store.currentTaskId}`, {
       method: 'POST',
+      signal: reportController.signal,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ force: true })
+      body: JSON.stringify({ context_hash: contextHash })
     })
     if (!res.ok || !res.body) {
       let m = 'HTTP ' + res.status
-      try { const j = await res.json(); if (j.error) m = j.error } catch { /* 非 JSON 响应 */ }
+      try { const j = await res.json(); if (j.error || j.detail) m = j.error || j.detail } catch { /* 非 JSON 响应 */ }
       throw new Error(m)
     }
 
     const reader = res.body.getReader()
     const dec = new TextDecoder()
-    let buf = '', acc = '', first = true
+    let buf = '', acc = '', first = true, completed = false
 
     while (true) {
       const { done, value } = await reader.read()
@@ -199,19 +190,24 @@ async function run() {
           acc += j.t || ''
           report.value = acc
         } else if (ev === 'done') {
+          completed = true
           report.value = j.text || acc
         } else if (ev === 'error') {
           throw new Error(j.error || '分析失败')
         }
       }
     }
-    if (!report.value.trim()) report.value = '模型没有返回内容'
+    if (!completed) throw new Error('连接中断，分析结果可能不完整，请重试')
+    if (!report.value.trim()) throw new Error('模型没有返回内容')
+    reportContextHash.value = contextHash
     think.finish()
   } catch (e) {
+    report.value = ''
     err.value = e.message
     think.fail()
   } finally {
     running.value = false
+    reportController = null
   }
 }
 
@@ -220,25 +216,32 @@ async function send() {
   const q = question.value.trim()
   if (!q || chatBusy.value || !store.currentTaskId) return
   question.value = ''
-  chat.value.push({ role: 'user', content: q })
-  const history = chat.value.slice(0, -1).map(m => ({ role: m.role, content: m.content }))
-  const slot = { role: 'assistant', content: '', streaming: true }
+  const userMessage = reactive({ role: 'user', content: q })
+  chat.value.push(userMessage)
+  const history = chat.value.slice(0, -1).filter(m => !m.failed).map(m => ({ role: m.role, content: m.content }))
+  const slot = reactive({ role: 'assistant', content: '', streaming: true })
   chat.value.push(slot)
   chatBusy.value = true
+  chatController = new AbortController()
   await nextTick()
   scrollChat()
 
   try {
     const res = await fetch(`/api/v1/ai/chat/${store.currentTaskId}`, {
       method: 'POST',
+      signal: chatController.signal,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question: q, history })
+      body: JSON.stringify({ question: q, history, context_hash: reportContextHash.value })
     })
-    if (!res.ok || !res.body) throw new Error('HTTP ' + res.status)
+    if (!res.ok || !res.body) {
+      let message = 'HTTP ' + res.status
+      try { const data = await res.json(); message = data.error || data.detail || message } catch { /* 非 JSON 响应 */ }
+      throw new Error(message)
+    }
 
     const reader = res.body.getReader()
     const dec = new TextDecoder()
-    let buf = '', acc = ''
+    let buf = '', acc = '', completed = false
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
@@ -260,18 +263,23 @@ async function send() {
           slot.content = acc
           scrollChat()
         } else if (ev === 'done') {
+          completed = true
           slot.content = j.text || acc
         } else if (ev === 'error') {
           throw new Error(j.error || '对话失败')
         }
       }
     }
-    if (!slot.content.trim()) slot.content = '（无返回内容）'
+    if (!completed) throw new Error('连接中断，回答不完整，请重试')
+    if (!slot.content.trim()) throw new Error('模型没有返回内容')
   } catch (e) {
+    userMessage.failed = true
+    slot.failed = true
     slot.content = '对话失败：' + e.message
   } finally {
     slot.streaming = false
     chatBusy.value = false
+    chatController = null
     scrollChat()
   }
 }
@@ -301,7 +309,7 @@ watch(() => store.currentTaskId, loadCfg, { immediate: true })
       <div class="as-title-wrap">
         <div class="as-title">AI 智能分析</div>
         <div class="as-sub">
-          DeepSeek 结合本次分析结果给出故障判断
+          DeepSeek 结合本次分析结果给出故障判断；摘要中的文件名、设备 ID、协商地址和诊断描述已隐藏；追问内容仍由你检查。
           <template v-if="model"> · <span class="mono">{{ model }}</span></template>
         </div>
       </div>
@@ -313,6 +321,8 @@ watch(() => store.currentTaskId, loadCfg, { immediate: true })
     </div>
 
     <div class="as-body">
+      <AiContextPreview v-if="previewOpen" :task-id="store.currentTaskId" @cancel="previewOpen = false" @confirm="run" />
+      <div v-if="err" class="err-box mt-14" role="alert">{{ err }}</div>
       <!-- 未配 Key -->
       <div v-if="!hasKey" class="as-empty">
         <div class="ae-icon">
@@ -334,7 +344,7 @@ watch(() => store.currentTaskId, loadCfg, { immediate: true })
           </div>
         </div>
         <div class="as-cta">
-          <button class="btn primary lg" @click="run">深度思考</button>
+          <button class="btn primary lg" @click="previewOpen = true">查看发送内容</button>
           <div class="cta-hint">
             AI 将读取上述 {{ facts[0].v }} 条报文的分析结果，梳理信令与媒体的关联
           </div>
@@ -394,7 +404,7 @@ watch(() => store.currentTaskId, loadCfg, { immediate: true })
           <div class="fr-body" v-html="renderMd(report)"></div>
         </details>
 
-        <div v-if="err" class="err-box mt-14">{{ err }}</div>
+
 
         <!-- 追问 -->
         <div v-if="report" class="ask">
@@ -418,7 +428,7 @@ watch(() => store.currentTaskId, loadCfg, { immediate: true })
                     @click="send">
               发送
             </button>
-            <button class="btn" :disabled="running" @click="run">重新分析</button>
+            <button class="btn" :disabled="running" @click="previewOpen = true">重新分析</button>
           </div>
         </div>
       </template>
@@ -515,7 +525,7 @@ watch(() => store.currentTaskId, loadCfg, { immediate: true })
   text-align: center;
 }
 .af i {
-  display: block; font-size: 10px;
+  display: block; font-size: 11px;
   color: var(--text-4); font-style: normal;
   margin-bottom: 4px;
 }
@@ -528,6 +538,8 @@ watch(() => store.currentTaskId, loadCfg, { immediate: true })
 .af b.critical { color: var(--critical); }
 
 .as-cta { text-align: center; padding: 6px 0 4px; }
+.ai-sec .btn.primary { background: var(--ds-dk); border-color: var(--ds-dk); color: #fff; }
+.ai-sec .btn.primary:hover:not(:disabled) { background: var(--ds); border-color: var(--ds); }
 .cta-hint {
   font-size: 11.5px; color: var(--text-4);
   margin-top: 12px;
@@ -631,7 +643,7 @@ watch(() => store.currentTaskId, loadCfg, { immediate: true })
   background: var(--surface-3);
   padding: 1.5px 6px; border-radius: 4px;
   font-family: var(--font-mono); font-size: 11.5px;
-  color: #e2c08d;
+  color: var(--warning);
 }
 
 /* 关键发现 */
@@ -705,7 +717,7 @@ watch(() => store.currentTaskId, loadCfg, { immediate: true })
   background: var(--surface-3);
   padding: 1px 5px; border-radius: 3px;
   font-family: var(--font-mono); font-size: 11px;
-  color: #e2c08d;
+  color: var(--warning);
 }
 
 /* 追问 */
@@ -743,7 +755,7 @@ watch(() => store.currentTaskId, loadCfg, { immediate: true })
 }
 .am.assistant .am-bub {
   background: var(--ds-soft);
-  border: 1px solid rgba(77,107,254,.16);
+  border: 1px solid var(--ds-line);
   color: var(--text-2);
 }
 .am.user .am-bub {
@@ -762,7 +774,7 @@ watch(() => store.currentTaskId, loadCfg, { immediate: true })
   background: var(--surface-3);
   padding: 1px 4px; border-radius: 3px;
   font-family: var(--font-mono); font-size: 10.5px;
-  color: #e2c08d;
+  color: var(--warning);
 }
 .ask-in { display: flex; gap: 8px; align-items: center; }
 </style>

@@ -1,15 +1,19 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api/client'
 import { useTaskStore } from '../stores/task'
 import SipLadder from '../components/SipLadder.vue'
 import PageNav from '../components/PageNav.vue'
+import { inviteLatency } from '../utils/sipPhases'
 
 const router = useRouter()
 const store = useTaskStore()
 
 const sessions = ref([])
+const sessionTotal = ref(0)
+const sessionPage = ref(0)
+const sessionsLoading = ref(false)
 const selected = ref(null)
 const sip = ref([])
 const filterMethod = ref('')
@@ -17,25 +21,38 @@ const filterCallId = ref('')
 const err = ref('')
 const selectedMsg = ref(null)
 const loading = ref(false)
+let selectionRequest = 0
+onUnmounted(() => { selectionRequest++ })
 
 async function loadSessions() {
-  if (!store.currentTaskId) return
+  if (!store.currentTaskId || sessionsLoading.value) return
+  sessionsLoading.value = true
+  const page = sessionPage.value + 1
   try {
-    const r = await api.sessions(store.currentTaskId, { page_size: 50 })
-    sessions.value = r.items
-    if (r.items.length) await selectSession(r.items[0].id)
+    const r = await api.sessions(store.currentTaskId, { page, page_size: 50 })
+    sessions.value = page === 1 ? r.items : [...sessions.value, ...r.items]
+    sessionTotal.value = r.total
+    sessionPage.value = page
+    if (page === 1 && r.items.length) await selectSession(r.items[0].id)
   } catch (e) { err.value = e.message }
+  finally { sessionsLoading.value = false }
 }
 
 async function selectSession(id) {
+  const request = ++selectionRequest
   selected.value = id
   loading.value = true
+  err.value = ''
+  sip.value = []
+  selectedMsg.value = null
   try {
     const r = await api.sessionSip(id)
-    sip.value = r.items || []
-    selectedMsg.value = null
-  } catch (e) { err.value = e.message }
-  finally { loading.value = false }
+    if (request === selectionRequest) sip.value = r.items || []
+  } catch (e) {
+    if (request === selectionRequest) err.value = '加载会话信令失败：' + e.message
+  } finally {
+    if (request === selectionRequest) loading.value = false
+  }
 }
 
 const methods = computed(() => {
@@ -77,6 +94,7 @@ const phases = computed(() => {
   add('100 Trying', trying, 'prov')
   add('180 Ringing', ringing, 'prov')
   add('200 OK', ok, 'ok')
+  if (ok) out[out.length - 1].inviteResponse = true
   add('ACK', ack, 'ok')
   add('BYE', bye, 'prov')
   add('200 OK', byeOk, 'ok')
@@ -88,12 +106,7 @@ const phases = computed(() => {
   return out
 })
 
-const latency = computed(() => {
-  const inv = phases.value.find(p => p.label === 'INVITE')
-  const ok = phases.value.find(p => p.label === '200 OK')
-  if (!inv || !ok) return null
-  return +(ok.t - inv.t).toFixed(3)
-})
+const latency = computed(() => inviteLatency(phases.value))
 
 function onPick(m) { selectedMsg.value = m }
 
@@ -109,7 +122,7 @@ onMounted(loadSessions)
   <div class="page">
     <PageNav
       title="SIP 信令分析"
-      :sub="`任务 #${store.currentTaskId || '未选择'} · ${sip.length} 条消息 · ${sessions.length} 个会话`"
+      :sub="`任务 #${store.currentTaskId || '未选择'} · ${sip.length} 条消息 · ${sessionTotal} 个会话`"
       :crumbs="[{label:'工作台', to:'/'}, {label:'SIP 信令分析'}]">
       <template #actions>
         <select v-model="filterMethod" class="inp sm" style="width:132px">
@@ -135,12 +148,13 @@ onMounted(loadSessions)
       <aside class="side">
         <div class="side-head">
           会话
-          <span class="cnt">{{ sessions.length }}</span>
+          <span class="cnt">{{ sessionTotal }}</span>
         </div>
         <div class="side-body">
           <div v-for="s in sessions" :key="s.id"
                class="sess" :class="{ on: selected === s.id }"
-               @click="selectSession(s.id)">
+               role="button" tabindex="0" :aria-pressed="selected === s.id"
+               @click="selectSession(s.id)" @keydown.enter.prevent="selectSession(s.id)" @keydown.space.prevent="selectSession(s.id)">
             <div class="se-top">
               <span class="mono-sm">#{{ s.id }}</span>
               <span class="badge" :class="s.signal_status === 'success' ? 'ok'
@@ -154,7 +168,10 @@ onMounted(loadSessions)
               <template v-if="s.total_duration"> · {{ s.total_duration.toFixed(2) }}s</template>
             </div>
           </div>
-          <div v-if="!sessions.length" class="empty" style="padding:30px 12px">
+          <button v-if="sessions.length < sessionTotal" class="btn sm" :disabled="sessionsLoading" @click="loadSessions">
+            {{ sessionsLoading ? '加载中…' : '加载更多会话' }}
+          </button>
+          <div v-if="!sessions.length && !sessionsLoading && !err" class="empty" style="padding:30px 12px">
             无会话
           </div>
         </div>
@@ -202,7 +219,8 @@ onMounted(loadSessions)
             </span>
           </div>
           <div class="sec-body tight">
-            <SipLadder :key="selected || 0" :messages="filtered" @select="onPick" />
+            <div v-if="loading" class="empty" role="status">正在加载会话信令…</div>
+            <SipLadder v-else :key="selected || 0" :messages="filtered" @select="onPick" />
           </div>
         </div>
 
@@ -322,14 +340,14 @@ onMounted(loadSessions)
 
 .side {
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-2);
   border-radius: var(--radius);
   overflow: hidden;
   position: sticky; top: 78px;
 }
 .side-head {
-  padding: 11px 14px;
-  background: var(--surface-2);
+  padding: 14px;
+  background: var(--surface);
   border-bottom: 1px solid var(--line);
   font-size: 12px; font-weight: 600;
   display: flex; align-items: center; gap: 8px;
@@ -349,10 +367,11 @@ onMounted(loadSessions)
 }
 .sess:hover { background: var(--surface-2); }
 .sess.on {
-  background: var(--surface-3);
-  border-left: 2px solid var(--text-3);
+  background: var(--brand-soft);
+  border-left: 2px solid var(--brand);
   padding-left: 11px;
 }
+.sess:focus-visible { outline:2px solid var(--brand); outline-offset:-2px; }
 .se-top {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 3px;
@@ -368,7 +387,7 @@ onMounted(loadSessions)
 
 .phase-strip {
   display: flex; gap: 0;
-  overflow-x: auto; padding: 8px 0 4px;
+  overflow-x: auto; padding: 16px 8px 12px;
 }
 .ph {
   flex: 1; min-width: 88px;

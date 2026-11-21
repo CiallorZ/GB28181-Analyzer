@@ -393,6 +393,7 @@ def parse_rfc4571_ex(buf: bytes, max_scan: int = 8000, min_pkts: int = 3):
         o = off
         pkts = []
         truncated = 0
+        stream_ssrc = None
         while o + 2 <= len(buf):
             L = int.from_bytes(buf[o:o + 2], 'big')
             if L < 12 or L > MAX_RTP_PACKET:
@@ -404,14 +405,30 @@ def parse_rfc4571_ex(buf: bytes, max_scan: int = 8000, min_pkts: int = 3):
             pp = buf[o + 2:o + 2 + L]
             if (pp[0] >> 6) != 2:
                 break
+            header_length = 12 + 4 * (pp[0] & 0x0f)
+            if header_length > L:
+                break
+            if pp[0] & 0x10:
+                if header_length + 4 > L:
+                    break
+                header_length += 4 + 4 * int.from_bytes(pp[header_length + 2:header_length + 4], 'big')
+                if header_length > L:
+                    break
+            ssrc = int.from_bytes(pp[8:12], 'big')
+            if stream_ssrc is not None and ssrc != stream_ssrc:
+                break
+            stream_ssrc = ssrc
+            padding = pp[-1] if pp[0] & 0x20 else 0
+            if pp[0] & 0x20 and (not padding or padding > L - header_length):
+                break
             pkts.append(RtpPacket(
                 seq=int.from_bytes(pp[2:4], 'big'),
                 timestamp=int.from_bytes(pp[4:8], 'big'),
-                ssrc=int.from_bytes(pp[8:12], 'big'),
+                ssrc=ssrc,
                 payload_type=pp[1] & 0x7f,
                 marker=bool((pp[1] >> 7) & 1),
                 size=L,
-                payload=pp[12:],
+                payload=pp[header_length:L - padding if padding else L],
             ))
             o += 2 + L
         if len(pkts) >= min_pkts and (best is None or len(pkts) > len(best[1])):

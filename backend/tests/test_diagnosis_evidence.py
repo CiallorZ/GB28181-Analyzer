@@ -81,3 +81,24 @@ def test_med_002_points_at_packet_after_gap():
     })
     ev = next(x for x in out if x.rule_id == 'MED-002')
     assert ev.related_packet_ids == [77]
+
+
+def test_media_diagnostic_does_not_claim_an_unobserved_ack():
+    out = d.diagnose({'sessions': [_session(media_status='no_media')],
+                      'streams': [], 'messages': []})
+    event = next(x for x in out if x.rule_id == 'MED-001')
+    assert 'ACK' not in event.description
+    assert '成功最终响应' in event.description
+
+
+def test_rebuild_environment_error_is_not_reported_as_invalid_media():
+    from app.services import diagnosis
+
+    events = diagnosis._check_media([], [{
+        'id': 1, 'ssrc': 1234, 'packet_count': 12,
+        'rebuild_error': '未找到 ffmpeg，无法转码',
+    }], {})
+    event = next(event for event in events if event.rule_id == 'MED-008')
+    assert event.evidence['rebuild_error'] == '未找到 ffmpeg，无法转码'
+    assert '无法被解码器接受' not in event.description
+    assert 'FFmpeg' in event.recommendations[0]
