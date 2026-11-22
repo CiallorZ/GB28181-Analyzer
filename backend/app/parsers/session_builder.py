@@ -292,7 +292,7 @@ def build_sessions(dialogs: list[DialogInfo],
                             for x in d.messages)
             s.end_reason = 'normal' if has_final else 'abnormal'
             if not has_final:
-                s.notes.append('发出 BYE 但未收到最终响应，事务未正常终止')
+                s.notes.append('抓包中未观察到 BYE 成功响应')
         elif d.answer_time is not None:
             s.end_reason = 'capture_ended'
             s.notes.append('抓包结束时会话仍在进行（未见 BYE），需确认抓包范围')

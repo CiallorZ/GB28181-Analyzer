@@ -912,6 +912,8 @@ def _message_dict(info) -> dict:
         'method': info.method,
         'is_request': info.is_request,
         'status_code': info.status_code,
+        'cseq_number': info.cseq_number,
+        'via_branch': info.via_branch,
     }
 
 

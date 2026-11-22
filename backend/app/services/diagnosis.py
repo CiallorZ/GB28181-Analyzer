@@ -55,7 +55,7 @@ RULES = {
     'SIP-005': '请求与响应无法关联',
     'SIP-006': 'SIP 消息结构异常',
     'SIP-007': '会话非正常结束',
-    'SIP-008': 'BYE 未收到最终响应',
+    'SIP-008': 'BYE 结束异常',
     'SDP-001': 'SDP 媒体地址异常',
     'SDP-002': 'SDP 协商与实际媒体不匹配',
     'SDP-003': 'SSRC 不一致',
@@ -234,23 +234,41 @@ def _check_signal(sessions: list, messages: list) -> list[Diagnostic]:
                                  '查看对端返回的错误原因短语'],
             ))
 
-        # SIP-008 BYE 无最终响应
         if s.get('end_reason') == 'abnormal':
+            def bye_key(m):
+                return m.get('call_id'), m.get('cseq_number'), m.get('via_branch')
+
+            requests = {
+                bye_key(m) for m in messages
+                if m.get('call_id') in call_ids and m.get('method') == 'BYE'
+                and m.get('is_request') and m.get('cseq_number') is not None
+                and m.get('via_branch')
+            }
+            failure = next((
+                m for m in messages if m.get('method') == 'BYE'
+                and not m.get('is_request') and 300 <= (m.get('status_code') or 0) <= 699
+                and bye_key(m) in requests
+            ), None)
+            code = failure['status_code'] if failure else None
+            packets = _packets_of(
+                messages, call_ids,
+                lambda m: m.get('is_request') and m.get('method') == 'BYE'
+                and (failure is None or bye_key(m) == bye_key(failure)),
+                limit=3)
+            if failure and failure.get('packet_number'):
+                packets.append(failure['packet_number'])
             out.append(Diagnostic(
                 rule_id='SIP-008',
                 severity=WARNING,
                 evidence_level=CONFIRMED,
-                title='BYE 未收到最终响应',
-                description=('会话 %s 发出 BYE 后未收到 2xx 响应，'
-                             'SIP 事务未正常终止，发送方会持续重传直到超时。'
-                             % (dev or '未知')),
+                title='BYE 返回 SIP %d' % code if code else '未观察到 BYE 最终响应',
+                description=('抓包中观察到匹配的 BYE 失败响应 SIP %d。' % code
+                             if code else '抓包中未观察到匹配的 BYE 最终响应，'
+                             '请核对抓包时间范围和响应方向。'),
                 session_id=sid, device_id=dev,
                 timestamp=s.get('end_time'),
-                evidence={'bye_time': s.get('end_time')},
-                related_packet_ids=_packets_of(
-                    messages, call_ids,
-                    lambda m: m.get('is_request') and m.get('method') == 'BYE',
-                    limit=3),
+                evidence={'bye_time': s.get('end_time'), 'bye_response_code': code},
+                related_packet_ids=packets,
                 possible_causes=['对端 SIP 栈事务处理不完整',
                                  'BYE 的响应方向未被抓包'],
                 recommendations=['要求对端修复 BYE 事务响应',

@@ -53,6 +53,22 @@ def test_sip_001_points_at_invite():
     assert ev.related_packet_ids == [10]
 
 
+def test_sip_008_distinguishes_matching_failure_from_missing_response():
+    request = _msg(30, method='BYE', is_request=True, cseq_number=2, via_branch='bye')
+    wrong = _msg(31, method='BYE', status_code=481, cseq_number=3, via_branch='other')
+    response = _msg(32, method='BYE', status_code=481, cseq_number=2, via_branch='bye')
+
+    for messages, expected_code, packets in [
+        ([request, wrong], None, [30]),
+        ([request, wrong, response], 481, [30, 32]),
+    ]:
+        events = d.diagnose({'sessions': [_session(end_reason='abnormal')],
+                             'streams': [], 'messages': messages})
+        event = next(x for x in events if x.rule_id == 'SIP-008')
+        assert event.evidence['bye_response_code'] == expected_code
+        assert event.related_packet_ids == packets
+
+
 def test_sip_008_points_at_bye():
     out = d.diagnose({
         'sessions': [_session(end_reason='abnormal')],
