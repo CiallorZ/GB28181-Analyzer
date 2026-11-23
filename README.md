@@ -1,35 +1,93 @@
 # GB28181 Analyzer
 
-适用于 Windows x64 的 GB/T 28181 离线抓包分析工作站。遇到「点播有响应，画面却没有出来」，可以沿同一会话核对信令、媒体和视频重建结果，并导出带证据的报告。
+**GB/T 28181 协议与媒体分析工作站 · Windows x64 单机版**
 
-**[下载 v1.1.5 Windows x64 离线单文件 EXE](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v1.1.5/GB28181-Analyzer-v1.1.5-offline-x64.exe)** · [校验和与版本记录](https://github.com/CiallorZ/gb28181-analyzer/releases/tag/v1.1.5)
+平台返回了 SIP 200 OK，为什么预览仍然黑屏？GB28181 Analyzer 把点播信令、SDP 协商、实际捕获的媒体、重建画面和诊断证据放进同一个任务。现场工程师可以从异常结论回到具体报文，平台和设备开发人员可以对照两端抓包，交付人员可以导出可复核的报告。
 
-## 首次打开
+**[下载 v1.1.5 离线单文件 EXE](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v1.1.5/GB28181-Analyzer-v1.1.5-offline-x64.exe)** · [SHA-256 校验文件](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v1.1.5/OFFLINE-SHA256.txt) · [发行说明](https://github.com/CiallorZ/gb28181-analyzer/releases/tag/v1.1.5)
 
-1. 双击离线 EXE。首次启动会将内置工具解压到当前用户的本机缓存，后续打开复用缓存。整个过程无需管理员权限。
-2. 程序自带 TShark、Capinfos、FFmpeg、FFprobe 和固定版本 WebView2。分析已有抓包和重建视频无需联网或配置 PATH。实时网卡采集另需 Npcap 驱动。
-3. 拖入 PCAP、PCAPNG 或 CAP 文件，或先点击「试用示例抓包」。分析完成后从工作台的关键诊断进入证据。
+![工作台实图：左侧可导入抓包或试用示例，右侧展示平台与设备之间的点播流程](docs/images/workbench-intake.png)
 
-## 从结论查到报文
+*首页实图。右侧动画用于解释点播协议；进入任务后的时序图按实际捕获的消息绘制。*
 
-| 想回答的问题 | 核对位置 |
-| --- | --- |
-| 点播协商进行到哪一步？ | 在 SIP 时序中选择消息，核对 Call-ID、响应、SDP 地址及端口，再打开关联报文。 |
-| 抓包点观察到了哪些媒体？ | 查看 RTP 流、SSRC、码率、抖动及序号缺口。信令成功、捕获媒体、视频可解码是三个独立观察结果。 |
-| 能否还原视频？ | 在媒体详情选择流，查看编码参数、重建状态、预览或下载。结果取决于抓包完整性和解码工具。 |
-| 两个抓包点看到的结果有何不同？ | 在「双包对比」选择两个已完成任务。先核对对齐置信度，再查差异和未对齐项。[对比方法](docs/COMPARE.md) |
-| 如何交接排查结果？ | 从完成任务导出诊断报告，保留会话、流和报文依据。历史任务可在下次启动后继续查看。 |
+## 第一次使用
 
-## 数据和 AI
+1. 在 Windows x64 上双击名称含 **offline-x64** 的 EXE。首次启动会将工具展开到当前用户的缓存，建议预留数 GB 空间，并为抓包和视频另留空间。后续启动复用缓存。本版未签名，可用 PowerShell 的 `Get-FileHash` 与发布页校验文件核对。
+2. 点击 **试用示例抓包** 熟悉工作台，或拖入自己的 PCAP、PCAPNG、CAP 文件。工具在本机完成导入和分析。离线 EXE 已包含 TShark、Capinfos、FFmpeg、FFprobe 和 WebView2，无需配置 PATH。
+3. 打开 **分析结论**，选择 **查看证据**。核对关联会话、信令消息、媒体流或原始报文，再决定需要转交哪些报告和视频。
 
-桌面版默认监听本机，抓包、数据库及分析产物默认位于 Windows 用户目录下的 `%LOCALAPPDATA%\GB28181 Analyzer`。删除任务或清理数据前，请先归档所需报告和视频。
+离线分析已有文件无需抓包驱动。直接从本机网卡采集需要 Npcap 和相应权限。发布页另有精简 ZIP，使用该包时需要自行准备外部工具。[Windows 使用说明](docs/WINDOWS.md)
 
-DeepSeek 是可选外部服务。用户自行提供 API Key，环境变量 `DEEPSEEK_API_KEY` 优先于本机设置。通过设置保存的密钥位于本机应用数据目录，勿分享该目录。发送前可查看结构化摘要并确认。规则诊断可离线独立使用，AI 建议需回到原始证据核实。
+## 功能图
 
-## 适用边界
+```mermaid
+flowchart LR
+    A["抓包分析任务"] --> B["分析结论"]
+    B --> C["规则事件与证据等级"]
+    C --> D["会话详情与报文编号"]
+    A --> E["SIP 时序与 SDP 协商"]
+    E --> D
+    A --> F["RTP 媒体流"]
+    F --> G["码率、抖动、序号缺口"]
+    F --> H["编码、视频重建与预览"]
+    D --> I["协议字段与 HEX"]
+    A --> J["归档与协作"]
+    J --> K["报告导出"]
+    J --> L["两个完成任务的对比"]
+    A -. "用户确认后" .-> M["DeepSeek 专家会诊"]
+```
 
-未捕获 RTP 只说明当前抓包点和时间窗未观察到对应媒体。TCP 承载流的序号缺口不能直接换算成网络丢包。首 RTP 时间与终端实际出画时间也需分别衡量。完整 RTCP 对时、多跳拓扑和团队数据库见[实施状态](IMPLEMENTATION_STATUS.md)。Windows 便携包未做代码签名，下载后可核对发布页 SHA-256。
+## 实例：从一次黑屏点播查起
 
-## 使用与维护
+| 顺序 | 在工作台上做什么 | 能回答的问题 |
+| --- | --- | --- |
+| 1 · 查信令 | 打开 SIP 时序，按方法筛选，点选 INVITE、响应、ACK 或 BYE，查看 Call-ID 和 CSeq。 | 当前抓包点观察到哪些请求与响应？哪一步需要检查原始报文？ |
+| 2 · 查协商 | 从消息详情读 SDP，核对媒体地址、端口、传输方式与 SSRC。 | 两端在信令中协商了什么？ |
+| 3 · 查媒体 | 选择关联流，对照实际端点、SSRC、码率、抖动、乱序和序号缺口。 | 在当前抓包时间窗内，观察到了什么媒体数据？ |
+| 4 · 查画面 | 查看编码、分辨率、关键帧和重建状态；有重建产物时播放或下载。 | 现有媒体数据能否组成可解码的视频？ |
+| 5 · 交接证据 | 从诊断事件跳到关联报文，核对协议树与 HEX，导出 Markdown、JSON、HTML 或 CSV 任务报告。 | 下一位工程师能否从同一批证据复核结论？ |
 
-[Windows 安装与排障](docs/WINDOWS.md) · [架构](ARCHITECTURE.md) · [源码开发和测试](CONTRIBUTING.md) · [验收记录与性能基线](docs/FREEZE_V1_1.md) · [更新记录](CHANGELOG.md) · [MIT 许可证](LICENSE)
+SIP 成功响应只确认相应信令事务。未捕获 RTP 时，应先核对抓包点、过滤条件和时间窗。TCP 承载 RTP 的序号缺口不能直接换算成网络丢包率。首媒体耗时与终端真正显示第一帧也有不同的测量口径。
+
+### 设备侧与平台侧如何对比
+
+分别导入同一次业务的两份抓包，待两个任务完成后进入 **双包对比**。先查看会话对齐方式，再检查协商、媒体、编码和诊断差异。Call-ID 相交可精确对齐，唯一业务标识可辅助推断；歧义与未对齐项单列。对比只读取入库结果，支持导出 Markdown 和 JSON 快照。任务重新分析后可查看原快照及过期提示。[对齐规则、容差和局限](docs/COMPARE.md)
+
+### 何时使用 DeepSeek
+
+需要整理多条证据或规划下一次现场复核时，打开任务中的专家会诊。可以选择 **综合研判、信令事务、媒体链路、现场排障**。选择专家后先看本次分析重点，再预览待发送摘要并确认。报告和后续追问支持流式输出，可使用预设问题继续核对同一任务。
+
+AI 是可选的联网服务，发行包不提供测试 Key。用户可设置环境变量 `DEEPSEEK_API_KEY`，或在本机设置中保存自己的 Key；环境变量优先。请勿分享带密钥的应用配置。没有 Key 时，规则诊断、媒体分析和报告导出仍可使用。AI 给出的可能原因需结合报文或现场复测验证。
+
+## 架构图
+
+```mermaid
+flowchart TD
+    EXE["离线 EXE · 当前用户运行时缓存"] --> SHELL["Tauri 桌面窗口 · WebView2"]
+    SHELL --> UI["Vue 3 工作台 · Pinia · ECharts"]
+    UI <-->|"本机 HTTP /api/v1"| API["FastAPI 分析服务"]
+    API --> TASK["任务调度与分析流水线"]
+    TASK --> READ["TShark / Capinfos 读取抓包"]
+    READ --> PARSE["SIP / SDP / RTP 解析与会话关联"]
+    PARSE --> MEDIA["PS / ES 提取 · FFmpeg / FFprobe"]
+    PARSE --> RULE["规则诊断与证据关联"]
+    RULE --> DB["SQLite · 任务与分析结果"]
+    MEDIA --> FILES["本机文件 · 重建视频与产物"]
+    API --> DB
+    API --> FILES
+    API -. "明确确认后的结构化摘要" .-> AI["DeepSeek API"]
+```
+
+默认应用数据目录为 `%LOCALAPPDATA%\GB28181 Analyzer`。历史任务和分析产物可在重启后继续访问。清理任务前，请先导出需要留存的报告和视频；离线运行时缓存的清理方式见 Windows 使用说明。[架构与解析设计](ARCHITECTURE.md)
+
+## 验收与适用范围
+
+项目面向单机离线排障。已有现场验收使用 73,049 个报文的抓包，覆盖自动分析、视频播放、报文跳转和报告导出。已有性能基线中，227.72 MiB 样本分析耗时约 160 秒、峰值内存约 2.55 GiB。抓包内容、流数、磁盘性能与视频重建工作量都会影响结果。[验收与性能基线](docs/FREEZE_V1_1.md)
+
+RTCP 已有接收报告块等证据，完整 SR/RR 对时仍有局限；端点关系可供核对，多跳交互拓扑和团队数据库属于后续范围。[当前实现与已知限制](IMPLEMENTATION_STATUS.md) · [开放 Issue](https://github.com/CiallorZ/gb28181-analyzer/issues)
+
+## 开发与维护
+
+前端位于 `frontend/`，后端位于 `backend/`，桌面壳位于 `desktop/`，离线启动器与打包脚本位于 `scripts/offline/`。开发者可分别启动本地 API 和前端，按贡献指南执行后端 pytest 及前端 lint、Vitest、构建与体积预算检查。
+
+[开发环境与验证命令](CONTRIBUTING.md) · [发布流程](docs/RELEASE.md) · [更新记录](CHANGELOG.md) · [MIT 许可证](LICENSE)
