@@ -23,6 +23,7 @@ from datetime import timedelta
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from ..core import analysis_control
 from ..core.config import settings
 from ..core.timeutil import utcnow
 from ..models.entities import AnalysisTask, TaskComparison, TaskStatus
@@ -94,6 +95,18 @@ def purge_task_media(db: Session, task_id: int, drop_task: bool = False) -> dict
 
     drop_task=True 时连任务记录一起删（彻底删除）
     """
+    if drop_task:
+        return _purge_task_media(db, task_id, True)
+    with analysis_control.task_lock:
+        task = db.get(AnalysisTask, task_id, populate_existing=True)
+        if not task or task.status == TaskStatus.ANALYZING or (
+            task_id in analysis_control.active_tasks and task.status != TaskStatus.COMPLETED
+        ):
+            return {'removed': 0, 'freed_mb': 0}
+        return _purge_task_media(db, task_id, False)
+
+
+def _purge_task_media(db: Session, task_id: int, drop_task: bool) -> dict:
     task = db.get(AnalysisTask, task_id)
     if not task:
         return {'removed': 0, 'freed_mb': 0}
@@ -153,7 +166,7 @@ def purge_task_media(db: Session, task_id: int, drop_task: bool = False) -> dict
     }
 
 
-def auto_purge(db: Session) -> dict:
+def auto_purge(db: Session, *, keep_tasks: int | None = None) -> dict:
     """按策略自动清理
 
     在以下时机调用：
@@ -161,6 +174,7 @@ def auto_purge(db: Session) -> dict:
       - 每次分析完成后
     """
     actions = []
+    keep_tasks = settings.KEEP_TASKS if keep_tasks is None else keep_tasks
 
     tasks = db.scalars(
         select(AnalysisTask).order_by(AnalysisTask.created_at.desc())).all()
@@ -168,8 +182,8 @@ def auto_purge(db: Session) -> dict:
         return {'actions': [], 'usage': total_disk_usage()}
 
     # ---- 1. 保留数量 ----
-    if settings.KEEP_TASKS > 0:
-        for t in tasks[settings.KEEP_TASKS:]:
+    if keep_tasks > 0:
+        for t in tasks[keep_tasks:]:
             if t.files and not (t.configuration or {}).get('media_purged'):
                 r = purge_task_media(db, t.id, drop_task=False)
                 if r['removed']:
@@ -177,7 +191,7 @@ def auto_purge(db: Session) -> dict:
                         'task_id': t.id, 'reason': '超出保留数量',
                         **r
                     })
-    elif settings.KEEP_TASKS == 0:
+    elif keep_tasks == 0:
         # 不保留：所有已完成任务都清掉媒体
         for t in tasks:
             if t.status == TaskStatus.COMPLETED and \

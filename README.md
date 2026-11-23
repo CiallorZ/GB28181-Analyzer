@@ -97,6 +97,7 @@ npm run dev
 
 - [架构与数据流](ARCHITECTURE.md)
 - [贡献指南与验证命令](CONTRIBUTING.md)
+- [当前实施状态与已知限制](IMPLEMENTATION_STATUS.md)
 - [发布与 Windows 打包流程](docs/RELEASE.md)
 - [测试抓包与预期结果](backend/tests/fixtures/README.md)
 - [变更记录](CHANGELOG.md) · [路线图](docs/ROADMAP.md)

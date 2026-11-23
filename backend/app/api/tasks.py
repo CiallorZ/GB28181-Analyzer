@@ -31,8 +31,8 @@ from ..schemas import task as S
 
 router = APIRouter(prefix='/tasks', tags=['tasks'])
 
-_running = {}
-_run_lock = threading.Lock()
+_running = analysis_control.active_tasks
+_run_lock = analysis_control.task_lock
 
 
 # ---------------------------------------------------------------
@@ -81,6 +81,11 @@ async def upload_file(file: UploadFile = File(...),
     except Exception as e:
         dest.unlink(missing_ok=True)
         raise HTTPException(500, '写入文件失败：%s' % e)
+
+    except BaseException:
+        # Cancellation also owns the partially written capture.
+        dest.unlink(missing_ok=True)
+        raise
 
     if size == 0:
         dest.unlink(missing_ok=True)
@@ -285,13 +290,6 @@ def start_analyze(task_id: int, bg: BackgroundTasks,
     # 再因为文件缺失失败 —— 用户等于白丢一份分析结果。
     if not task.files:
         raise HTTPException(409, '任务没有关联抓包文件')
-    missing = [cf.filename for cf in task.files
-               if not cf.stored_path or not os.path.isfile(cf.stored_path)]
-    if missing:
-        raise HTTPException(
-            409, '源文件已不存在（可能被保留策略清理）：%s，请重新上传'
-                 % '、'.join(missing))
-
     if task.status == TaskStatus.COMPLETED and not (
         capture.TSHARK and os.path.isfile(capture.TSHARK)
     ):
@@ -303,6 +301,13 @@ def start_analyze(task_id: int, bg: BackgroundTasks,
         # 此时再点一次会起第二个线程，两个线程同时删同一批结果。
         if task_id in _running:
             raise HTTPException(409, '任务正在分析中')
+
+        missing = [cf.filename for cf in task.files
+                   if not cf.stored_path or not os.path.isfile(cf.stored_path)]
+        if missing:
+            raise HTTPException(
+                409, '源文件已不存在（可能被保留策略清理）：%s，请重新上传'
+                     % '、'.join(missing))
 
         running = sum(1 for v in _running.values() if v)
         if running >= settings.MAX_CONCURRENT_TASKS:
@@ -461,15 +466,7 @@ def storage_purge(keep: int | None = None, db: Session = Depends(get_db)):
     keep 为空时按当前策略执行
     """
     from ..services import retention
-    old = settings.KEEP_TASKS
-    if keep is not None:
-        settings.KEEP_TASKS = max(0, keep)
-    try:
-        r = retention.auto_purge(db)
-    finally:
-        if keep is not None:
-            settings.KEEP_TASKS = old
-    return r
+    return retention.auto_purge(db, keep_tasks=None if keep is None else max(0, keep))
 
 
 @router.delete('/storage/all')

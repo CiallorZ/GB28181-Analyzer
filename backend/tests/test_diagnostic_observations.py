@@ -83,3 +83,17 @@ def test_sdp_port_count_is_valid():
     from app.parsers.sip_parser import parse_sdp
     sdp = parse_sdp('v=0\r\nm=video 5004/2 RTP/AVP 96')
     assert sdp.media[0]['port'] == 5004 and not sdp.errors
+
+@pytest.mark.parametrize(('rule', 'quiet', 'observed', 'measurement'), [
+    ('MED-003', {'jitter_avg': 50}, {'jitter_avg': 200}, 'jitter_avg_ms'),
+    ('MED-004', {'max_gap': 3}, {'max_gap': 3.01}, 'max_gap_seconds'),
+    ('MED-005', {'ts_anomalies': [{'type': 'wrap'}]},
+     {'ts_anomalies': [{'type': 'wrap'}, {'type': 'backward'}]}, 'kinds'),
+])
+def test_media_rule_boundaries(rule, quiet, observed, measurement):
+    assert not matches(rule, streams=[{'id': 7, 'ssrc': 0, **quiet}])
+    event, = matches(rule, streams=[{'id': 7, 'ssrc': 0, **observed}])
+    assert event.stream_id == 7 and event.evidence_level == 'confirmed'
+    assert measurement in event.evidence
+    if rule == 'MED-005':
+        assert event.evidence[measurement] == {'backward': 1}
