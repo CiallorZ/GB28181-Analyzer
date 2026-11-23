@@ -15,6 +15,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  windows-candidate:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/windows.yml
+    with:
+      artifact-name: windows-candidate-${{ github.event.pull_request.head.sha }}
+
   lint:
     name: 后端静态检查
     runs-on: ubuntu-latest

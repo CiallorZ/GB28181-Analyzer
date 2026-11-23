@@ -26,6 +26,7 @@ from ..models.entities import (
 from .diagnosis import RULES, severity_order_clause
 
 DEFAULT_BASE = 'https://api.deepseek.com'
+DEFAULT_MODEL = 'deepseek-flash'
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -34,7 +35,6 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
-DEFAULT_MODEL = 'deepseek-chat'
 AI_TIMEOUT = 180
 CONFIG_PATH = settings.DATA_DIR / 'ai_config.json'
 

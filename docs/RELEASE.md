@@ -37,6 +37,10 @@ cd .. && docker compose config -q     # 有 Docker 时再跑一次 compose
 界面至少覆盖：暗色、亮色、390px 移动端各截一次关键页面，控制台无 error。
 报告导出需要实际下载一次 `.md` 与 `.json`，确认内容与页面数字一致。
 
+可选 AI 服务纳入发布目标时，从仓库根目录执行 `backend/.venv/Scripts/python scripts/verify-deepseek.py`。进程从 `DEEPSEEK_API_KEY` 读取凭据，用临时数据库中的合成会话调用官方服务，验证流式报告和追问均收到正文及结束事件。运行会使用该账户的 API 额度，输出仅记录模型名及两次回复长度。
+
+面向 main 的 PR 还会在干净的 Windows x64 runner 构建候选 ZIP。测试解压后启动引擎和桌面窗口、访问对比入口、关闭窗口并确认引擎退出。可在该次 CI 的 Artifacts 下载按 PR 提交 SHA 命名的候选制品。
+
 ## 4. 提交与打标签
 
 ```bash

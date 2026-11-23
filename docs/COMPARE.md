@@ -61,6 +61,16 @@ Markdown 包含范围、生成时间、指纹、过期状态、对齐依据、�
 
 在 backend 目录执行 `python -m pytest tests/test_comparisons.py -k typical_scale -s -q`。测试在临时文件型 SQLite 库中为每侧准备 500 个会话、每会话 4 条流。计时从 TestClient 发起 POST 到完整响应返回，包含查询、对齐、统计、序列化和提交，排除造数。本机 Windows 实测 **0.154 秒**，响应 **560,839 字节**，保存 200 对会话、500 对流明细，完整计数 500 对会话、2,000 对流。该用例为构造数据，无诊断事件；不同硬件、磁盘负载和诊断量会影响耗时。
 
+## 使用公开点播样本复验
+
+从 [SRS 国标点播文档](https://ossrs.net/lts/zh-cn/docs/v6/doc/gb28181) 下载并解压 `gb-media-ps-normal.pcapng.zip`。在仓库根目录使用后端开发环境运行以下命令，最后一个参数指定新的输出目录。
+
+```powershell
+backend/.venv/Scripts/python scripts/verify-public-playback.py D:/captures/gb-media-ps-normal.pcapng D:/captures/comparison-results
+```
+
+脚本校验原始抓包的 SHA-256，保留 A 的完整记录。B 使用 TShark 过滤式 `not tcp.port == 9000 or frame.number <= 1600` 生成，模拟同一次点播在另一抓包点提前结束媒体记录。两个文件分别通过上传、分析、对比和报告接口。预期 Call-ID 为 `854k7337207yxpfj`，两侧 SSRC 均为 `200007585`，媒体包数分别为 1669 和 811。脚本校验两份 MP4 的分辨率、Markdown 行和 JSON 快照，留下抓包、视频和报告。包数差在本例由过滤条件产生。
+
 ## 局限
 
 - 对比只描述两侧观察到的结果差异，不证明差异发生的位置或原因。
