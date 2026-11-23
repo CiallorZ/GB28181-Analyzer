@@ -9,7 +9,7 @@
    ============================================================ */
 
 :root {
-  --app-header-height: 68px;
+  --app-header-height: 56px;
   /* ---- 品牌：中国铁塔 ---- */
   --brand: #D70C1A;
   --brand-dk: #A80D17;
@@ -798,4 +798,33 @@ select.inp { cursor: pointer; }
 }
 @media (prefers-reduced-transparency: reduce), (forced-colors: active) {
   .glass-panel.glass-panel { background:var(--surface); backdrop-filter:none; }
+}
+
+:root {
+  --color-bg: var(--bg);
+  --color-bg-secondary: var(--bg-2);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-2);
+  --color-surface-active: var(--surface-3);
+  --color-border: var(--line);
+  --color-border-strong: var(--line-2);
+  --color-text-primary: var(--text);
+  --color-text-secondary: var(--text-2);
+  --color-text-muted: var(--text-4);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-lt);
+  --color-info: var(--info);
+  --color-success: var(--ok);
+  --color-warning: var(--warning);
+  --color-danger: var(--critical);
+  --color-unknown: var(--unknown);
+  --color-ai: var(--ds);
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --radius-md: var(--radius);
+  font-variant-numeric: tabular-nums;
 }

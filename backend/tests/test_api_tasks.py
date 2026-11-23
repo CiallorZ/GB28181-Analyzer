@@ -364,3 +364,20 @@ def test_reanalysis_without_tshark_preserves_report(client, db, make_task, monke
     monkeypatch.setattr(capture, 'TSHARK', None)
     assert client.post(endpoint + '/analyze').status_code == 409
     assert client.get(endpoint + '/report?format=json').json() == original.json()
+
+
+def test_packet_range_sort_and_pagination(client, db, make_task):
+    from app.models.entities import PacketIndex
+
+    task = make_task(path=__file__)
+    for number, timestamp in enumerate([None, 0.0, 1.0, 2.0], start=1):
+        db.add(PacketIndex(task_id=task.id, file_id=task.files[0].id,
+                           packet_number=number, timestamp=timestamp))
+    db.commit()
+    params = dict(time_from=0.0, time_to=1.0, descending=True, page_size=1)
+    url = f'/api/v1/tasks/{task.id}/packets'
+    for page, expected in enumerate([3, 2], start=1):
+        result = client.get(url, params={**params, 'page': page}).json()
+        assert result['total'] == 2
+        assert [row['packet_number'] for row in result['items']] == [expected]
+    assert client.get(url).json()['items'][0]['packet_number'] == 1

@@ -74,6 +74,8 @@ def list_packets(task_id: int, page: int = 1, page_size: int = 100,
                  session_id: int | None = None,
                  number_from: int | None = None,
                  number_to: int | None = None,
+                 time_from: float | None = None, time_to: float | None = None,
+                 descending: bool = False,
                  db: Session = Depends(get_db)):
     page = max(1, page)
     page_size = min(500, max(1, page_size))
@@ -96,9 +98,13 @@ def list_packets(task_id: int, page: int = 1, page_size: int = 100,
     if number_to is not None:
         stmt = stmt.where(PacketIndex.packet_number <= number_to)
 
+    if time_from is not None:
+        stmt = stmt.where(PacketIndex.timestamp >= time_from)
+    if time_to is not None:
+        stmt = stmt.where(PacketIndex.timestamp <= time_to)
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
     rows = db.scalars(
-        stmt.order_by(PacketIndex.packet_number)
+        stmt.order_by(PacketIndex.packet_number.desc() if descending else PacketIndex.packet_number)
         .offset((page - 1) * page_size).limit(page_size)).all()
 
     return S.PacketList(

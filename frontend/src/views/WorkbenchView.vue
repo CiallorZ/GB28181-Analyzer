@@ -6,7 +6,7 @@
  *   上传 → 自动分析 → 结果按"信令 → 媒体 → 编码 → 诊断 → 报文"逐层展开，
  *   每节可折叠、可跳转，滚动时自动高亮当前节（滚动叙事）。
  */
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { defineAsyncComponent, shallowRef, ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import BackButton from '../components/BackButton.vue'
 import { useRoute, useRouter } from 'vue-router'
 import { loadECharts } from '../utils/chartLoader'
@@ -20,6 +20,8 @@ import CaptureIntake from '../components/CaptureIntake.vue'
 import CaptureEvidence from '../components/CaptureEvidence.vue'
 import CaptureFlow from '../components/CaptureFlow.vue'
 
+const PrecisionWorkspace = defineAsyncComponent(() => import('../components/PrecisionWorkspace.vue'))
+const expandedReport = ref(false)
 const router = useRouter()
 const route = useRoute()
 const store = useTaskStore()
@@ -31,8 +33,9 @@ const diagnostics = ref([])
 const streams = ref([])
 const mediaStats = ref(null)
 const TREND_LIMIT = 12
-let metrics = {}
+const metrics = shallowRef({})
 const metricsError = ref(false)
+const metricsPending = ref(false)
 const packets = ref([])
 const packetTotal = ref(0)
 
@@ -58,6 +61,18 @@ function themeColors() {
 }
 
 // 报告由浏览器直接下载，不经 axios，文件名交给后端 Content-Disposition
+async function toggleReport() {
+  expandedReport.value = !expandedReport.value
+  await nextTick()
+  if (expandedReport.value) {
+    setupScrollSpy()
+    renderCharts()
+    document.querySelector('.spy')?.scrollIntoView({block:'start'})
+  } else {
+    onThemeChange()
+  }
+}
+
 function reportUrl(format) {
   return `/api/v1/tasks/${task.value?.id}/report?format=${format}`
 }
@@ -136,7 +151,7 @@ async function loadAll() {
     packetTotal.value = pk.total
     streams.value = media.items
     mediaStats.value = stats
-    metrics = {}
+    metrics.value = {}
     loadingResults.value = false
 
     await nextTick()
@@ -144,14 +159,15 @@ async function loadAll() {
     renderCharts()
     const ids = media.items.slice(0, TREND_LIMIT).map(stream => stream.id)
     if (ids.length) {
+      metricsPending.value = true
       try {
         const result = await api.taskMetrics(tid, ids)
         if (stale()) return
-        metrics = Object.fromEntries(result.items.map(item => [item.stream_id, item]))
+        metrics.value = Object.fromEntries(result.items.map(item => [item.stream_id, item]))
         renderMediaCharts()
       } catch {
         if (!stale()) metricsError.value = true
-      }
+      } finally { if (!stale()) metricsPending.value = false }
     }
   } catch (error) {
     if (!stale()) err.value = error.message
@@ -162,7 +178,7 @@ async function loadAll() {
 
 function renderCharts() {
   const ov = overview.value
-  if (!ov) return
+  if (!ov || !expandedReport.value) return
   const s = ov.summary || {}
   C = themeColors()
   const t = C
@@ -171,7 +187,7 @@ function renderCharts() {
   const md = ov.method_distribution || {}
   const biz = Object.entries(md).map(([k, v]) => ({ name: k, value: v }))
     .sort((a, b) => b.value - a.value)
-  const bizTotal = biz.reduce((a, b) => a + b.value, 0) || 1
+  const bizTotal = biz.reduce((a, b) => a + b.value, 0)
 
   chart('c-biz', baseGrid({
     tooltip: { ...baseGrid().tooltip, trigger: 'item' },
@@ -181,7 +197,7 @@ function renderCharts() {
       textStyle: { color: t.text, fontSize: 11 },
       formatter: (n) => {
         const it = biz.find(d => d.name === n)
-        return it ? `${n}  ${(it.value / bizTotal * 100).toFixed(0)}%` : n
+        return it ? `${n}  ${(it.value / (bizTotal || 1) * 100).toFixed(0)}%` : n
       }
     },
     series: [{
@@ -263,11 +279,11 @@ function renderMediaCharts() {
   const trendStreams = streams.value.slice(0, TREND_LIMIT)
   const streamLabel = st => `#${st.id}${st.ssrc == null ? '' : ' · 0x' + st.ssrc.toString(16)}`
   const brSeries = trendStreams.map((st, i) => {
-    const m = metrics[st.id]
+    const m = metrics.value[st.id]
     if (!m?.bitrate_series?.length) return null
     return {
       name: streamLabel(st),
-      type: 'line', smooth: true, showSymbol: false,
+      type: 'line', smooth: false, showSymbol: false,
       lineStyle: { width: 1.8, color: PALETTE[i % PALETTE.length] },
       // 面积用单层低透明度填充：渐变在暗色下会把网格线压暗，也不承载信息
       areaStyle: { color: PALETTE[i % PALETTE.length] + '18' },
@@ -296,11 +312,11 @@ function renderMediaCharts() {
 
   /* --- 5. 抖动趋势 --- */
   const jSeries = trendStreams.map((st, i) => {
-    const m = metrics[st.id]
+    const m = metrics.value[st.id]
     if (!m?.jitter_series?.length) return null
     return {
       name: streamLabel(st),
-      type: 'line', smooth: true, showSymbol: false,
+      type: 'line', smooth: false, showSymbol: false,
       lineStyle: { width: 1.8, color: PALETTE[i % PALETTE.length] },
       data: m.jitter_series.map(p => [p.t, p.v])
     }
@@ -444,6 +460,8 @@ async function reanalyze() {
 
 function clearResults() {
   stopPoll()
+  metricsPending.value = false
+  expandedReport.value = false
   loadSeq++
   task.value = null
   overview.value = null
@@ -455,7 +473,7 @@ function clearResults() {
   mediaStats.value = null
   busyStage.value = ''
   busyPct.value = 0
-  metrics = {}
+  metrics.value = {}
   err.value = ''
   loadingResults.value = false
   activeSection.value = 'kpi'
@@ -526,8 +544,8 @@ const codecSummary = computed(() => {
   return {
     codecs: [...set],
     resolution: res || null,
-    totalFrames: codecList.value.reduce((a, b) => a + (b.frameCount || 0), 0),
-    totalKeyframes: codecList.value.reduce((a, b) => a + (b.keyframeCount || 0), 0)
+    totalFrames: codecList.value.every(x => x.frameCount != null) ? codecList.value.reduce((n, x) => n + x.frameCount, 0) : null,
+    totalKeyframes: codecList.value.every(x => x.keyframeCount != null) ? codecList.value.reduce((n, x) => n + x.keyframeCount, 0) : null
   }
 })
 
@@ -668,7 +686,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
 </script>
 
 <template>
-  <div class="page">
+  <div class="page" :class="{ workstation: task?.status === 'completed' }">
     <nav v-if="route.name === 'task'" class="task-breadcrumb" aria-label="任务导航">
       <BackButton fallback="/tasks" /><router-link to="/">工作台</router-link><span>/</span>
       <router-link to="/tasks">历史任务</router-link><span>/</span><strong>任务 #{{ route.params.id }}</strong>
@@ -757,6 +775,11 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
 
     <!-- ==================== 结果瀑布 ==================== -->
     <template v-else-if="task.status === 'completed'">
+      <PrecisionWorkspace :key="task.id" :task="task" :overview="overview" :sessions="sessions"
+        :streams="streams" :events="diagnostics" :metrics="metrics" :metrics-error="metricsError" :metrics-pending="metricsPending"
+        :packets="packets" :packet-total="packetTotal" :expanded="expandedReport"
+        @expand="toggleReport" />
+      <template v-if="expandedReport">
       <!-- 进度导航 -->
       <nav class="spy glass-panel">
         <div class="spy-in">
@@ -1174,11 +1197,11 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
               </div>
               <div class="ck">
                 <i>总帧数</i>
-                <b>{{ codecSummary.totalFrames || '—' }}</b>
+                <b>{{ codecSummary.totalFrames ?? '—' }}</b>
               </div>
               <div class="ck">
                 <i>关键帧</i>
-                <b>{{ codecSummary.totalKeyframes || '—' }}</b>
+                <b>{{ codecSummary.totalKeyframes ?? '—' }}</b>
               </div>
             </div>
 
@@ -1323,11 +1346,13 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
         SIP 成功 ≠ 媒体成功 ≠ 画面可播放。
         无法计算的指标显示为「无法计算」而非 0。
       </div>
+      </template>
     </template>
   </div>
 </template>
 
 <style scoped>
+.page.workstation {max-width:none;padding:10px 16px 24px}.workstation .task-breadcrumb{margin-bottom:6px}
 #sec-video { scroll-margin-top:calc(var(--app-header-height) + 58px); }
 .task-breadcrumb { display:flex; align-items:center; gap:10px; color:var(--text-3); font-size:12px; margin-bottom:32px; }
 .task-breadcrumb strong { color:var(--text-2); }

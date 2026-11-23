@@ -11,13 +11,13 @@ import { LineChart, BarChart, PieChart, ScatterChart } from 'echarts/charts'
 import {
   GridComponent,
   TooltipComponent,
-  LegendComponent
+  LegendComponent, DataZoomComponent
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 
 echarts.use([
   LineChart, BarChart, PieChart, ScatterChart,
-  GridComponent, TooltipComponent, LegendComponent,
+  GridComponent, TooltipComponent, LegendComponent, DataZoomComponent,
   CanvasRenderer
 ])
 

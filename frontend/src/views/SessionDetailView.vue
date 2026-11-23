@@ -82,7 +82,7 @@ function renderCharts() {
     if (!m.bitrate_series?.length) return
     brSeries.push({
       name: 'SSRC ' + (m.ssrc || i),
-      type: 'line', smooth: true, showSymbol: false,
+      type: 'line', smooth: false, showSymbol: false,
       lineStyle: { width: 1.6 },
       data: m.bitrate_series.map(p => [p.t, p.v])
     })
@@ -101,7 +101,7 @@ function renderCharts() {
     if (!m.jitter_series?.length) return
     jSeries.push({
       name: 'SSRC ' + (m.ssrc || i),
-      type: 'line', smooth: true, showSymbol: false,
+      type: 'line', smooth: false, showSymbol: false,
       lineStyle: { width: 1.6 },
       data: m.jitter_series.map(p => [p.t, p.v])
     })

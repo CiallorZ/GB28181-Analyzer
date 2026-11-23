@@ -5,13 +5,15 @@ import { api } from '../api/client'
 import PageNav from '../components/PageNav.vue'
 import { useTaskStore } from '../stores/task'
 
+const props=defineProps({embedded:Boolean,seed:Array,seedTotal:Number,range:Array})
+const listLoading=ref(false), descending=ref(false)
 const route = useRoute()
 const store = useTaskStore()
 
-const items = ref([])
-const total = ref(0)
+const items = ref(props.seed || [])
+const total = ref(props.seedTotal || 0)
 const page = ref(1)
-const pageSize = 200
+const pageSize = props.embedded ? 8 : 200
 const ipFilter = ref('')
 const portFilter = ref('')
 const protoFilter = ref('')
@@ -20,16 +22,22 @@ const err = ref('')
 
 const detail = ref(null)
 const detailLoading = ref(false)
-const viewMode = ref('tree')   // tree | hex
+
 
 let listSeq = 0
 async function load() {
   if (!store.currentTaskId) return
   const taskId = store.currentTaskId
   const seq = ++listSeq
+  listLoading.value = true
+  err.value = ''
+  detailSeq++
+  detail.value = null
+  detailLoading.value = false
   try {
     const r = await api.packets(taskId, {
       page: page.value, page_size: pageSize,
+      time_from:props.range?.[0], time_to:props.range?.[1], descending:descending.value,
       ip: ipFilter.value || undefined,
       port: portFilter.value ? Number(portFilter.value) : undefined,
       protocol: protoFilter.value || undefined,
@@ -39,13 +47,22 @@ async function load() {
       items.value = r.items
       total.value = r.total
     }
-  } catch (e) { if (seq === listSeq) err.value = e.message }
+  } catch (e) {
+    if (seq === listSeq) {
+      err.value = e.message
+      items.value = []
+      total.value = 0
+    }
+  } finally {
+    if (seq === listSeq) listLoading.value = false
+  }
 }
 
 let detailSeq = 0
 async function openPacket(p) {
   const seq = ++detailSeq
   const taskId = store.currentTaskId
+  detail.value = null
   detailLoading.value = true
   try {
     const result = await api.packet(p.id)
@@ -117,12 +134,14 @@ watch([() => route.query.task, () => route.query.number], async ([task, number])
   if (task !== route.query.task || number !== route.query.number) return
   if (task && Number(task) !== store.currentTaskId) return
   await locatePacket(number)
-}, { immediate: true })
+}, { immediate: !props.embedded })
+watch(()=>props.range,()=>{page.value=1;load()})
+if(props.embedded && items.value[0])openPacket(items.value[0])
 </script>
 
 <template>
-  <div class="packets-page">
-    <PageNav
+  <div class="packets-page" :class="{embedded}">
+    <PageNav v-if="!embedded"
       title="原始报文"
       :sub="`任务 #${store.currentTaskId || '未选择'} · 共 ${total} 条报文`"
       :crumbs="[{label:'工作台', to:'/'}, {label:'原始报文'}]">
@@ -135,6 +154,7 @@ watch([() => route.query.task, () => route.query.number], async ([task, number])
       </template>
     </PageNav>
 
+    <form v-if="embedded" class="packet-filters" @submit.prevent="page=1;load()"><input class="inp sm" v-model="ipFilter" placeholder="源或目的 IP" aria-label="IP 过滤"><input class="inp sm" v-model="protoFilter" placeholder="协议" aria-label="协议过滤"><button>查询</button><small v-if="range">捕获时间选区已应用</small></form>
     <div v-if="err" class="err-box">{{ err }}</div>
 
     <div v-if="!store.currentTaskId" class="card">
@@ -154,7 +174,7 @@ watch([() => route.query.task, () => route.query.number], async ([task, number])
         <div class="pane-body">
           <table class="pkt-tbl">
             <thead>
-              <tr><th>#</th><th>时间</th><th>源</th><th>目的</th><th>协议</th><th>长度</th></tr>
+              <tr><th><button aria-label="切换报文号排序" @click="descending=!descending;page=1;load()">No. {{descending?'↓':'↑'}}</button></th><th>时间</th><th>源</th><th>目的</th><th>协议</th><th>长度</th><th>信息</th></tr>
             </thead>
             <tbody>
               <tr v-for="p in items" :key="p.id"
@@ -166,11 +186,11 @@ watch([() => route.query.task, () => route.query.number], async ([task, number])
                 <td class="mono-sm truncate">{{ p.source_ip }}</td>
                 <td class="mono-sm truncate">{{ p.destination_ip }}</td>
                 <td><span class="proto">{{ p.protocol }}</span></td>
-                <td class="num">{{ p.length }}</td>
+                <td class="num">{{ p.length }}</td><td :title="p.summary">{{p.summary || '—'}}</td>
               </tr>
             </tbody>
           </table>
-          <div v-if="!items.length" class="empty">无报文</div>
+          <div v-if="listLoading" class="empty">读取中…</div><div v-else-if="!items.length && !err" class="empty">无匹配报文</div>
         </div>
       </div>
 
@@ -179,10 +199,7 @@ watch([() => route.query.task, () => route.query.number], async ([task, number])
         <div class="pane-head">
           协议详情
           <span class="spacer"></span>
-          <div class="seg">
-            <button :class="{ on: viewMode === 'tree' }" @click="viewMode = 'tree'">协议树</button>
-            <button :class="{ on: viewMode === 'hex' }" @click="viewMode = 'hex'">十六进制</button>
-          </div>
+
         </div>
         <div class="pane-body scroll">
           <div v-if="detailLoading" class="empty">加载中…</div>
@@ -192,9 +209,9 @@ watch([() => route.query.task, () => route.query.number], async ([task, number])
           </div>
 
           <template v-else>
-            <div v-if="viewMode === 'tree'">
-              <div v-for="(layer, li) in detail.layers" :key="li" class="layer">
-                <div class="layer-name">{{ layer.name }}</div>
+            <div>
+              <details open v-for="(layer, li) in detail.layers" :key="li" class="layer">
+                <summary class="layer-name">{{ layer.name }}</summary>
                 <div class="layer-fields">
                   <div v-for="(f, fi) in layer.fields" :key="fi" class="field"
                        :style="{ paddingLeft: (f.indent || 0) * 2 + 'px' }">
@@ -202,11 +219,20 @@ watch([() => route.query.task, () => route.query.number], async ([task, number])
                     <span class="fval mono">{{ f.value }}</span>
                   </div>
                 </div>
-              </div>
+              </details>
               <div v-if="!detail.layers?.length" class="empty">该报文无协议树数据</div>
             </div>
 
-            <div v-else class="hex-view">
+          </template>
+        </div>
+      </div>
+
+      <!-- 栏 3：字段摘要 -->
+      <div class="pane pane-info">
+        <div class="pane-head">原始字节 · HEX / ASCII</div>
+        <div class="pane-body scroll">
+          <div v-if="!detail" class="empty">—</div>
+                      <div v-if="detail && !detailLoading" class="hex-view">
               <div class="hex-head">
                 <span class="ho">偏移</span>
                 <span class="hh">十六进制</span>
@@ -219,16 +245,7 @@ watch([() => route.query.task, () => route.query.number], async ([task, number])
               </div>
               <div v-if="!hexRows.length" class="empty">无原始字节</div>
             </div>
-          </template>
-        </div>
-      </div>
-
-      <!-- 栏 3：字段摘要 -->
-      <div class="pane pane-info">
-        <div class="pane-head">报文字段</div>
-        <div class="pane-body scroll">
-          <div v-if="!detail" class="empty">—</div>
-          <template v-else>
+          <details v-if="detail && !detailLoading"><summary>索引字段</summary>
             <div class="info-row"><span>报文号</span><b class="mono">{{ detail.packet_number }}</b></div>
             <div class="info-row"><span>时间</span><b class="mono">{{ detail.timestamp?.toFixed(6) }}s</b></div>
             <div class="info-row"><span>协议</span><b>{{ detail.protocol }}</b></div>
@@ -239,7 +256,7 @@ watch([() => route.query.task, () => route.query.number], async ([task, number])
             <div class="info-row" v-if="detail.ssrc"><span>SSRC</span><b class="mono">0x{{ detail.ssrc.toString(16) }}</b></div>
             <div class="info-row" v-if="detail.session_id"><span>会话</span><b>#{{ detail.session_id }}</b></div>
             <div class="info-row full"><span>摘要</span><b class="mono-sm">{{ detail.summary }}</b></div>
-          </template>
+          </details>
         </div>
       </div>
     </div>
@@ -350,4 +367,6 @@ watch([() => route.query.task, () => route.query.number], async ([task, number])
   border-radius: 0; padding: 10px 12px; font-size: 12.5px;
   color: var(--critical); margin-bottom: 14px;
 }
+.packets-page.embedded{padding:0;height:auto;max-width:none}.embedded .tri-pane{grid-template-columns:minmax(0,1.45fr) minmax(0,.95fr) minmax(0,1.05fr);height:190px;min-height:0;border:0}.embedded .pane{min-height:0}.pane-body{overflow:auto}.packet-filters{display:flex;align-items:center;gap:8px;padding:6px 12px}.packet-filters input{width:125px}.pane-list td:last-child{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.layer summary{cursor:pointer}
+@media(max-width:850px){.embedded .tri-pane{grid-template-columns:1fr;height:auto}.embedded .pane{max-height:220px}}
 </style>

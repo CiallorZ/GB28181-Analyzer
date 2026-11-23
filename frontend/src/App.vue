@@ -80,12 +80,16 @@ onUnmounted(() => {
           <img src="/brand/analyzer.svg" alt="中国铁塔" class="brand-logo" />
           <div class="brand-txt">
             <div class="brand-name">GB28181 Analyzer</div>
-            <div class="brand-desc">中国铁塔 · 视联网协议分析</div>
+            <div class="brand-desc">GB/T 28181 协议与媒体分析工作站</div>
           </div>
         </router-link>
 
+          <router-link to="/settings" class="dep" :class="engine[1]" :title="engine[0]" :aria-label="engine[0]">
+            <i></i>
+            <span>{{ engine[0] }}</span>
+          </router-link>
         <nav class="bar-nav" aria-label="主导航">
-          <router-link to="/"><AppIcon name="home" />工作台</router-link>
+          <router-link to="/" :class="{current: route.name === 'task'}"><AppIcon name="home" />工作台</router-link>
           <router-link to="/tasks"><AppIcon name="history" />历史任务</router-link>
           <router-link to="/compare" :class="{current: route.path.startsWith('/compare/')}"><AppIcon name="compare" />双包对比</router-link>
           <router-link to="/settings"><AppIcon name="settings" />设置</router-link>
@@ -117,10 +121,7 @@ onUnmounted(() => {
             <span>AI 分析助手</span>
           </button>
 
-          <router-link to="/settings" class="dep" :class="engine[1]" :title="engine[0]" :aria-label="engine[0]">
-            <i></i>
-            <span>{{ engine[0] }}</span>
-          </router-link>
+
         </div>
       </div>
     </header>
@@ -280,4 +281,6 @@ onUnmounted(() => {
 }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 .appearance {background:var(--surface);color:var(--text-2);border:1px solid var(--line-2);border-radius:6px;font:inherit;font-size:12px;padding:5px;}
+@media(min-width:1081px){.bar-in{max-width:none;padding:0 20px;gap:20px}.brand-txt{display:flex;align-items:center;gap:18px}.brand-desc{font-size:12px;border-left:1px solid var(--line);padding-left:16px}.bar-task{display:none}.bar{box-shadow:none}.bar-nav .current,.bar-nav .router-link-exact-active{background:var(--brand-soft);color:var(--text)}}
+.brand .brand-name{color:var(--text)}@media(min-width:1100px){.bar-in{gap:18px}.dep{border-radius:5px}.bar-nav{margin-left:12px}}@media(max-width:1100px){.bar-in>.dep{display:none}}
 </style>

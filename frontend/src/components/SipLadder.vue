@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 
 import { usePacketReplay } from '../utils/usePacketReplay'
 
@@ -9,17 +9,27 @@ const props = defineProps({
 const emit = defineEmits(['select'])
 
 const svgContainer = ref(null)
+const viewport = ref(null)
+const laneWidth = ref(700)
+let resize
+onMounted(() => {
+  resize = new ResizeObserver(([entry]) => {
+    laneWidth.value = Math.max(460, Math.floor(entry.contentRect.width))
+  })
+  resize.observe(viewport.value)
+})
+onUnmounted(() => resize?.disconnect())
 const selected = ref(null)
 const zoom = ref(1)
-const ROW_H = 48
-const FIRST_ROW = 82
+const density = ref(36)
+const FIRST_ROW = 72
 const { index, playing, reduced, play, pause, select } = usePacketReplay(() => props.messages.length)
 watch(() => props.messages, () => { selected.value = null; select(0) })
 const flight = computed(() => {
   const msg = props.messages[index.value]
   if (!msg) return null
   const x = laneX(msg.source_ip, parties.value), end = laneX(msg.destination_ip, parties.value)
-  const y = FIRST_ROW + ROW_H * index.value
+  const y = FIRST_ROW + density.value * index.value
   return { path: x === end ? `M${x} ${y}h28v10h-28` : `M${x} ${y}H${end}`, color: styleOf(msg).color, x, end, y, arrivalY: x === end ? y + 10 : y }
 })
 watch(index, i => {
@@ -64,16 +74,20 @@ const parties = computed(() => {
     let label = '端点', color = 'var(--text-4)'
     if (sentInvite) { label = '点播方'; color = 'var(--info)' }
     else if (recvInvite) { label = '被点播方'; color = 'var(--text-2)' }
-    return { ip, label: ip ? label : '未知端点', color }
+    const ports = new Set(list.flatMap(m => [
+      m.source_ip === ip ? m.source_port : null,
+      m.destination_ip === ip ? m.destination_port : null
+    ]).filter(v => v != null))
+    return { ip, address: [ip, [...ports].join('/')].filter(Boolean).join(':'), label: ip ? label : '未知端点', color }
   })
 })
 
 function laneX(ip, list) {
   const i = list.findIndex(p => p.ip === (ip || ''))
-  if (i < 0) return 500
-  if (list.length === 1) return 500
+  if (i < 0) return laneWidth.value / 2
+  if (list.length === 1) return laneWidth.value / 2
   const pad = 110
-  return pad + i * ((1000 - pad * 2) / (list.length - 1))
+  return pad + i * ((laneWidth.value - pad * 2) / (list.length - 1))
 }
 
 /* ---------------- 消息样式 ---------------- */
@@ -94,7 +108,7 @@ function styleOf(m) {
 }
 
 const svgH = computed(() =>
-  Math.max(240, (props.messages || []).length * ROW_H + 76))
+  Math.max(125, (props.messages || []).length * density.value + FIRST_ROW))
 
 /* ---------------- 生成 SVG 字符串 ---------------- */
 const svgHtml = computed(() => {
@@ -129,13 +143,13 @@ const svgHtml = computed(() => {
     out.push(`<text x="${x + 4}" y="24" text-anchor="middle"
       fill="var(--text)" font-size="13" font-weight="600">${esc(p.label)}</text>`)
     out.push(`<text x="${x + 4}" y="37" text-anchor="middle"
-      fill="var(--text-3)" font-size="11.5" font-family="monospace">${esc(p.ip || '地址缺失')}</text>`)
+      fill="var(--text-3)" font-size="11.5" font-family="monospace">${esc(p.address || '地址缺失')}</text>`)
   })
 
   // 消息行
   msgs.forEach((m, i) => {
     const st = styleOf(m)
-    const y = FIRST_ROW + i * ROW_H
+    const y = FIRST_ROW + i * density.value
     const x1 = laneX(m.source_ip, list)
     const x2 = laneX(m.destination_ip, list)
     const key = !!(m.method && KEY_METHODS.has(m.method))
@@ -143,7 +157,7 @@ const svgHtml = computed(() => {
 
     // 行底
     if (hl) {
-      out.push(`<rect x="0" y="${y - 25}" width="1000" height="${ROW_H - 4}"
+      out.push(`<rect x="0" y="${y - density.value + 10}" width="${laneWidth.value}" height="${density.value - 4}"
         fill="${selected.value === i ? 'var(--surface-3)' : 'var(--surface-2)'}" rx="5"/>`)
     }
 
@@ -166,7 +180,7 @@ const svgHtml = computed(() => {
 
     // 时间
     if (m.timestamp != null) {
-      out.push(`<text x="994" y="${y + 3}" text-anchor="end"
+      out.push(`<text x="${laneWidth.value - 6}" y="${y + 3}" text-anchor="end"
         fill="var(--text-3)" font-size="11.5" font-family="monospace">${
           Number(m.timestamp).toFixed(3)}s</text>`)
     }
@@ -185,12 +199,12 @@ const svgHtml = computed(() => {
     }
 
     // 透明热区（承接鼠标事件）
-    out.push(`<rect class="hit" data-idx="${i}" x="0" y="${y - 25}"
-      width="1000" height="${ROW_H - 4}" fill="transparent"
+    out.push(`<rect class="hit" data-idx="${i}" x="0" y="${y - density.value + 10}"
+      width="${laneWidth.value}" height="${density.value - 4}" fill="transparent"
       role="button" tabindex="0" aria-label="${esc(st.label)}，报文 ${esc(m.packet_id || '未知')}，${esc(m.source_ip || '未知端点')} 到 ${esc(m.destination_ip || '未知端点')}" style="cursor:pointer"/>`)
   })
 
-  return `<svg class="ladder-svg" viewBox="0 0 1000 ${H}" role="group" aria-label="SIP 信令交互，共 ${msgs.length} 条消息"
+  return `<svg class="ladder-svg" viewBox="0 0 ${laneWidth.value} ${H}" role="group" aria-label="SIP 信令交互，共 ${msgs.length} 条消息"
     style="height:${H * zoom.value}px;width:100%;display:block"
     xmlns="http://www.w3.org/2000/svg">${out.join('')}</svg>`
 })
@@ -241,7 +255,7 @@ function onWheel(e) {
 
 <template>
   <div class="ladder-wrap" @wheel="onWheel">
-    <div class="ladder-tools">
+    <div class="ladder-tools"><select v-model.number="density" class="inp sm" aria-label="信令行高"><option :value="26">紧凑</option><option :value="36">标准</option><option :value="48">详细</option></select>
       <button v-if="messages.length" class="btn xs" @click="playing ? pause() : play()">{{playing?'暂停回放':'回放信令'}}</button>
       <span v-if="messages.length" class="lt-hint">报文 {{index+1}} / {{messages.length}} · 等间隔演示</span>
       <button v-if="failures.length" class="btn xs" @click="nextFailure">定位失败响应 · {{ failures.length }}</button>
@@ -253,11 +267,11 @@ function onWheel(e) {
       <button class="btn xs" @click="zoom = 1">重置</button>
     </div>
 
-    <div class="ladder-scroll">
-      <div class="diagram-stage">
+    <div ref="viewport" class="ladder-scroll">
+      <div class="diagram-stage" :style="{width: laneWidth * zoom+'px'}">
       <!-- eslint-disable-next-line vue/no-v-html -->
       <div ref="svgContainer" v-html="svgHtml" @click="onSvgClick" @keydown="onSvgKey"></div>
-      <svg v-if="flight" class="flight" :viewBox="`0 0 1000 ${svgH}`" aria-hidden="true">
+      <svg v-if="flight" class="flight" :viewBox="`0 0 ${laneWidth} ${svgH}`" aria-hidden="true">
         <path :d="flight.path" fill="none" :stroke="flight.color" stroke-width="5" opacity=".16"/>
         <circle :cx="flight.end" :cy="flight.arrivalY" r="6" :stroke="flight.color" fill="none" opacity=".65"/>
         <path v-if="!reduced" :key="index" :d="flight.path" fill="none" :stroke="flight.color" stroke-width="5"
@@ -304,7 +318,7 @@ function onWheel(e) {
     linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
   background-size: 40px 40px;
 }
-.ladder-scroll > div { min-width: 700px; }
+.ladder-scroll > div { min-width: 460px; }
 .ladder-scroll :deep(.hit:focus-visible) { outline: 2px solid var(--brand); outline-offset: -2px; }
 .ladder-scroll :deep(.hit:hover) { fill: var(--surface-3); fill-opacity: .28; }
 </style>

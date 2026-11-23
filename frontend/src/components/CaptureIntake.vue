@@ -1,6 +1,5 @@
 <script setup>
 import { onMounted, ref } from 'vue'
-import PlaybackIllustration from './PlaybackIllustration.vue'
 import { api } from '../api/client'
 
 const props = defineProps({
@@ -81,7 +80,7 @@ function drop(event) {
     <section class="hero glass-panel" aria-labelledby="hero-title">
       <div class="hero-copy" :class="{ dragging }" @dragover.prevent="dragging = true" @dragleave.prevent="dragging = false" @drop.prevent="drop">
         <div class="hero-meta"><img src="/brand/analyzer.svg" width="30" height="30" alt="">中国铁塔 · 视联网</div>
-        <h1 id="hero-title">抓包分析工作台</h1>
+        <h1 id="hero-title">GB/T 28181 分析工作台</h1>
         <p>拖入抓包，沿点播会话检查信令、媒体传输与重建画面。</p>
         <div class="drop-surface"><strong>导入抓包</strong><div class="hero-actions">
           <input ref="picker" type="file" accept=".pcap,.pcapng,.cap" hidden @change="pick" />
@@ -99,17 +98,17 @@ function drop(event) {
         <div class="hero-note">支持 PCAP / PCAPNG / CAP <span></span> 抓包由分析服务所在设备处理</div>
         <div v-if="error" class="hero-error" role="alert">{{ error }}</div>
       </div>
-      <PlaybackIllustration />
-    </section>
-    <section class="workspace" aria-label="分析路径与历史任务">
-      <div class="workspace-body">
-        <section class="layers" aria-labelledby="layers-title"><div class="section-head"><div><h2 id="layers-title">协议分析路径</h2></div><router-link to="/compare" class="all-link">双包对比 <AppIcon name="open" /></router-link></div>
-          <ol class="layer-list"><li v-for="layer in layers" :key="layer.code"><span class="layer-icon"><AppIcon :name="layer.icon" /></span><div><strong>{{ layer.name }}</strong><p>{{ layer.detail }}</p></div><span class="layer-code">{{ layer.code }}</span></li></ol>
-        </section>
         <section class="recent" aria-labelledby="recent-title"><div class="section-head"><div><h2 id="recent-title">最近分析</h2></div><router-link to="/tasks" class="all-link">全部任务 <span aria-hidden="true"><AppIcon name="forward" /></span></router-link></div>
           <p v-if="historyError" class="history-empty">历史记录暂时无法读取。</p><p v-else-if="history === null" class="history-empty" role="status">正在读取历史记录…</p><p v-else-if="!history.length" class="history-empty">导入首份抓包后，任务会出现在这里。</p>
           <ul v-else class="history-list"><li v-for="item in history" :key="item.id"><router-link :to="{ name: 'task', params: { id: item.id } }"><span class="file-icon" aria-hidden="true"><AppIcon name="file" /></span><span class="file-info"><strong class="truncate" :title="item.name">{{ item.name }}</strong><time :datetime="item.created_at">{{ localDate(item.created_at) }}</time></span><span class="badge" :class="status[item.status]?.[1]">{{ status[item.status]?.[0] || item.status }}</span><span class="row-arrow" aria-hidden="true"><AppIcon name="open" /></span></router-link></li></ul>
         </section>
+    </section>
+    <section class="workspace" aria-label="分析路径">
+      <div class="workspace-body">
+        <section class="layers" aria-labelledby="layers-title"><div class="section-head"><div><h2 id="layers-title">协议分析路径</h2></div><router-link to="/compare" class="all-link">双包对比 <AppIcon name="open" /></router-link></div>
+          <ol class="layer-list"><li v-for="layer in layers" :key="layer.code"><span class="layer-icon"><AppIcon :name="layer.icon" /></span><div><strong>{{ layer.name }}</strong><p>{{ layer.detail }}</p></div><span class="layer-code">{{ layer.code }}</span></li></ol>
+        </section>
+
       </div>
     </section>
   </div>
@@ -140,4 +139,7 @@ function drop(event) {
 @media (max-width:850px) { .capture-home { padding:20px 16px 48px; }.hero { grid-template-columns:1fr; }.hero-copy { padding:36px 28px; }.exchange { border-inline-start:0; border-top:1px solid var(--line); }.workspace-body { grid-template-columns:1fr; gap:30px; } }
 @media (max-width:480px) { .hero-copy { padding:32px 22px; }.hero h1 { font-size:clamp(26px,7.5vw,34px); text-wrap:balance; }.layer-code { font-size:10px; } }
 @media (prefers-reduced-motion:reduce) { .upload-button,.sample-button { transition:none; }.upload-button:hover:not(:disabled) { transform:none; } }
-.live{margin:14px 0;color:var(--text-2);font-size:13px}.live summary{cursor:pointer}.live select,.live input{max-width:100%;margin:6px;padding:5px}.live input{width:6em}</style>
+.live{margin:14px 0;color:var(--text-2);font-size:13px}.live summary{cursor:pointer}.live select,.live input{max-width:100%;margin:6px;padding:5px}.live input{width:6em}@media(min-width:900px){
+.capture-home{max-width:none;padding:4px 0 24px}.hero{grid-template-columns:1.1fr 1fr;min-height:0;background:var(--bg-2);border-radius:8px;backdrop-filter:none}.hero::after{display:none}.hero-copy{padding:24px}.hero-copy h1{font-size:24px;letter-spacing:0;margin:8px 0}.hero-meta{font-size:12px}.hero-meta img{width:20px;height:20px}.hero .recent{border-left:1px solid var(--line);padding:18px 24px;background:var(--surface)}.history-list{max-height:295px;overflow:auto}.workspace{margin-top:12px}.workspace-body{display:block}.layer-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.layers{border:0}.layers li{align-items:start}.layer-code{align-self:start}
+}
+</style>

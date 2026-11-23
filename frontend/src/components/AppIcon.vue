@@ -1,6 +1,7 @@
 <script setup>
 defineProps({ name: { type: String, required: true } })
 const paths = {
+  check: ["m4 12 5 5L20 6", ""],
   "warning": ["m10.5 4.5-8 14.2q-.7 1.7 1.5 1.7h16q2 0 1-2L13.2 4.5q-1.3-2.1-2.7 0z","M12 9v4m0 3v.3"],
   "down": ["m5 9 7 7 7-7",""],
   "signal": ["M4 3.8v16.4M20 3.8v16.4", "M7 8h10l-2.7-2.5M17 16H7l2.7 2.5"],

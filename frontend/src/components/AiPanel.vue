@@ -329,6 +329,15 @@ function scrollChat() {
   })
 }
 
+function exportReport() {
+  const url = URL.createObjectURL(new Blob([report.value], { type: 'text/markdown;charset=utf-8' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'DeepSeek-分析-' + store.currentTaskId + '.md'
+  link.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
 function copyReport() {
   navigator.clipboard?.writeText(report.value)
 }
@@ -472,7 +481,7 @@ watch(() => props.open, async (v) => {
               <div v-if="report" class="report">
                 <div class="r-tools"><strong class="signature">{{ profiles[expert][0] }} · 研判报告</strong>
                   <button class="btn-mini" :disabled="running || chatBusy" @click="report = ''; chat = []; steps = []; question = ''; reportContextHash = ''">新会诊</button>
-                  <button class="btn-mini" @click="copyReport">复制</button>
+                  <button class="btn-mini" @click="copyReport">复制</button><button class="btn-mini" @click="exportReport">导出 .md</button>
                   <button class="btn-mini" @click="previewOpen = true" :disabled="running">
                     重新分析
                   </button>
