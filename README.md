@@ -2,7 +2,7 @@
 
 适用于 Windows x64 的 GB/T 28181 离线抓包分析工作站。遇到「点播有响应，画面却没有出来」，可以沿同一会话核对信令、媒体和视频重建结果，并导出带证据的报告。
 
-**[下载 v1.1.4 Windows x64 离线单文件 EXE](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v1.1.4/GB28181-Analyzer-v1.1.4-offline-x64.exe)** · [校验和与版本记录](https://github.com/CiallorZ/gb28181-analyzer/releases/tag/v1.1.4)
+**[下载 v1.1.5 Windows x64 离线单文件 EXE](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v1.1.5/GB28181-Analyzer-v1.1.5-offline-x64.exe)** · [校验和与版本记录](https://github.com/CiallorZ/gb28181-analyzer/releases/tag/v1.1.5)
 
 ## 首次打开
 

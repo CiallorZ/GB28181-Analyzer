@@ -43,6 +43,12 @@ with tempfile.TemporaryDirectory(dir=a.output.parent) as temp:
         z.writestr("Third-party.txt", "TShark 4.6.10: https://gitlab.com/wireshark/wireshark/-/tree/v4.6.10\nFFmpeg 9.0.2 Gyan full build: https://www.gyan.dev/ffmpeg/builds/ and https://github.com/FFmpeg/FFmpeg/tree/n9.0.2\nWebView2 Fixed Version 158.0.4370.33: https://developer.microsoft.com/microsoft-edge/webview2/\n")
     with archive.open("rb") as f:
         digest = hashlib.file_digest(f, "sha256").hexdigest()
-    subprocess.run(["go","build","-trimpath","-ldflags",f"-s -w -H windowsgui -X main.buildID={digest}","-o",str(a.output),str(Path(__file__).with_name("main.go"))],check=True)
+    source = Path(__file__).resolve()
+    shutil.copy(source.with_name("main.go"), temp / "main.go")
+    subprocess.run(["go", "run", "github.com/akavel/rsrc@v0.10.2", "-arch", "amd64",
+                    "-ico", str(source.parents[2] / "desktop/icons/icon.ico"),
+                    "-o", str(temp / "icon_windows_amd64.syso")], check=True)
+    subprocess.run(["go","build","-trimpath","-ldflags",f"-s -w -H windowsgui -X main.buildID={digest}",
+                    "-o",str(a.output.resolve()),"."], cwd=temp, env={**os.environ,"GO111MODULE":"off"},check=True)
     with a.output.open("ab") as dest, archive.open("rb") as src:
         shutil.copyfileobj(src,dest)

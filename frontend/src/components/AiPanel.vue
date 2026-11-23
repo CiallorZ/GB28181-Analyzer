@@ -43,6 +43,7 @@ const question = ref('')
 const chatBusy = ref(false)
 const chatBox = ref(null)
 const questionInput = ref(null)
+const streamLabels = { followup: '正在生成追问回复…', analysis: '正在生成分析报告…' }
 const expert = ref('general')
 const profiles = {
   general: ['综合研判', '串联信令与媒体证据', ['第一处异常出现在哪里？', '哪些结论仍需补抓验证？']],
@@ -459,8 +460,16 @@ watch(() => props.open, async (v) => {
 
               <!-- 起始 -->
               <div v-if="!report && !running" class="start">
-                <h3>选择会诊专家</h3>
-                <div class="experts"><button v-for="(profile,key) in profiles" :key="key" :aria-pressed="expert === key" @click="expert = key"><strong>{{ profile[0] }}</strong><small>{{ profile[1] }}</small></button></div>
+                <header class="consult-title"><img src="/brand/deepseek.svg" alt="" /><h3>选择会诊专家</h3></header>
+                <div class="expert-list">
+                  <button v-for="(profile,key) in profiles" :key="key" type="button" :aria-pressed="expert === key" @click="expert = key">
+                    <span><strong>{{ profile[0] }}</strong><small>{{ profile[1] }}</small></span>
+                    <span aria-hidden="true">{{ expert === key ? '✓' : '○' }}</span>
+                  </button>
+                </div>
+                <section class="focus-preview" aria-live="polite"><strong>本次分析重点</strong>
+                  <ul><li v-for="item in suggestedQuestions" :key="item">{{ item }}</li></ul>
+                </section>
                 <button class="btn primary lg" @click="previewOpen = true"
                         :disabled="running || !cfg.has_key">
                   <img src="/brand/deepseek-white.svg" alt="" class="btn-ico" />
@@ -488,6 +497,7 @@ watch(() => props.open, async (v) => {
                 </div>
               </div>
 
+              <p v-if="running || chatBusy" role="status" class="stream-state">{{ chatBusy ? streamLabels.followup : streamLabels.analysis }}</p>
               <!-- 报告 -->
               <div v-if="report" class="report">
                 <div class="r-tools"><strong class="signature">{{ profiles[expert][0] }} · 研判报告</strong>
@@ -793,8 +803,8 @@ watch(() => props.open, async (v) => {
 .stime { font-size: 9.5px; color: var(--text-4); }
 
 /* 报告 */
-.report { margin:16px 12px 8px; padding:16px; border-radius:12px; background:var(--surface);border:1px solid var(--ds-line);border-top:2px solid var(--ds); }
-.report :deep(h2) {border-left:3px solid var(--brand);padding-left:9px;}
+.report { margin:16px 12px 8px; padding:16px; border-radius:12px; background:var(--surface);border:1px solid var(--ds-line);box-shadow:0 2px 12px rgb(0 0 0 / 4%); }
+.report :deep(h2) {padding-block:8px;border-bottom:1px solid var(--line);}
 .r-tools {
   display: flex; gap: 6px; justify-content: flex-end;
   margin-bottom: 12px;
@@ -952,8 +962,21 @@ watch(() => props.open, async (v) => {
 .send:hover:not(:disabled) { background: var(--ds-dk); }
 .send:disabled { opacity: .4; cursor: not-allowed; }
 .send svg { width: 14px; height: 14px; }
-.experts {display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:16px auto;max-width:480px}
-.experts button {padding:12px;text-align:left;background:var(--surface);color:var(--text);border:1px solid var(--line-2);border-radius:9px;cursor:pointer}
-.experts button[aria-pressed="true"] {background:var(--ds-soft);border-color:var(--ds);box-shadow:inset 3px 0 var(--brand)}
-.experts small {display:block;color:var(--text-2);margin-top:4px}.signature {margin-right:auto;color:var(--ds-lt)}
+.start { text-align:left; padding:clamp(18px,3vw,38px); }
+.consult-title {display:flex;align-items:center;gap:12px}
+.consult-title img {width:36px}
+.consult-title h3 {margin:0}
+.expert-list {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:8px;margin:20px 0}
+.expert-list button {display:flex;align-items:center;justify-content:space-between;gap:8px;padding:14px;text-align:left;color:var(--text);background:color-mix(in srgb,var(--surface) 68%,transparent);border:1px solid var(--line);border-radius:10px;cursor:pointer}
+.expert-list button[aria-pressed=true] {border-color:var(--ds);background:var(--ds-soft)}
+.expert-list small {display:block;color:var(--text-2);margin-top:5px}
+.focus-preview {border-inline-start:2px solid var(--ds);padding-inline:14px;margin:18px 0;color:var(--text-2)}
+.focus-preview ul {padding-left:18px;line-height:1.65;margin:6px 0}
+.stream-state {color:var(--ds-lt);font-size:13px;margin:12px 18px}
+.signature {margin-right:auto;color:var(--ds-lt)}
+@supports (backdrop-filter:blur(1px)) {
+  .drawer .report,.drawer .chat {background:color-mix(in srgb,var(--surface) 80%,transparent)}
+}
+.drawer .chat-in:focus-within {outline:2px solid var(--ds);outline-offset:2px}
+.drawer .chat-log {scrollbar-gutter:stable}
 </style>
