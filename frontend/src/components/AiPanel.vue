@@ -550,8 +550,8 @@ watch(() => props.open, async (v) => {
 <style scoped>
 .mask {
   position: fixed; inset: 0; z-index: 300;
-  background: rgba(0, 0, 0, .58);
-  backdrop-filter: blur(3px);
+  background:color-mix(in srgb,var(--bg) 26%,transparent);
+  backdrop-filter:blur(14px) saturate(.85);
   display: flex; justify-content: flex-end;
 }
 .drawer {
@@ -589,7 +589,7 @@ watch(() => props.open, async (v) => {
 .head-in { background:linear-gradient(115deg,var(--ds-soft),transparent 75%); }
 @supports (backdrop-filter:blur(1px)) {
   .drawer.glass-panel {
-    background:color-mix(in srgb,var(--bg-2) 86%,transparent);
+    background:color-mix(in srgb,var(--bg-2) 77%,transparent);
     backdrop-filter:blur(24px) saturate(115%);
   }
 }
