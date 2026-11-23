@@ -27,7 +27,7 @@ function applyTheme() {
 }
 
 function chooseAppearance() {
-  try { localStorage.setItem('appearance', appearance.value) } catch {}
+  try { localStorage.setItem('appearance', appearance.value) } catch { /* 存储不可用时仅在当前窗口应用。 */ }
   applyTheme()
 }
 

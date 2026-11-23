@@ -6,7 +6,7 @@
 [![GitHub Release](https://img.shields.io/github/v/release/CiallorZ/gb28181-analyzer)](https://github.com/CiallorZ/gb28181-analyzer/releases/latest)
 [![MIT License](https://img.shields.io/badge/license-MIT-3fb950)](LICENSE)
 
-**[下载 Windows x64 便携包（v0.8.3）](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v0.8.3/gb28181-analyzer-windows-x64-v0.8.3.zip)** · [所有版本](https://github.com/CiallorZ/gb28181-analyzer/releases) · [Windows 使用说明](docs/WINDOWS.md)
+**[下载 Windows x64 便携包（v0.8.4）](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v0.8.4/gb28181-analyzer-windows-x64-v0.8.4.zip)** · [所有版本](https://github.com/CiallorZ/gb28181-analyzer/releases) · [Windows 使用说明](docs/WINDOWS.md)
 
 ## Windows 快速开始
 
