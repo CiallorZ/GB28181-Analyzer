@@ -398,9 +398,17 @@ def _run(db: Session, task: AnalysisTask):
     limits = session_builder.detect_capture_limits(
         sessions, [m['info'] for m in sip_msgs], stats)
     limits.extend(media_limits)
+    bitrate_samples = {}
+    samples = select(MediaMetric.stream_id, MediaMetric.timestamp, MediaMetric.bitrate).join(
+        MediaStream, MediaStream.id == MediaMetric.stream_id).where(
+        MediaStream.task_id == task.id, MediaMetric.bitrate.is_not(None)).order_by(
+        MediaMetric.stream_id, MediaMetric.timestamp)
+    for stream_id, ts, rate in db.execute(samples):
+        bitrate_samples.setdefault(stream_id, []).append((ts, rate))
     task_payload = {
         'sessions': [_session_dict(s, sid) for s, sid in session_rows],
-        'streams': [_stream_dict(r) for r in streams_raw],
+        'capture_end': stats.get('last_ts'),
+        'streams': [{**_stream_dict(r), 'bitrate_samples': bitrate_samples.get(r.id, [])} for r in streams_raw],
         'messages': [_message_dict(m['info']) for m in sip_msgs],
         'limits': limits,
     }
@@ -900,6 +908,9 @@ def _stream_dict(r: MediaStream) -> dict:
         'loss_confidence': (r.extra or {}).get('loss_confidence'),
         'ts_anomalies': (r.extra or {}).get('ts_anomalies'),
         'rebuild_error': r.rebuild_error,
+        'source_port': r.source_port, 'destination_port': r.destination_port,
+        'source_ip': r.source_ip, 'destination_ip': r.destination_ip,
+        'link_mode': (r.extra or {}).get('link_mode'),
     }
 
 
@@ -914,6 +925,13 @@ def _message_dict(info) -> dict:
         'status_code': info.status_code,
         'cseq_number': info.cseq_number,
         'via_branch': info.via_branch,
+        'cseq_method': info.cseq_method,
+        'source_ip': info.source_ip, 'destination_ip': info.destination_ip,
+        'source_port': info.source_port, 'destination_port': info.destination_port,
+        'parse_errors': info.parse_errors,
+        'sdp_address': info.sdp.connection_address if info.sdp else None,
+        'sdp_errors': (info.sdp.errors if info.sdp else
+                       ['SDP 缺少版本行'] if info.body and 'application/sdp' in info.content_type.lower() else []),
     }
 
 

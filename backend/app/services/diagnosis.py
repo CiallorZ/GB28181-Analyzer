@@ -11,7 +11,10 @@
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
+from ipaddress import ip_address
+from statistics import median
 
 # 严重级别
 CRITICAL = 'critical'
@@ -71,16 +74,7 @@ RULES = {
     'CAP-001': '抓包不完整',
 }
 
-# 已接入检测逻辑的规则。清单里其余条目是规划中的规则，
-# 界面与文档必须明确区分，避免用户以为"没报错 = 没问题"。
-# 新增规则时同步更新；tests/test_rule_catalog.py 会对照源码校验。
-RULE_IMPLEMENTED = frozenset({
-    'SIP-001', 'SIP-003', 'SIP-008',
-    'SDP-003',
-    'MED-001', 'MED-002', 'MED-003', 'MED-004', 'MED-005',
-    'MED-007', 'MED-008',
-    'CAP-001',
-})
+RULE_IMPLEMENTED = frozenset(RULES)
 
 
 def rule_catalog() -> list[dict]:
@@ -145,6 +139,8 @@ def diagnose(task_data: dict) -> list[Diagnostic]:
 
     # ---- 抓包局限 ----
     out += _check_capture_limits(task_data)
+
+    out.extend(_observations(sessions, streams, messages, task_data.get('capture_end')))
 
     out.sort(key=lambda d: (_severity_rank(d.severity),
                             d.timestamp if d.timestamp is not None else 0))
@@ -604,3 +600,113 @@ def _check_capture_limits(task_data: dict) -> list[Diagnostic]:
             recommendations=['在信令与媒体都经过的节点补抓包'],
         ))
     return out
+
+
+def _observations(sessions, streams, messages, capture_end):
+    owners = defaultdict(set)
+    for session in sessions:
+        for call in session.get('call_ids') or []:
+            owners[call].add(session.get('id'))
+    requests, responses = defaultdict(list), defaultdict(list)
+    for msg in messages:
+        call = msg.get('call_id')
+        matches = owners.get(call, set())
+        common = dict(session_id=next(iter(matches)) if len(matches) == 1 else None,
+                      timestamp=msg.get('timestamp'), related_packet_ids=[msg['packet_number']] if msg.get('packet_number') else [])
+        if msg.get('parse_errors'):
+            yield Diagnostic(rule_id='SIP-006', severity='warning', evidence_level='confirmed',
+                             title='SIP 报文解析异常',
+                             description='解析器记录了 SIP 首行或头字段错误，可打开关联报文核查原文。', evidence={'errors':msg['parse_errors']}, **common)
+        if msg.get('sdp_errors'):
+            yield Diagnostic(rule_id='SDP-004', severity='warning', evidence_level='confirmed',
+                             title='SDP 描述无法完整解析',
+                             description='SDP 文本未通过字段检查，具体字段和解析结果见证据。', evidence={'errors':msg['sdp_errors']}, **common)
+        address = (msg.get('sdp_address') or '').split('/')[0]
+        if address and (':' in address or all(c in '.0123456789' for c in address)):
+            try:
+                ip_address(address)
+            except ValueError:
+                yield Diagnostic(rule_id='SDP-001', severity='warning', evidence_level='confirmed',
+                                 title='SDP 连接地址格式无效',
+                             description='连接行中的地址字面量无法解析为 IPv4 或 IPv6 地址。', evidence={'address':address}, **common)
+        method = msg.get('cseq_method') or msg.get('method')
+        key = (call, msg.get('cseq_number'), method, msg.get('via_branch'))
+        if all(v is not None and v != '' for v in key):
+            (requests if msg.get('is_request') else responses)[key].append(msg)
+
+    for key in dict.fromkeys((*requests, *responses)):
+        req, resp = requests.get(key, []), responses.get(key, [])
+        source = req or resp
+        first = source[0]
+        sid = owners.get(key[0], set())
+        common = dict(session_id=next(iter(sid)) if len(sid) == 1 else None,
+                      timestamp=first.get('timestamp'), related_packet_ids=[m['packet_number'] for m in source[:5] if m.get('packet_number')])
+        evidence = dict(call_id=key[0], cseq=key[1], method=key[2], via_branch=key[3], observations=len(source))
+        if not req:
+            yield Diagnostic(rule_id='SIP-005', severity='info', evidence_level='insufficient',
+                             title='抓包中未找到响应对应的请求',
+                             description='在本次观察窗口内，未找到 Call-ID、CSeq、方法和 Via 分支均匹配的请求。', evidence=evidence, **common)
+        elif key[2] == 'REGISTER' and not resp and capture_end is not None and first.get('timestamp') is not None:
+            window = capture_end - first['timestamp']
+            if window >= 32:
+                yield Diagnostic(rule_id='SIP-002', severity='warning', evidence_level='suspected',
+                                 title='REGISTER 后至少 32 秒未观察到响应',
+                             description='观察窗口覆盖了请求后的 32 秒，同一事务内未见响应。', evidence={**evidence, 'window_s':window}, **common)
+        if key[2] != 'ACK' and len(req) >= 4:
+            directions = defaultdict(list)
+            for msg in req:
+                endpoints = (msg.get('source_ip'), msg.get('source_port'),
+                             msg.get('destination_ip'), msg.get('destination_port'))
+                if None not in endpoints and all((endpoints[0], endpoints[2])):
+                    directions[endpoints].append(msg)
+            for endpoints, copies in directions.items():
+                if len(copies) >= 4:
+                    yield Diagnostic(
+                        rule_id='SIP-004', severity=WARNING, evidence_level=SUSPECTED,
+                        title='同一 SIP 事务请求出现至少四次',
+                        description='同一方向重复观察到事务键相同的请求，可对照帧号核查重传或重复采集。',
+                        session_id=common['session_id'], timestamp=copies[0].get('timestamp'),
+                        related_packet_ids=[m['packet_number'] for m in copies[:5] if m.get('packet_number')],
+                        evidence={**evidence, 'observations': len(copies), 'endpoints': list(endpoints)},
+                    )
+
+    by_id = {s.get('id'): s for s in sessions}
+    for session in sessions:
+        if session.get('end_reason') == 'abnormal':
+            yield Diagnostic(rule_id='SIP-007', severity='warning', evidence_level='suspected',
+                             title='会话结束事务未正常完成',
+                             description='本次抓包观察到 BYE，未观察到对应的成功结束响应。', session_id=session.get('id'),
+                             timestamp=session.get('end_time'), evidence={'end_reason':'abnormal', 'call_ids':session.get('call_ids')})
+    for st in streams:
+        common = dict(session_id=st.get('session_id'), stream_id=st.get('id'))
+        session = by_id.get(st.get('session_id')) or {}
+        if st.get('link_mode') == 'exact':
+            expected = session.get('negotiated_transport')
+            port = session.get('negotiated_port')
+            ports = [st.get('source_port'), st.get('destination_port')]
+            mismatch = expected and st.get('transport') and expected != st['transport']
+            address = session.get('negotiated_ip')
+            endpoints = [st.get('source_ip'), st.get('destination_ip')]
+            try:
+                ip = ip_address(address)
+                address_differs = not ip.is_unspecified and all(endpoints) and ip not in [ip_address(v) for v in endpoints]
+            except ValueError:
+                address_differs = False
+            if mismatch or address_differs or (port and not (port == 9 and expected == 'TCP') and all(p is not None for p in ports) and port not in ports):
+                yield Diagnostic(rule_id='SDP-002', severity='warning', evidence_level='suspected',
+                                 title='已关联媒体流的端点或传输方式与协商值不同',
+                             description='SSRC 已精确关联。可对照协商值与捕获的源、目的端点核查差异。',
+                                 evidence={'transport':st.get('transport'), 'ports':ports, 'addresses':endpoints,
+                                           'negotiated_address':address,
+                                           'negotiated_transport':expected, 'negotiated_port':port}, **common)
+        # Ignore partial edge buckets. Require a sustained change across complete adjacent buckets.
+        samples = (st.get('bitrate_samples') or [])[1:-1]
+        for index in range(3, len(samples)-2):
+            base = median(v for _, v in samples[index-3:index])
+            low = samples[index:index+3]
+            if base > 0 and max(v for _, v in low) <= base * 0.3:
+                yield Diagnostic(rule_id='MED-006', severity='warning', evidence_level='suspected',
+                                 title='连续三个采样窗口码率不超过基线的 30%',
+                             description='基线取前三个完整窗口的中位数，证据保留随后三个窗口的实际码率。',
+                                 timestamp=low[0][0], evidence={'baseline_kbps':base,'samples_kbps':[v for _,v in low]}, **common)
+                break

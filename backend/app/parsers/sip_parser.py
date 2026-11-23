@@ -233,14 +233,21 @@ def parse_sdp(text: str) -> SdpInfo | None:
         elif k == 'm':
             parts = v.split()
             if len(parts) >= 3:
+                port, sep, count = parts[1].partition('/')
+                if sep and (_to_int(count) or 0) <= 0:
+                    sdp.errors.append('m= 行端口数量无效')
                 cur_media = {
                     'type': parts[0],
-                    'port': _to_int(parts[1]),
+                    'port': _to_int(port),
                     'protocol': parts[2],
                     'formats': parts[3:],
                     'attributes': {},
                     'connection': '',
                 }
+                if cur_media['port'] is None or not 0 <= cur_media['port'] <= 65535:
+                    sdp.errors.append('m= 行媒体端口无效')
+                if not cur_media['formats']:
+                    sdp.errors.append('m= 行缺少媒体格式')
                 sdp.media.append(cur_media)
                 if 'TCP' in parts[2].upper():
                     sdp.is_tcp = True
