@@ -38,15 +38,16 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
     });
     let port = rx.recv_timeout(Duration::from_secs(45)).map_err(|_| "分析服务启动失败，请检查是否已经打开工作台，以及数据目录是否可写。")?;
     let url: tauri::Url = format!("http://127.0.0.1:{port}/").parse()?;
-    tauri::Builder::default().setup(move |app| {
-        let origin = url.origin();
-        WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
-            .title("GB28181 Analyzer · 视联网分析工作台").inner_size(1280., 840.)
-            .min_inner_size(720., 480.).disable_drag_drop_handler()
-            .on_navigation(move |target| target.origin() == origin)
-            .build()?;
-        Ok(())
-    }).run(tauri::generate_context!())?;
+    let app = tauri::Builder::default().build(tauri::generate_context!())?;
+    let origin = url.origin();
+    WebviewWindowBuilder::new(&app, "main", WebviewUrl::External(url))
+        .title("GB28181 Analyzer · 视联网分析工作台")
+        .inner_size(1280., 840.)
+        .min_inner_size(720., 480.)
+        .disable_drag_drop_handler()
+        .on_navigation(move |target| target.origin() == origin)
+        .build()?;
+    app.run_return(|_, _| {});
     drop(child.stdin.take());
     for _ in 0..30 {
         if child.try_wait()?.is_some() { break; }
