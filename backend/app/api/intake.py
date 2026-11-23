@@ -138,7 +138,8 @@ def dumpcap():
 
 @router.get('/interfaces')
 def interfaces():
-    result = capture._run([dumpcap(), '-D'], 8, '读取网卡')
+    result = subprocess.run([dumpcap(), '-D'], capture_output=True, text=True, encoding='utf-8',
+                            errors='replace', creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), timeout=8)
     if result.returncode:
         raise HTTPException(503, '无法读取网卡，请检查 Npcap 和采集权限')
     return [{'id': int(m[1]), 'name': m[2]} for m in re.finditer(r'^(\d+)\. (.+)$', result.stdout, re.M)]
@@ -156,7 +157,7 @@ def record(body: Recording, db: Session = Depends(get_db)):
                                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), timeout=body.seconds+15)
         if result.returncode or not dest.is_file():
             raise HTTPException(422, '采集失败，请检查网卡及 Npcap 权限')
-        return register_capture(db, f'网卡{body.interface}.pcapng', dest, dest.stat().st_size(), capture.file_checksum(str(dest)))
+        return register_capture(db, f'网卡{body.interface}.pcapng', dest, dest.stat().st_size, capture.file_checksum(str(dest)))
     except BaseException:
         dest.unlink(missing_ok=True)
         raise

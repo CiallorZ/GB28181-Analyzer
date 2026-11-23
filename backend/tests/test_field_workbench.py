@@ -45,3 +45,19 @@ def test_expert_persists_in_report_and_chat(monkeypatch):
     ai.analyze(None, 1, context='synthetic', expert='sip')
     ai.chat(None, 1, [], 'synthetic?', context='synthetic', expert='sip')
     assert all(ai.EXPERTS['sip'] in m for m in messages)
+
+
+def test_finished_recording_registers_capture(client, monkeypatch):
+    from pathlib import Path
+    from subprocess import CompletedProcess
+    from app.api import intake
+
+    def run(cmd, **kwargs):
+        Path(cmd[-1]).write_bytes(bytes.fromhex('0a0d0d0a') + bytes(76))
+        return CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(intake, 'dumpcap', lambda: 'dumpcap')
+    monkeypatch.setattr(intake.subprocess, 'run', run)
+    res = client.post('/api/v1/intake/record', json={'interface': 1, 'seconds': 2})
+    assert res.status_code == 200 and res.json()['size'] == 80
+    assert client.get('/api/v1/tasks/' + str(res.json()['task_id'])).is_success
