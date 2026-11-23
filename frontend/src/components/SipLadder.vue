@@ -192,6 +192,18 @@ function onSvgKey(e) {
   }
 }
 
+const failures = computed(() => props.messages.flatMap((message, index) =>
+  !message.is_request && message.status_code >= 400 && message.status_code < 700 ? [index] : []))
+
+async function nextFailure() {
+  const index = failures.value.find(i => i > (selected.value ?? -1)) ?? failures.value[0]
+  if (index === undefined) return
+  selected.value = index
+  emit('select', props.messages[index])
+  await nextTick()
+  svgContainer.value?.querySelector(`.hit[data-idx="${index}"]`)?.scrollIntoView({ block: 'nearest' })
+}
+
 function onWheel(e) {
   if (!e.ctrlKey && !e.metaKey) return
   e.preventDefault()
@@ -203,6 +215,7 @@ function onWheel(e) {
 <template>
   <div class="ladder-wrap" @wheel="onWheel">
     <div class="ladder-tools">
+      <button v-if="failures.length" class="btn xs" @click="nextFailure">定位失败响应 · {{ failures.length }}</button>
       <span class="lt-hint">Ctrl + 滚轮缩放</span>
       <span class="spacer"></span>
       <button class="btn icon xs" aria-label="缩小时序图" @click="zoom = Math.max(0.6, +(zoom - 0.1).toFixed(1))">−</button>
@@ -230,7 +243,7 @@ function onWheel(e) {
   overflow: hidden;
 }
 .ladder-tools {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
   padding: 8px 12px;
   background: var(--surface-2);
   border-bottom: 1px solid var(--line);
