@@ -12,6 +12,7 @@ const list = ref([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = 20
+const pageRevision = ref(0)
 const keyword = ref('')
 const statusFilter = ref('')
 const loading = ref(false)
@@ -71,6 +72,7 @@ async function load() {
     })
     if (seq !== request) return
     list.value = r.items
+    pageRevision.value++
     total.value = r.total
   } catch (e) { if (seq === request) err.value = e.message }
   finally { if (seq === request) loading.value = false }
@@ -187,7 +189,7 @@ onMounted(loadStorage)
               <th>大小</th><th>会话</th><th>异常</th><th>创建时间</th><th>操作</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody :key="pageRevision" class="page-content-in">
             <tr v-for="t in list" :key="t.id" tabindex="0" @click="openTask(t)" @keydown.enter="openTask(t)">
               <td class="mono">#{{ t.id }}</td>
               <td class="truncate" style="max-width:260px">{{ t.name }}</td>

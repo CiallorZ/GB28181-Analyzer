@@ -5,6 +5,11 @@ from contextvars import ContextVar
 from threading import Lock
 
 
+# Coordinates worker reservation with deletion of capture files.
+task_lock = Lock()
+active_tasks = {}
+
+
 current = ContextVar('analysis_control', default=None)
 
 

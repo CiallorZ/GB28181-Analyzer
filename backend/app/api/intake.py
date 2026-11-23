@@ -1,4 +1,5 @@
 """Resumable capture import and bounded local desktop recording."""
+import errno
 import hashlib
 import json
 import os
@@ -73,18 +74,25 @@ def manifest(folder):
 @router.put('/resume/{key}/{index}')
 def part(key: str, index: int, file: UploadFile = File(...)):
     folder = directory(key)
-    body = manifest(folder)
-    if not 0 <= index < len(body.hashes):
-        raise HTTPException(400, '分片编号无效')
     data = file.file.read(CHUNK+1)
-    if len(data) != min(CHUNK, body.size-index*CHUNK) or hashlib.sha256(data).hexdigest() != body.hashes[index]:
-        raise HTTPException(400, '分片校验失败')
-    if index == 0 and not looks_like_capture(data):
-        raise HTTPException(400, '无效抓包头')
     with lock:
+        body = manifest(folder)
+        if not 0 <= index < len(body.hashes):
+            raise HTTPException(400, '分片编号无效')
+        if len(data) != min(CHUNK, body.size-index*CHUNK) or hashlib.sha256(data).hexdigest() != body.hashes[index]:
+            raise HTTPException(400, '分片校验失败')
+        if index == 0 and not looks_like_capture(data):
+            raise HTTPException(400, '无效抓包头')
         tmp = folder / 'chunk.tmp'
-        tmp.write_bytes(data)
-        tmp.replace(folder / str(index))
+        try:
+            tmp.write_bytes(data)
+            tmp.replace(folder / str(index))
+        except OSError as exc:
+            if exc.errno == errno.ENOSPC:
+                raise HTTPException(507, '剩余空间不足以保存分片，释放空间后可重试') from exc
+            raise
+        finally:
+            tmp.unlink(missing_ok=True)
     return {'received': index}
 
 

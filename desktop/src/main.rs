@@ -40,10 +40,16 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
     let url: tauri::Url = format!("http://127.0.0.1:{port}/").parse()?;
     let app = tauri::Builder::default().build(tauri::generate_context!())?;
     let origin = url.origin();
+    // Tauri's work area excludes the taskbar and is reported in physical pixels.
+    let (width, height) = app.primary_monitor().ok().flatten().map_or((1060., 680.), |monitor| {
+        let usable = monitor.work_area().size.to_logical::<f64>(monitor.scale_factor());
+        ((usable.width * 0.92).min(1480.), (usable.height * 0.91).min(920.))
+    });
     WebviewWindowBuilder::new(&app, "main", WebviewUrl::External(url))
         .title("GB28181 Analyzer · 视联网分析工作台")
-        .inner_size(1280., 840.)
-        .min_inner_size(720., 480.)
+        .inner_size(width, height)
+        .min_inner_size(width.min(520.), height.min(360.))
+        .center()
         .disable_drag_drop_handler()
         .on_navigation(move |target| target.origin() == origin)
         .build()?;

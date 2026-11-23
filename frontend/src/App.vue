@@ -128,7 +128,7 @@ onUnmounted(() => {
 
     <main class="main">
       <router-view v-slot="{ Component }">
-        <transition name="fade" mode="out-in">
+        <transition name="route-slide" mode="out-in">
           <component :is="Component" :key="route.name === 'session-detail' ? route.path : route.query.task" />
         </transition>
       </router-view>
@@ -160,7 +160,6 @@ onUnmounted(() => {
 .bar-nav a:hover, .bar-nav .router-link-exact-active, .bar-nav .current {
   color: var(--brand-lt); text-decoration: none;
 }
-.bar-nav .router-link-exact-active::after, .bar-nav .current::after { content:''; position:absolute; height:3px; left:10px; right:10px; bottom:0; background:var(--brand); }
 @media (max-width: 1080px) { .bar-in { padding: 0 16px; gap: 12px; } }
 
 .brand {
@@ -251,7 +250,7 @@ onUnmounted(() => {
 .dep.partial i { background: var(--warning); }
 .dep.waiting i { background: var(--text-3); }
 
-.main { flex: 1; }
+.main { flex: 1; min-width: 0; }
 
 /* 移动端：只留标志与图标，任务上下文交给页面标题 */
 @media (max-width: 1020px) {
@@ -276,10 +275,33 @@ onUnmounted(() => {
   .dep span { display: none; }
 }
 
-.fade-enter-active, .fade-leave-active {
-  transition: opacity .16s var(--ease);
+.route-slide-enter-active { transition: opacity .2s var(--ease), translate .24s var(--ease-out); }
+.route-slide-leave-active { transition: opacity .07s ease-in; }
+.route-slide-enter-from { opacity:0; translate:0 7px; }
+.route-slide-leave-to { opacity:0; }
+.bar-nav a { transition:color .16s var(--ease), background-color .16s var(--ease); }
+.bar-nav a::after {
+  content:''; position:absolute; height:2px; left:10px; right:10px; bottom:0;
+  border-radius:2px 2px 0 0; background:var(--brand); transform:scaleX(.5); opacity:0;
+  transition:transform .2s var(--ease-out), opacity .16s var(--ease);
 }
-.fade-enter-from, .fade-leave-to { opacity: 0; }
+.bar-nav a:is(.router-link-exact-active,.current)::after { transform:scaleX(1); opacity:1; }
+.bar-nav a .app-icon { width:16px; height:16px; }
+@media (max-width:1279px) { .bar .brand-desc { display:none; } }
+@media (max-width:900px) {
+  .bar-in { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 10px; padding:6px 12px 0; }
+  .bar .brand { border:0; padding-right:0; }
+  .bar .spacer { display:none; }
+  .bar .bar-nav { grid-row:2; grid-column:1/-1; justify-content:space-between; min-width:0; }
+  .bar-nav a { gap:5px; padding:0 clamp(2px,1vw,10px); }
+  .bar-nav a .app-icon { width:14px; height:14px; }
+  .bar-act { grid-column:2; grid-row:1; }
+}
+@media (max-width:360px) {
+  .brand-logo { height:20px; }
+  .bar-nav { gap:3px; }
+  .bar-nav a { font-size:12px; }
+}
 .appearance {background:var(--surface);color:var(--text-2);border:1px solid var(--line-2);border-radius:6px;font:inherit;font-size:12px;padding:5px;}
 @media(min-width:1081px){.bar-in{max-width:none;padding:0 20px;gap:20px}.brand-txt{display:flex;align-items:center;gap:18px}.brand-desc{font-size:12px;border-left:1px solid var(--line);padding-left:16px}.bar-task{display:none}.bar{box-shadow:none}.bar-nav .current,.bar-nav .router-link-exact-active{background:var(--brand-soft);color:var(--text)}}
 .brand .brand-name{color:var(--text)}@media(min-width:1100px){.bar-in{gap:18px}.dep{border-radius:5px}.bar-nav{margin-left:12px}}@media(max-width:1100px){.bar-in>.dep{display:none}}

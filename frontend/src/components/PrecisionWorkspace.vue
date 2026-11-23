@@ -177,7 +177,9 @@ async function evidenceOf(d, trigger) {
   event.value = d
   await nextTick()
   evidencePanel.value?.focus({ preventScroll: true })
-  evidencePanel.value?.scrollIntoView({ block: 'nearest' })
+  evidencePanel.value?.scrollIntoView({
+    block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+  })
 }
 async function closeEvidence() {
   event.value = null
@@ -201,13 +203,28 @@ watch(filtered, (items) => {
       ><span class="done">已完成 · {{ task.progress }}%</span>
       <button ref="railToggle" @click="rail = !rail" :aria-expanded="rail">{{ rail ? '收起助手' : '展开助手' }}</button>
     </header>
-    <div class="station-layout" :class="{ withRail: rail }">
+    <div class="station-layout page-content-in" :class="{ withRail: rail }">
       <div class="instrument-grid">
         <section class="instrument wide">
           <header>
             <h2>分析总览</h2>
             <button @click="$emit('expand')">{{ expanded ? '收起完整明细' : '完整分析明细' }}</button>
           </header>
+          <section class="finding" :class="first?.severity" aria-labelledby="finding-title">
+            <AppIcon :name="!first ? 'check' : ['critical', 'warning'].includes(first.severity) ? 'warning' : 'info'" />
+            <div class="finding-copy">
+              <h3 id="finding-title">分析结论</h3>
+              <strong>{{ first?.title || '本次抓包未命中异常规则' }}</strong>
+              <small v-if="first">{{ first.rule_id }} · {{ names[first.evidence_level] }} · {{ first.description }}</small>
+              <small v-else>结论覆盖本次抓包的可见范围和现有诊断规则。</small>
+            </div>
+            <div class="finding-actions">
+              <button v-if="first" @click="evidenceOf(first, $event.currentTarget)">查看证据 ›</button>
+              <button type="button" class="finding-ai" @click="store.openAiPanel()">
+                <img src="/brand/deepseek.svg" alt="" />DeepSeek 会诊
+              </button>
+            </div>
+          </section>
           <div class="readings">
             <article v-for="[icon, label, v, u, note] in kpis" :key="label">
               <i><AppIcon :name="icon" /></i>
@@ -218,16 +235,6 @@ watch(filtered, (items) => {
                 ><small>{{ note }}</small>
               </div>
             </article>
-          </div>
-          <div class="finding" :class="first?.severity">
-            <AppIcon :name="!first ? 'check' : ['critical', 'warning'].includes(first.severity) ? 'warning' : 'info'" /><b>关键诊断</b>
-            <div>
-              <strong>{{ first?.title || '未发现规则命中异常' }}</strong
-              ><small v-if="first"
-                >{{ first.rule_id }} · {{ names[first.evidence_level] }} · {{ first.description }}</small
-              >
-            </div>
-            <button v-if="first" @click="evidenceOf(first, $event.currentTarget)">查看证据 ›</button>
           </div>
         </section>
         <section class="instrument">

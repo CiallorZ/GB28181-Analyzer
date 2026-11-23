@@ -62,8 +62,18 @@ def desktop_smoke(root):
             assert json.load(response) == {'total': 0, 'items': []}
         with urllib.request.urlopen(base + '/compare', timeout=5) as response:
             assert 'GB28181 Analyzer' in response.read().decode()
-        user32.PostMessageW(wintypes.HWND(handles[0]), 0x0010, 0, 0)  # WM_CLOSE
-        assert process.wait(timeout=20) == 0
+        # A visible HWND may precede the WebView2 event loop being ready.
+        # Retry the normal close message without treating a forced kill as success.
+        hwnd = wintypes.HWND(handles[0])
+        deadline = time.monotonic() + 20
+        while process.poll() is None and time.monotonic() < deadline:
+            if user32.IsWindow(hwnd):
+                assert user32.PostMessageW(hwnd, 0x0010, 0, 0), 'WM_CLOSE could not be queued'
+            try:
+                process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                continue
+        assert process.returncode == 0, 'Desktop did not exit cleanly after WM_CLOSE'
         with socket.socket() as probe:
             probe.settimeout(1)
             assert probe.connect_ex(('127.0.0.1', port)) != 0, 'Engine still listening'
@@ -74,7 +84,7 @@ def desktop_smoke(root):
 
 
 def smoke(archive):
-    with tempfile.TemporaryDirectory(prefix='gb28181-smoke-') as temp:
+    with tempfile.TemporaryDirectory(prefix='gb28181-smoke-', ignore_cleanup_errors=True) as temp:
         root = Path(temp)
         with zipfile.ZipFile(archive) as bundle:
             bundle.extractall(root)

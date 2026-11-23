@@ -49,6 +49,14 @@ function localDate(value) {
   const normalized = /(?:Z|[+-]\d{2}:\d{2})$/i.test(value) ? value : value + 'Z'
   return date.format(new Date(normalized))
 }
+const demoPaused = ref(false)
+const exchange = [
+  { name: 'INVITE', detail: '发起点播 · SDP offer', direction: 'request' },
+  { name: '200 OK', detail: '接受请求 · SDP answer', direction: 'response' },
+  { name: 'ACK', detail: '确认会话', direction: 'request' },
+  { name: 'RTP', detail: '发送媒体', direction: 'media' }
+]
+const binary = ['01101001 00011010 10110100 01011001', '10100110 01011100 00100011 10010010']
 const layers = [
   { icon: 'signal', code: 'SIP / SDP', name: '信令与协商', detail: '点播时序 · 响应码 · 端口与 SSRC' },
   { icon: 'wave', code: 'RTP / TCP', name: '媒体传输', detail: '序号缺口 · 抖动 · 码率趋势' },
@@ -76,7 +84,7 @@ function drop(event) {
 </script>
 
 <template>
-  <div class="capture-home">
+  <div class="capture-home page-content-in">
     <section class="hero glass-panel" aria-labelledby="hero-title">
       <div class="hero-copy" :class="{ dragging }" @dragover.prevent="dragging = true" @dragleave.prevent="dragging = false" @drop.prevent="drop">
         <div class="hero-meta"><img src="/brand/analyzer.svg" width="30" height="30" alt="">中国铁塔 · 视联网</div>
@@ -98,13 +106,36 @@ function drop(event) {
         <div class="hero-note">支持 PCAP / PCAPNG / CAP <span></span> 抓包由分析服务所在设备处理</div>
         <div v-if="error" class="hero-error" role="alert">{{ error }}</div>
       </div>
+      <figure class="exchange" :class="{ paused: demoPaused }" aria-labelledby="exchange-title">
+        <div class="binary-field" aria-hidden="true">
+          <span v-for="i in 8" :key="i" :style="{ '--lane': i }">{{ (binary[i % 2] + '   ').repeat(13) }}</span>
+        </div>
+        <figcaption class="exchange-head">
+          <div><h2 id="exchange-title">点播信令交互</h2><p>协议示意 · SIP / SDP / RTP</p></div>
+          <button class="motion-toggle" type="button" @click="demoPaused = !demoPaused">
+            <AppIcon :name="demoPaused ? 'play' : 'pause'" />
+            {{ demoPaused ? '继续演示' : '暂停演示' }}
+          </button>
+        </figcaption>
+        <div class="endpoints">
+          <span><AppIcon name="monitor" />点播平台</span>
+          <span><AppIcon name="codec" />前端设备</span>
+        </div>
+        <ol class="exchange-rows">
+          <li v-for="(message, i) in exchange" :key="message.name" :class="message.direction" :style="{ '--delay': i * 1.55 + 's' }">
+            <div class="message"><b>{{ message.name }}</b><span>{{ message.detail }}</span></div>
+            <span class="sr-only">{{ message.direction === 'request' ? '平台发往设备' : '设备发往平台' }}</span>
+            <div class="wire" aria-hidden="true"><span></span></div>
+          </li>
+        </ol>
+      </figure>
+    </section>
+    <section class="workspace" aria-label="分析路径和最近任务">
+      <div class="workspace-body">
         <section class="recent" aria-labelledby="recent-title"><div class="section-head"><div><h2 id="recent-title">最近分析</h2></div><router-link to="/tasks" class="all-link">全部任务 <span aria-hidden="true"><AppIcon name="forward" /></span></router-link></div>
           <p v-if="historyError" class="history-empty">历史记录暂时无法读取。</p><p v-else-if="history === null" class="history-empty" role="status">正在读取历史记录…</p><p v-else-if="!history.length" class="history-empty">导入首份抓包后，任务会出现在这里。</p>
           <ul v-else class="history-list"><li v-for="item in history" :key="item.id"><router-link :to="{ name: 'task', params: { id: item.id } }"><span class="file-icon" aria-hidden="true"><AppIcon name="file" /></span><span class="file-info"><strong class="truncate" :title="item.name">{{ item.name }}</strong><time :datetime="item.created_at">{{ localDate(item.created_at) }}</time></span><span class="badge" :class="status[item.status]?.[1]">{{ status[item.status]?.[0] || item.status }}</span><span class="row-arrow" aria-hidden="true"><AppIcon name="open" /></span></router-link></li></ul>
         </section>
-    </section>
-    <section class="workspace" aria-label="分析路径">
-      <div class="workspace-body">
         <section class="layers" aria-labelledby="layers-title"><div class="section-head"><div><h2 id="layers-title">协议分析路径</h2></div><router-link to="/compare" class="all-link">双包对比 <AppIcon name="open" /></router-link></div>
           <ol class="layer-list"><li v-for="layer in layers" :key="layer.code"><span class="layer-icon"><AppIcon :name="layer.icon" /></span><div><strong>{{ layer.name }}</strong><p>{{ layer.detail }}</p></div><span class="layer-code">{{ layer.code }}</span></li></ol>
         </section>
@@ -115,13 +146,11 @@ function drop(event) {
 </template>
 
 <style scoped>
-.capture-home { max-width:1500px; margin:auto; padding:28px 28px 64px; }
-.hero { min-height:370px; position:relative; overflow:hidden; display:grid; grid-template-columns:minmax(0,1fr) minmax(300px,.95fr); background:color-mix(in srgb,var(--surface) 84%,transparent); border:1px solid var(--line-2); border-radius:14px; color:var(--text); backdrop-filter:blur(20px); box-shadow:var(--shadow); }
-.hero::after { z-index:-1; content:''; position:absolute; inset:0; pointer-events:none; background:repeating-linear-gradient(90deg,transparent 0 95px,var(--grid-line) 96px); }
+.capture-home { padding:4px 0 32px; }
+.hero { min-height:370px; position:relative; overflow:hidden; display:grid; grid-template-columns:minmax(0,1fr) minmax(300px,.95fr); background:radial-gradient(ellipse at 5% 0,var(--brand-soft),transparent 48%),color-mix(in srgb,var(--info) 4%,var(--bg-2)); border:1px solid var(--line-2); border-radius:14px; color:var(--text); backdrop-filter:blur(20px); box-shadow:var(--shadow); }
 .hero-copy { z-index:1; padding:32px clamp(24px,3vw,48px); }
 .hero-meta { font-size:12px; font-weight:600; letter-spacing:.04em; color:var(--brand-lt); display:flex; align-items:center; gap:9px; }
-.hero-mark { width:18px; height:2px; background:var(--brand); }
-.hero h1 { margin:22px 0 12px; font-size:clamp(39px,4.4vw,64px); line-height:1.12; letter-spacing:-.045em; font-weight:750; }
+.hero h1 { margin:22px 0 12px; font-size:clamp(30px,3.2vw,49px); line-height:1.12; letter-spacing:-.045em; font-weight:750; }
 
 .hero-copy > p { color:var(--text-2); font-size:14px; line-height:1.8; max-width:440px; }
 .hero-actions { display:flex; gap:12px; align-items:center; margin-top:27px; flex-wrap:wrap; }
@@ -136,10 +165,145 @@ function drop(event) {
 .workspace-body { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:28px; margin-top:29px; }.layers,.recent { min-width:0; border-top:2px solid var(--line-strong); padding-top:16px; }.section-head { display:flex; justify-content:space-between; align-items:end; gap:12px; padding-bottom:15px; border-bottom:1px solid var(--line-2); }.section-label { display:block; color:var(--brand-lt); font-size:11px; font-weight:650; margin-bottom:5px; }.section-head h2 { font-size:19px; letter-spacing:-.02em; }.section-hint,.all-link { font-size:12px; color:var(--text-3); }.all-link { color:var(--brand-lt); font-weight:650; text-decoration:none; }.all-link:hover { text-decoration:underline; }
 .layer-list,.history-list { list-style:none; }.layer-list li { display:grid; grid-template-columns:38px minmax(0,1fr) auto; gap:10px; align-items:center; padding:15px 0; border-bottom:1px solid var(--line); }.layer-icon { display:grid; place-items:center; width:32px; height:32px; font-size:17px; color:var(--brand-lt); background:var(--surface); border:1px solid var(--line-2); border-radius:8px; }.layer-list strong { font-size:13px; }.layer-list p { color:var(--text-3); font-size:11.5px; margin-top:2px; }.layer-code { font:11px var(--font-mono); color:var(--text-3); }
 .history-list a { display:flex; align-items:center; gap:12px; min-height:64px; border-bottom:1px solid var(--line); color:var(--text); text-decoration:none; }.history-list a:hover { background:var(--surface-2); }.file-icon { width:34px; height:34px; display:grid; place-items:center; flex:none; color:var(--brand-lt); background:var(--brand-soft); border-radius:7px; }.file-icon svg { width:20px; height:20px; }.file-info { display:grid; gap:3px; min-width:0; flex:1; }.file-info strong { font-size:12.5px; }.file-info time,.history-empty { font-size:11px; color:var(--text-3); }.history-empty { padding:24px 0; }.row-arrow { color:var(--text-4); }
-@media (max-width:850px) { .capture-home { padding:20px 16px 48px; }.hero { grid-template-columns:1fr; }.hero-copy { padding:36px 28px; }.exchange { border-inline-start:0; border-top:1px solid var(--line); }.workspace-body { grid-template-columns:1fr; gap:30px; } }
+@media (max-width:740px) {
+  .hero { grid-template-columns:1fr; }
+  .hero-copy { padding:26px 22px; }
+  .workspace-body { grid-template-columns:1fr; }
+}
 @media (max-width:480px) { .hero-copy { padding:32px 22px; }.hero h1 { font-size:clamp(26px,7.5vw,34px); text-wrap:balance; }.layer-code { font-size:10px; } }
 @media (prefers-reduced-motion:reduce) { .upload-button,.sample-button { transition:none; }.upload-button:hover:not(:disabled) { transform:none; } }
-.live{margin:14px 0;color:var(--text-2);font-size:13px}.live summary{cursor:pointer}.live select,.live input{max-width:100%;margin:6px;padding:5px}.live input{width:6em}@media(min-width:900px){
-.capture-home{max-width:none;padding:4px 0 24px}.hero{grid-template-columns:1.1fr 1fr;min-height:0;background:var(--bg-2);border-radius:8px;backdrop-filter:none}.hero::after{display:none}.hero-copy{padding:24px}.hero-copy h1{font-size:24px;letter-spacing:0;margin:8px 0}.hero-meta{font-size:12px}.hero-meta img{width:20px;height:20px}.hero .recent{border-left:1px solid var(--line);padding:18px 24px;background:var(--surface)}.history-list{max-height:295px;overflow:auto}.workspace{margin-top:12px}.workspace-body{display:block}.layer-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.layers{border:0}.layers li{align-items:start}.layer-code{align-self:start}
+.live { margin:14px 0; color:var(--text-2); font-size:13px; }
+.live summary { cursor:pointer; }
+.live select,.live input { max-width:100%; margin:6px; padding:5px; }
+.live input { width:6em; }
+.exchange {
+  position:relative;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  min-width:0;
+  margin:0;
+  padding:24px clamp(16px,2.4vw,40px);
+  isolation:isolate;
+  overflow:hidden;
+  border-inline-start:1px solid var(--line);
+  background:
+    radial-gradient(ellipse at 80% 30%,color-mix(in srgb,var(--info) 14%,transparent),transparent 72%),
+    radial-gradient(circle at 1px 1px,var(--grid-line) 1px,transparent 1px) 0 0 / 17px 17px,
+    var(--bg-2);
+}
+.binary-field {
+  position:absolute;
+  inset:18px 0 0;
+  z-index:-1;
+  overflow:hidden;
+  color:var(--info);
+  opacity:.13;
+  mask-image:linear-gradient(125deg,transparent 18%,black 62%,transparent);
+  font:11px/43px var(--font-mono);
+  pointer-events:none;
+}
+.binary-field span {
+  display:block;
+  white-space:nowrap;
+  animation:bit-stream 22s linear infinite;
+  animation-delay:calc(var(--lane) * -2.9s);
+}
+.binary-field span:nth-child(even) { animation-direction:reverse; }
+@keyframes bit-stream { to { transform:translateX(-28ch); } }
+.exchange-head,.endpoints,.message { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.exchange-head h2 { font-size:18px; margin:0; }
+.exchange-head p { margin:3px 0 0; font-size:12px; color:var(--text-3); }
+.motion-toggle {
+  flex:none;
+  padding:6px 8px;
+  background:var(--surface);
+  color:var(--text-2);
+  border:1px solid var(--line-2);
+  border-radius:6px;
+  cursor:pointer;
+  font:inherit;
+  font-size:12px;
+}
+.motion-toggle:hover { border-color:var(--info); }
+.endpoints { margin-top:18px; }
+.endpoints > span {
+  display:flex;
+  align-items:center;
+  gap:7px;
+  background:var(--surface);
+  border:1px solid var(--line-2);
+  border-radius:6px;
+  padding:6px 9px;
+  font-size:12px;
+  font-weight:650;
+}
+.endpoints .app-icon { color:var(--info); }
+.exchange-rows {
+  list-style:none;
+  padding:4px 0 2px;
+  margin:0 19px;
+  border-inline:1px dashed var(--line-strong);
+}
+.exchange-rows li { position:relative; --signal:var(--info); }
+.exchange-rows .response { --signal:var(--ok); }
+.exchange-rows .media { --signal:var(--brand-lt); }
+.message { padding:8px 13px 4px; font-size:12px; }
+.message b { font:650 12px var(--font-mono); color:var(--signal); }
+.message span { color:var(--text-2); text-align:right; }
+.wire {
+  position:relative;
+  margin:0 4px;
+  height:8px;
+  background:linear-gradient(90deg,var(--signal),var(--signal)) center / 100% 1px no-repeat;
+}
+.response .wire,.media .wire { transform:scaleX(-1); }
+.wire::after {
+  content:'';
+  position:absolute;
+  top:1px;
+  right:0;
+  width:6px;
+  height:6px;
+  border-top:1px solid var(--signal);
+  border-right:1px solid var(--signal);
+  transform:rotate(45deg);
+}
+.wire span {
+  position:absolute;
+  top:1px;
+  width:21px;
+  max-width:12%;
+  height:6px;
+  border-radius:12px;
+  background:linear-gradient(90deg,transparent,var(--signal));
+  box-shadow:0 0 9px color-mix(in srgb,var(--signal) 55%,transparent);
+  left:0;
+  opacity:0;
+  animation:signal-pulse 7s linear infinite var(--delay);
+}
+@keyframes signal-pulse {
+  0% { opacity:0; left:0; }
+  3% { opacity:1; }
+  18% { opacity:1; }
+  21%,100% { opacity:0; left:94%; }
+}
+.paused :is(.wire span,.binary-field span) { animation-play-state:paused; }
+.sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+@media (741px <= width <= 1050px) {
+  .hero { grid-template-columns:minmax(0,1fr) minmax(0,1fr); min-height:0; }
+  .hero-copy { padding:22px; }
+  .hero h1 { font-size:clamp(28px,3.7vw,38px); }
+  .drop-surface { margin-top:16px; padding:12px; }
+  .upload-button,.sample-button { min-height:36px; padding-inline:10px; }
+  .hero-note { margin-top:12px; }
+}
+@media (max-width:740px) {
+  .exchange { border-inline-start:0; border-top:1px solid var(--line); }
+  .workspace-body { gap:18px; margin-top:18px; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .wire span,.binary-field span { animation:none; }
+  .motion-toggle { display:none; }
 }
 </style>

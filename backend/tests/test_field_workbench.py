@@ -82,3 +82,35 @@ def test_finished_recording_registers_capture(client, monkeypatch):
     res = client.post('/api/v1/intake/record', json={'interface': 1, 'seconds': 2})
     assert res.status_code == 200 and res.json()['size'] == 80
     assert client.get('/api/v1/tasks/' + str(res.json()['task_id'])).is_success
+
+def test_resumable_disk_full_keeps_confirmed_chunks(client, monkeypatch, tmp_path):
+    import errno
+    from pathlib import Path
+
+    from app.api import intake
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, 'UPLOAD_DIR', tmp_path)
+    monkeypatch.setattr(intake, 'CHUNK', 8)
+    chunks = [bytes.fromhex('d4c3b2a1') + bytes(4), b'last']
+    manifest = {'name': 'space.pcap', 'size': 12,
+                'hashes': [hashlib.sha256(chunk).hexdigest() for chunk in chunks]}
+    base = '/api/v1/intake/resume'
+    key = client.post(base, json=manifest).json()['key']
+    url = f'{base}/{key}'
+    assert client.put(url+'/0', files={'file': ('chunk', chunks[0])}).is_success
+    write_bytes = Path.write_bytes
+
+    def disk_full(path, data):
+        if path.name == 'chunk.tmp':
+            write_bytes(path, data[:2])
+            raise OSError(errno.ENOSPC, 'disk full')
+        return write_bytes(path, data)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, 'write_bytes', disk_full)
+        assert client.put(url+'/1', files={'file': ('chunk', chunks[1])}).status_code == 507
+    assert not (intake.directory(key) / 'chunk.tmp').exists()
+    assert client.post(base, json=manifest).json()['received'] == [0]
+    assert client.put(url+'/1', files={'file': ('chunk', chunks[1])}).is_success
+    assert client.post(url+'/finish').is_success
