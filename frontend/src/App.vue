@@ -81,6 +81,7 @@ onUnmounted(() => {
         <nav class="bar-nav" aria-label="主导航">
           <router-link to="/" :class="{ current: route.name === 'task' }">工作台</router-link>
           <router-link to="/tasks">历史任务</router-link>
+          <router-link to="/compare">双包对比</router-link>
           <router-link to="/settings">设置</router-link>
         </nav>
 

@@ -87,6 +87,10 @@ export const api = {
   packets: (taskId, params) => client.get(`/tasks/${taskId}/packets`, { params }).then(r => r.data),
   packet: (id) => client.get(`/packets/${id}`).then(r => r.data),
 
+  comparisons: (offset=0) => client.get('/comparisons', {params:{offset}}).then(r=>r.data),
+  comparison: id => client.get('/comparisons/'+id).then(r=>r.data),
+  compare: body => client.post('/comparisons',body).then(r=>r.data),
+
   // DeepSeek
   aiContext: (taskId) => client.get(`/ai/context/${taskId}`).then(r => r.data),
   aiConfig: () => client.get('/ai/config').then(r => r.data),

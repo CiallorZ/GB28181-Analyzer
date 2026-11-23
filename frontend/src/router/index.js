@@ -17,6 +17,8 @@ const routes = [
   // 历史任务深链接：/tasks/:id 打开对应任务的分析结果（由全局守卫设置当前任务）
   { path: '/tasks/:id(\\d+)', name: 'task', component: WorkbenchView },
   { path: '/tasks', name: 'tasks', component: () => import('../views/TasksView.vue') },
+  { path: '/compare', component: () => import('../views/CompareView.vue') },
+  { path: '/compare/:id(\\d+)', component: () => import('../views/ComparisonDetail.vue') },
   { path: '/settings', name: 'settings', component: () => import('../views/SettingsView.vue') },
 
   // 未知路径回到工作台，避免白屏
