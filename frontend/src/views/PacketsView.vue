@@ -183,7 +183,7 @@ if(props.embedded && items.value[0])openPacket(items.value[0])
             <thead>
               <tr><th :aria-sort="descending ? 'descending' : 'ascending'"><button aria-label="切换报文号排序" @click="descending=!descending;page=1;load()">No. {{descending?'↓':'↑'}}</button></th><th>时间</th><th>源</th><th>目的</th><th>协议</th><th>长度</th><th>信息</th></tr>
             </thead>
-            <tbody v-if="!listLoading">
+            <tbody v-if="!listLoading" class="page-content-in">
               <tr v-for="p in items" :key="p.id"
                   :class="{ active: selectedId === p.id }"
                   tabindex="0" :aria-selected="selectedId === p.id"
@@ -284,17 +284,26 @@ if(props.embedded && items.value[0])openPacket(items.value[0])
 @media (max-width: 1500px) { .tri-pane { grid-template-columns: 390px minmax(0, 1fr) 220px; } }
 @media (max-width: 1080px) {
   .packets-page { height: auto; }
-  .tri-pane { grid-template-columns: 1fr; }
-  .pane { min-height: 320px; }
+  .tri-pane { grid-template-columns: minmax(0, 1fr); }
+  .pane { height:clamp(220px,42vh,340px); }
 }
 
+@media (851px <= width <= 1080px) {
+  .packets-page:not(.embedded) .tri-pane { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .packets-page:not(.embedded) .pane-list { grid-column:1/-1; }
+  .packets-page:not(.embedded) .pane-tree { border-right:1px solid var(--line-2); }
+}
 .pane {
   background: var(--surface); border-right: 1px solid var(--line-2);
   display: flex; flex-direction: column;
   min-height: 0; overflow: hidden;
 }
 .pane:last-child { border-right:0; }
-@media (max-width: 1080px) { .pane { border-right:0; border-bottom:1px solid var(--line-2); } .pane:last-child { border-bottom:0; } }
+@media (max-width: 1080px) {
+  .pane { border-right:0; border-bottom:1px solid var(--line-2); }
+  .pane:last-child { border-bottom:0; }
+}
+@media (851px <= width <= 1080px) { .packets-page:not(.embedded) .pane-tree { border-bottom:0; } }
 .pane-head {
   display: flex; align-items: center; gap: 8px;
   min-height:48px; padding: 10px 14px; background: var(--surface);
@@ -375,5 +384,6 @@ if(props.embedded && items.value[0])openPacket(items.value[0])
   color: var(--critical); margin-bottom: 14px;
 }
 .packets-page.embedded{padding:0;height:auto;max-width:none}.embedded .tri-pane{grid-template-columns:minmax(0,1.45fr) minmax(0,.95fr) minmax(0,1.05fr);height:190px;min-height:0;border:0}.embedded .pane{min-height:0}.pane-body{overflow:auto}.packet-filters{display:flex;align-items:center;gap:8px;padding:6px 12px}.packet-filters input{width:125px}.pane-list td:last-child{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.layer summary{cursor:pointer}
-@media(max-width:850px){.embedded .tri-pane{grid-template-columns:1fr;height:auto}.embedded .pane{max-height:220px}}
+@media(max-width:850px){.embedded .tri-pane{grid-template-columns:minmax(0,1fr);height:auto}.embedded .pane{height:220px}}
+@media(max-width:650px){.packets-page:not(.embedded){padding:16px}.packet-filters{flex-wrap:wrap}.packet-filters input{width:min(125px,100%)}}
 </style>

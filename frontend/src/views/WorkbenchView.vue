@@ -1020,6 +1020,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
           <router-link to="/sip" class="btn-mini" @click.stop>信令时序图 <AppIcon name="forward" /></router-link>
           <span class="chev" :class="{ open: openSections.signal }"><AppIcon name="next" /></span>
         </div>
+        <Transition name="panel-slide">
         <div v-show="openSections.signal" class="sec-body flush">
           <table class="tbl clickable" v-if="sessions.length">
             <thead>
@@ -1064,6 +1065,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
             <div class="hint">抓包中可能不含 INVITE 信令，或抓包点位于信令路径之外</div>
           </div>
         </div>
+        </Transition>
       </section>
 
       <!-- ===== 3. 媒体 ===== -->
@@ -1077,6 +1079,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
           <router-link to="/media" class="btn-mini" @click.stop>详细分析 <AppIcon name="forward" /></router-link>
           <span class="chev" :class="{ open: openSections.media }"><AppIcon name="next" /></span>
         </div>
+        <Transition name="panel-slide">
         <div v-show="openSections.media" class="sec-body">
           <template v-if="streams.length">
             <p v-if="metricsError" class="hint">媒体趋势暂时无法读取。</p>
@@ -1167,6 +1170,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
             </div>
           </div>
         </div>
+        </Transition>
       </section>
 
       <!-- ===== 4. 编码 ===== -->
@@ -1184,6 +1188,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
           <span v-if="!codecList.length" class="text-na">无数据</span>
           <span class="chev" :class="{ open: openSections.codec }"><AppIcon name="next" /></span>
         </div>
+        <Transition name="panel-slide">
         <div v-show="openSections.codec" class="sec-body">
           <template v-if="codecList.length">
             <div class="codec-kpis">
@@ -1257,6 +1262,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
             </div>
           </div>
         </div>
+        </Transition>
       </section>
 
       <!-- ===== 5. 诊断 ===== -->
@@ -1272,6 +1278,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
           <router-link to="/diagnostics" class="btn-mini" @click.stop>全部 <AppIcon name="forward" /></router-link>
           <span class="chev" :class="{ open: openSections.diag }"><AppIcon name="next" /></span>
         </div>
+        <Transition name="panel-slide">
         <div v-show="openSections.diag" class="sec-body">
           <div v-if="diagnostics.length" class="diag-list">
             <div v-for="d in diagnostics.slice(0, 8)" :key="d.id"
@@ -1300,6 +1307,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
             <div class="hint">规则引擎未在该任务中检测到问题</div>
           </div>
         </div>
+        </Transition>
       </section>
 
       <!-- ===== 6. 报文 ===== -->
@@ -1312,6 +1320,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
           <router-link to="/packets" class="btn-mini" @click.stop>查看全部 <AppIcon name="forward" /></router-link>
           <span class="chev" :class="{ open: openSections.packet }"><AppIcon name="next" /></span>
         </div>
+        <Transition name="panel-slide">
         <div v-show="openSections.packet" class="sec-body flush">
           <table class="tbl clickable">
             <thead>
@@ -1332,6 +1341,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
           </table>
           <div v-if="!packets.length" class="empty">暂无报文</div>
         </div>
+        </Transition>
       </section>
 
       <!-- ===== AI 分析概览 ===== -->

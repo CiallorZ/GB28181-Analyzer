@@ -60,8 +60,8 @@
   --dur-lg: .30s;
 }
 
-@media (max-width: 650px) {
-  :root { --app-header-height: 96px; }
+@media (max-width: 900px) {
+  :root { --app-header-height: 88px; }
 }
 
 /* ============================================================
@@ -768,6 +768,17 @@ select.inp { cursor: pointer; }
   to { opacity: 1 }
 }
 .fade { animation: fadeIn .28s var(--ease) both; }
+
+/* Keep native scrolling immediate. Animate targeted navigation and incoming content. */
+.panel-slide-enter-active { transition:opacity .18s var(--ease),translate .22s var(--ease-out); }
+.panel-slide-enter-from, .panel-slide-leave-to { opacity:0; translate:0 5px; }
+.panel-slide-leave-active { transition:opacity .12s var(--ease),translate .12s var(--ease); }
+@keyframes page-content-in {
+  from { opacity:.25; translate:0 5px; }
+  to { opacity:1; translate:0 0; }
+}
+.page-content-in { animation:page-content-in .23s var(--ease-out) backwards; }
+details[open] > summary + * { animation:page-content-in .2s var(--ease-out); }
 
 /* 用户要求减少动效时，全部动画只保留最终态 */
 @media (prefers-reduced-motion: reduce) {

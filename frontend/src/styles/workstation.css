@@ -176,7 +176,7 @@
   align-items: center;
   gap: 12px;
   padding: 8px 12px;
-  margin: 0 10px 10px;
+  margin: 10px 10px 0;
   border: 1px solid var(--line);
   border-radius: 5px;
   background: var(--surface);
@@ -197,23 +197,26 @@
   outline: 2px solid var(--info);
   outline-offset: -2px;
 }
-.finding > b {
-  white-space: nowrap;
-  border-right: 1px solid var(--line-strong);
-  padding-right: 12px;
+.finding > svg { flex:none; width:21px; height:21px; }
+.finding-copy { min-width:0; flex:1 1 240px; }
+.finding-copy h3 { margin:0 0 2px; font-size:11px; color:var(--text-2); }
+.finding-copy strong { display:block; font-size:16px; overflow-wrap:anywhere; }
+.finding small { display:block; margin-top:3px; color:var(--text-2); }
+.finding-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.finding button { white-space:nowrap; }
+.finding .finding-ai {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  color:var(--text);
+  border-color:color-mix(in srgb,#4D6BFE 46%,var(--line));
+  background:color-mix(in srgb,#4D6BFE 14%,var(--surface));
 }
-.finding div {
-  min-width: 0;
-}
-.finding small {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.finding button {
-  margin-left: auto;
-  flex: none;
+.finding .finding-ai:hover { border-color:#4D6BFE; }
+.finding-ai img { width:16px; height:16px; }
+@media (max-width:600px) {
+  .finding { display:grid; grid-template-columns:auto minmax(0,1fr); align-items:start; }
+  .finding-actions { grid-column:2; }
 }
 .station .ladder-wrap {
   border: 0;

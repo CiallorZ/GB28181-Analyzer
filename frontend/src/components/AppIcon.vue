@@ -1,24 +1,26 @@
 <script setup>
-defineProps({ name: { type: String, required: true } })
+import { computed } from 'vue'
+
+const props = defineProps({ name: { type: String, required: true } })
 const paths = {
   info: ["M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z", "M12 11v6m0-10v.3"],
   check: ["m4 12 5 5L20 6", ""],
   "warning": ["m10.5 4.5-8 14.2q-.7 1.7 1.5 1.7h16q2 0 1-2L13.2 4.5q-1.3-2.1-2.7 0z","M12 9v4m0 3v.3"],
   "down": ["m5 9 7 7 7-7",""],
-  "signal": ["M4 3.8v16.4M20 3.8v16.4", "M7 8h10l-2.7-2.5M17 16H7l2.7 2.5"],
-  "wave": ["M3 8.5v7m4-10v13m4-9v5m4-11v17m4-14v11", ""],
+  "signal": ["M4.5 4v16m15-16v16", "M7.5 8h9l-2.25-2.25m2.25 2.25-2.25 2.25M16.5 16h-9l2.25-2.25M7.5 16l2.25 2.25"],
+  "wave": ["M3.5 12h3l2-5.5 3.5 11 3-8.5 2 3h3.5", ""],
   "codec": ["M5 5h14v14H5zM8 2.5v2m4-2v2m4-2v2M8 19.5v2m4-2v2m4-2v2M2.5 8h2m-2 4h2m-2 4h2m15-8h2m-2 4h2m-2 4h2","m10 9 5 3-5 3z"],
   "home": [
-    "M3 10.5 11 4a1.6 1.6 0 0 1 2 0l8 6.5 M5.5 10v9a1.5 1.5 0 0 0 1.5 1.5h10a1.5 1.5 0 0 0 1.5-1.5v-9",
-    "M9 16h2l1.3-3 1.3 3H16"
+    "m3.5 10 7.4-6a1.75 1.75 0 0 1 2.2 0l7.4 6M5.5 9v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V9",
+    "M8.5 15h2l1.5-3 1.4 3h2.1"
   ],
   "history": [
     "M4 10a8.2 8.2 0 1 1 .8 6 M3.4 5.8v4.8h4.8",
     "M12 7.8v4.4l3.2 1.8"
   ],
   "compare": [
-    "M3 7h14m-3-3 3 3-3 3 M21 17H7m3-3-3 3 3 3",
-    "M4 14v5m16-14v5"
+    "M4.5 7h14m-3-3 3 3-3 3M19.5 17h-14m3-3-3 3 3 3",
+    "M4.5 10.5V12m15 .5V14"
   ],
   "settings": [
     "M4 7h5m5 0h6M4 17h9m5 0h2",
@@ -44,6 +46,7 @@ const paths = {
     "M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15",
     "M12 15V4m-4.2 4.2L12 4l4.2 4.2"
   ],
+  pause: ["M9 5v14M15 5v14", ""],
   "play": [
     "M7 5.8q0-1.7 1.5-.8l11 6.2q1.4.8 0 1.6l-11 6.2Q7 20 7 18.2z",
     ""
@@ -81,12 +84,13 @@ const paths = {
     ""
   ]
 }
+const icon = computed(() => paths[props.name] || paths.info)
 </script>
 <template>
   <svg class="app-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-       stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
-    <path :d="paths[name][0]" />
-    <path v-if="paths[name][1]" :d="paths[name][1]" />
+       stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+    <path :d="icon[0]" />
+    <path v-if="icon[1]" :d="icon[1]" />
   </svg>
 </template>
 <style scoped>
