@@ -163,7 +163,7 @@ def count_frames(path: str) -> int | None:
         return None
     try:
         r = subprocess.run(
-            [capture.FFMPEG, '-hide_banner', '-i', path, '-an',
+            [capture.FFMPEG, '-nostdin', '-hide_banner', '-i', path, '-an',
              '-map', '0:v:0', '-f', 'null', '-'],
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
             capture_output=True, text=True, errors='replace',
@@ -192,7 +192,7 @@ def transcode(ps_path: str, mp4_path: str, poster_path: str | None = None
     with tempfile.TemporaryDirectory(prefix='.transcode-', dir=output_dir) as tmp:
         temporary_mp4 = os.path.join(tmp, 'output.mp4')
         cmd = [
-            capture.FFMPEG, '-hide_banner', '-loglevel', 'error',
+            capture.FFMPEG, '-nostdin', '-hide_banner', '-loglevel', 'error',
             # 容忍码流瑕疵，不因单帧错误中断
             '-err_detect', 'ignore_err',
             # 参考帧缺失时丢弃坏帧，而不是输出花屏
@@ -227,7 +227,7 @@ def transcode(ps_path: str, mp4_path: str, poster_path: str | None = None
         for ss in ('1', '0'):
             try:
                 subprocess.run(
-                    [capture.FFMPEG, '-hide_banner', '-loglevel', 'error',
+                    [capture.FFMPEG, '-nostdin', '-hide_banner', '-loglevel', 'error',
                      '-ss', ss, '-i', mp4_path, '-frames:v', '1',
                      '-q:v', '4', '-y', poster_path],
                     creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
@@ -239,7 +239,7 @@ def transcode(ps_path: str, mp4_path: str, poster_path: str | None = None
         else:
             try:
                 subprocess.run(
-                    [capture.FFMPEG, '-hide_banner', '-loglevel', 'error',
+                    [capture.FFMPEG, '-nostdin', '-hide_banner', '-loglevel', 'error',
                      '-i', mp4_path, '-frames:v', '1', '-q:v', '4',
                      '-y', poster_path],
                     creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),

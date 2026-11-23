@@ -27,7 +27,9 @@ const info = computed(() => {
     codec: s.codec,
     width: s.width,
     height: s.height,
-    fps: s.fps,
+    outputCodec: rb.output_codec,
+    outputWidth: rb.output_width,
+    outputHeight: rb.output_height,
     frames: s.frame_count
   }
 })
@@ -55,7 +57,7 @@ function onError() {
 function download() {
   const a = document.createElement('a')
   a.href = videoUrl.value
-  a.download = `stream-${props.stream.ssrc ? props.stream.ssrc.toString(16) : props.stream.id}.mp4`
+  a.download = `stream-${props.stream.ssrc != null ? props.stream.ssrc.toString(16) : props.stream.id}.mp4`
   a.click()
 }
 
@@ -90,8 +92,7 @@ watch(() => props.stream.id, () => {
             <AppIcon name="play" />
           </div>
           <div class="vp-badge">
-            {{ info.width }}×{{ info.height }}
-            <template v-if="info.fps"> · {{ info.fps }}fps</template>
+            MP4 <template v-if="info.outputWidth && info.outputHeight">· {{ info.outputWidth }}×{{ info.outputHeight }}</template>
             <template v-if="info.duration"> · {{ info.duration.toFixed(2) }}s</template>
           </div>
         </div>
@@ -115,7 +116,7 @@ watch(() => props.stream.id, () => {
     <div class="vp-info">
       <div class="vi-row">
         <span class="vi-k">SSRC</span>
-        <span class="vi-v mono">0x{{ stream.ssrc?.toString(16) }}</span>
+        <span class="vi-v mono">{{ stream.ssrc == null ? '未知' : '0x' + stream.ssrc.toString(16) }}</span>
       </div>
       <div class="vi-row">
         <span class="vi-k">传输</span>
@@ -123,10 +124,15 @@ watch(() => props.stream.id, () => {
       </div>
       <template v-if="info.ok">
         <div class="vi-row">
-          <span class="vi-k">编码</span>
+          <span class="vi-k">源流</span>
           <span class="vi-v">
             <span class="badge brand">{{ info.codec || '未知' }}</span>
+            <template v-if="info.width && info.height">{{ info.width }}×{{ info.height }}</template>
           </span>
+        </div>
+        <div class="vi-row">
+          <span class="vi-k">预览编码</span>
+          <span class="vi-v mono">{{ info.outputCodec || '未知' }}</span>
         </div>
         <div class="vi-row">
           <span class="vi-k">帧数</span>

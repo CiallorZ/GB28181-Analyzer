@@ -485,7 +485,7 @@ const ANALYSIS_STEPS = [
 const summary = computed(() => overview.value?.summary || {})
 const diagTotal = computed(() => {
   const d = summary.value.diagnostics || {}
-  return (d.critical || 0) + (d.warning || 0) + (d.info || 0)
+  return (d.critical || 0) + (d.warning || 0) + (d.info || 0) + (d.unknown || 0)
 })
 // 异常的严重度决定颜色：只有警告时不该显示成故障红
 const diagTone = computed(() => {
@@ -584,12 +584,12 @@ const priorityFindings = computed(() => diagnostics.value
 const flowStages = computed(() => {
   const s = summary.value
   const d = s.diagnostics || {}
-  const alerts = (d.critical || 0) + (d.warning || 0)
+  const linked = streams.value.filter(stream => stream.session_id != null).length
   return [
-    { key: 'signal', label: '信令会话', value: s.session_count != null ? `${s.session_count} 个会话` : '暂无数据', detail: 'SIP / SDP', available: hasSignal.value },
-    { key: 'media', label: '媒体传输', value: `${streams.value.length} 条流`, detail: 'RTP / TCP', available: hasMedia.value },
-    { key: 'codec', label: '视频重建', value: `${playableStreams.value.length} 条可预览`, detail: '仅代表本机重建结果', available: hasCodec.value },
-    { key: 'diag', label: '诊断事件', value: `${alerts} 条严重或警告`, detail: '查看规则与证据', available: hasDiag.value, tone: d.critical ? 'critical' : d.warning ? 'warning' : '' }
+    { key: 'signal', icon: 'signal', label: '信令会话', value: s.session_count != null ? `${s.session_count} 个会话` : '暂无数据', detail: 'SIP / SDP', available: hasSignal.value },
+    { key: 'media', icon: 'wave', label: '媒体传输', value: `${streams.value.length} 条流`, detail: `已关联 ${linked} · 未关联 ${streams.value.length - linked}`, available: hasMedia.value },
+    { key: 'video', icon: 'monitor', label: '视频重建', value: `${playableStreams.value.length} 条可预览`, detail: '本机生成的 MP4', available: hasMedia.value },
+    { key: 'diag', icon: 'file', label: '诊断事件', value: `${diagTotal.value} 条事件`, detail: `${d.critical ?? 0} 严重 · ${d.warning ?? 0} 警告 · ${d.info ?? 0} 提示`, available: hasDiag.value, tone: d.critical ? 'critical' : d.warning ? 'warning' : '' }
   ]
 })
 
@@ -623,11 +623,16 @@ function setupScrollSpy() {
   })
 }
 
-function scrollTo(sec) {
+async function scrollTo(sec) {
+  const section = sec === 'video' ? 'media' : sec
+  if (section in openSections.value && !openSections.value[section]) {
+    openSections.value[section] = true
+    await nextTick()
+  }
   const el = document.getElementById('sec-' + sec)
   const motion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
   if (el) {
-    activeSection.value = sec
+    activeSection.value = section
     el.scrollIntoView({ behavior: motion ? 'auto' : 'smooth', block: 'start' })
   }
 }
@@ -987,7 +992,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
         <div class="sec-head clickable" @click="toggle('signal')">
           <span class="sec-num">{{ secNums.signal }}</span>
           <span class="sec-title">SIP 信令分析</span>
-          <span class="sec-sub">{{ sessions.length }} 个会话</span>
+          <span class="sec-sub">{{ summary.session_count ?? sessions.length }} 个会话</span>
           <span class="spacer"></span>
           <router-link to="/sip" class="btn-mini" @click.stop>信令时序图 <AppIcon name="forward" /></router-link>
           <span class="chev" :class="{ open: openSections.signal }"><AppIcon name="next" /></span>
@@ -1067,12 +1072,11 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
             </div>
 
             <!-- 重建视频 -->
-            <div v-if="playableStreams.length" class="video-sec">
+            <div v-if="playableStreams.length" id="sec-video" class="video-sec">
               <div class="vs-head">
                 <span class="vs-title">视频画面还原</span>
                 <span class="vs-sub">
-                  {{ playableStreams.length }} 条流成功解码
-                  · RTP → PS → ES → H.264
+                  {{ playableStreams.length }} 条流已生成预览
                   <template v-if="!hasSignal"> · 无信令，按 SSRC 编号</template>
                 </span>
               </div>
@@ -1090,7 +1094,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
               </div>
             </div>
 
-            <div v-else class="video-none">
+            <div v-else id="sec-video" class="video-none">
               <div class="vn-icon">
                 <AppIcon name="monitor" />
               </div>
@@ -1324,6 +1328,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
 </template>
 
 <style scoped>
+#sec-video { scroll-margin-top:calc(var(--app-header-height) + 58px); }
 .task-breadcrumb { display:flex; align-items:center; gap:10px; color:var(--text-3); font-size:12px; margin-bottom:32px; }
 .task-breadcrumb strong { color:var(--text-2); }
 

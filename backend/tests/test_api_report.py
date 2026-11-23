@@ -78,3 +78,16 @@ def test_report_rejects_unknown_format(client, db, make_task):
     _seed(db, task)
     assert client.get('/api/v1/tasks/%d/report?format=pdf'
                       % task.id).status_code == 400
+
+
+def test_report_localizes_insufficient_evidence(client, db, make_task):
+    task = make_task()
+    session = _seed(db, task)
+    db.add(DiagnosticEvent(task_id=task.id, session_id=session.id, rule_id='CAP-001',
+                           severity=DiagnosticSeverity.INFO, evidence_level='insufficient',
+                           title='观察窗口有限'))
+    db.commit()
+    response = client.get(f'/api/v1/tasks/{task.id}/report?format=md')
+    assert response.status_code == 200
+    assert '证据等级：证据不足' in response.text
+    assert 'EvidenceLevel.' not in response.text
