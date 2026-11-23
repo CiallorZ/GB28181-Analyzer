@@ -171,10 +171,15 @@ const fmt = (v, d = 3) => v == null ? '—' : Number(v).toFixed(d)
 
 let unbindResize = null
 onMounted(async () => {
-  await load()
+  window.addEventListener('alma-theme-changed', renderCharts)
   unbindResize = bindChartResize(charts)
+  await load()
 })
-onUnmounted(() => unbindResize?.())
+onUnmounted(() => {
+  window.removeEventListener('alma-theme-changed', renderCharts)
+  unbindResize?.()
+  Object.values(charts).forEach(instance => instance.dispose())
+})
 </script>
 
 <template>

@@ -11,7 +11,7 @@
 :root {
   --app-header-height: 68px;
   /* ---- 品牌：中国铁塔 ---- */
-  --brand: #D9121F;
+  --brand: #D70C1A;
   --brand-dk: #A80D17;
   --brand-lt: #FF5A64;
   --brand-soft: rgba(217, 18, 31, 0.10);
@@ -70,23 +70,23 @@
 :root, :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: #171416;
-  --bg-2: #1B1719;
-  --surface: #211D1F;
-  --surface-2: #292325;
-  --surface-3: #362C2F;
-  --surface-4: #47373A;
+  --bg: #10161E;
+  --bg-2: #141B24;
+  --surface: #19222D;
+  --surface-2: #202C38;
+  --surface-3: #2A3745;
+  --surface-4: #354557;
   --flow: #FF7277;
   --flow-soft: rgba(217, 18, 31, .15);
 
-  --line: #3A3032;
-  --line-2: #4B3D40;
-  --line-strong: #6B5559;
+  --line: #303E4E;
+  --line-2: #415065;
+  --line-strong: #617287;
 
   --text: #E6EDF3;
-  --text-2: #C3BABC;
-  --text-3: #B8ABAD;
-  --text-4: #A9989B;
+  --text-2: #CED8E3;
+  --text-3: #AFBFCE;
+  --text-4: #99ABBE;
 
   /* 操作色：与告警红分离 */
   --ink-btn: #E6EDF3;
@@ -108,22 +108,22 @@
 :root[data-theme="light"] {
   color-scheme: light;
 
-  --bg: #F4F3F2;
+  --bg: #F2F5F8;
   --bg-2: #FFFFFF;
   --surface: #FFFFFF;
-  --surface-2: #F9F7F7;
-  --surface-3: #F1E9EA;
-  --surface-4: #E7DADC;
+  --surface-2: #F7F9FB;
+  --surface-3: #EBF0F5;
+  --surface-4: #DFE7EF;
   --flow: #B20C19;
   --flow-soft: rgba(192, 11, 22, .08);
 
-  --line: #EAE3E3;
-  --line-2: #DDD4D5;
-  --line-strong: #BCA9AB;
+  --line: #DFE6ED;
+  --line-2: #CDD7E1;
+  --line-strong: #9CAABA;
 
   --text: #0F1720;
   --text-2: #47535F;
-  --text-3: #66717D;
+  --text-3: #536474;
   --text-4: #5C6B79;
 
   --brand: #C00B16;
@@ -164,6 +164,8 @@
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
+:root.changing-appearance *, :root.changing-appearance *::before,
+:root.changing-appearance *::after { transition: none !important; }
 html, body, #app { height: 100%; }
 
 body {
@@ -175,19 +177,6 @@ body {
   letter-spacing: 0;
   -webkit-font-smoothing: antialiased;
   font-variant-numeric: tabular-nums;
-  transition: background-color var(--dur-lg) var(--ease),
-              color var(--dur-lg) var(--ease);
-}
-
-/* 主题切换时统一过渡，避免局部先亮后暗 */
-:root.theme-transition *,
-:root.theme-transition *::before,
-:root.theme-transition *::after {
-  transition: background-color var(--dur) var(--ease),
-              border-color var(--dur) var(--ease),
-              color var(--dur) var(--ease),
-              fill var(--dur) var(--ease),
-              stroke var(--dur) var(--ease) !important;
 }
 
 a { color: var(--brand-lt); text-decoration: none; }

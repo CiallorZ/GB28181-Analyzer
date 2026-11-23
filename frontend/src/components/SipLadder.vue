@@ -153,9 +153,9 @@ const svgHtml = computed(() => {
     // 国标命令
     if (m.gb_command) {
       out.push(`<rect x="4" y="${y - 8}" width="72" height="15" rx="3"
-        fill="#D70D19" opacity=".14"/>`)
+        fill="var(--brand)" opacity=".14"/>`)
       out.push(`<text x="40" y="${y + 3}" text-anchor="middle"
-        fill="#F5323E" font-size="8.5" font-family="monospace">${
+        fill="var(--brand-lt)" font-size="8.5" font-family="monospace">${
           esc(m.gb_command)}</text>`)
     }
 

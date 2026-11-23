@@ -264,6 +264,34 @@ def task_media(task_id: int,
                         items=[S.StreamOut.model_validate(r) for r in rows])
 
 
+@router.get('/tasks/{task_id}/media-quality')
+def task_media_quality(task_id: int, db: Session = Depends(get_db)):
+    """One task-scoped read of streams and one ordered read of their chart points."""
+    st = MediaStream
+    rows = db.execute(select(
+        st.id, st.session_id, st.ssrc, st.transport, st.packet_count, st.byte_count,
+        st.avg_bitrate, st.jitter_avg, st.jitter_max, st.seq_gap_packets,
+        st.out_of_order_count, st.duplicate_count, st.max_gap, st.duration, st.extra,
+    ).where(st.task_id == task_id).order_by(st.packet_count.desc(), st.id)).mappings()
+    streams = {}
+    for row in rows:
+        item = dict(row)
+        item['gaps'] = (item.pop('extra') or {}).get('seq_gap_events', [])
+        item.update(bitrate=[], jitter=[])
+        streams[item['id']] = item
+    if streams:
+        m = MediaMetric
+        points = select(m.stream_id, m.timestamp, m.bitrate, m.jitter).join(
+            st, st.id == m.stream_id).where(st.task_id == task_id).order_by(
+            m.stream_id, m.timestamp, m.id)
+        for stream_id, timestamp, bitrate, jitter in db.execute(points):
+            if bitrate is not None:
+                streams[stream_id]['bitrate'].append((timestamp, bitrate))
+            if jitter is not None:
+                streams[stream_id]['jitter'].append((timestamp, jitter))
+    return {'items': list(streams.values())}
+
+
 @router.get('/tasks/{task_id}/media-stats')
 def task_media_stats(task_id: int, db: Session = Depends(get_db)):
     """媒体流统计（用于概览展示）"""

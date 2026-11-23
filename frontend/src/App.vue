@@ -8,25 +8,28 @@ import AiPanel from './components/AiPanel.vue'
 const store = useTaskStore()
 const route = useRoute()
 
-const theme = ref(document.documentElement.dataset.theme || 'light')
+const appearance = ref(document.documentElement.dataset.appearance || 'system')
+const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
 const health = ref(null)
 const healthError = ref(false)
 
-function applyTheme(t, animate = false) {
-  // 加过渡类：让所有元素在切换瞬间统一过渡，避免局部闪烁
-  if (animate) {
-    document.documentElement.classList.add('theme-transition')
-    setTimeout(() => {
-      document.documentElement.classList.remove('theme-transition')
-    }, 400)
-  }
-  theme.value = t
-  document.documentElement.setAttribute('data-theme', t)
-  localStorage.setItem('theme', t)
-  // 通知图表重绘（ECharts 不会自动跟随 CSS 变量）
-  window.dispatchEvent(new CustomEvent('alma-theme-changed', { detail: t }))
+function applyTheme() {
+  const root = document.documentElement
+  root.dataset.appearance = appearance.value
+  const next = appearance.value === 'system' ? (systemTheme.matches ? 'dark' : 'light') : appearance.value
+  if (root.dataset.theme === next) return
+  root.classList.add('changing-appearance')
+  root.dataset.theme = next
+  // Commit the new palette before restoring hover and focus transitions.
+  void root.offsetWidth
+  root.classList.remove('changing-appearance')
+  window.dispatchEvent(new CustomEvent('alma-theme-changed', { detail: next }))
 }
-function toggleTheme() { applyTheme(theme.value === 'dark' ? 'light' : 'dark', true) }
+
+function chooseAppearance() {
+  try { localStorage.setItem('appearance', appearance.value) } catch {}
+  applyTheme()
+}
 
 const engine = computed(() => {
   if (healthError.value) return ['服务离线', 'bad']
@@ -48,13 +51,15 @@ async function loadHealth() {
 let healthTimer = null
 
 onMounted(() => {
-  applyTheme(theme.value)
+  systemTheme.addEventListener('change', applyTheme)
+  applyTheme()
   loadHealth()
   if (store.currentTaskId && !['workbench', 'task'].includes(route.name)) store.loadTask().catch(() => {})
   healthTimer = setInterval(loadHealth, 30000)
 })
 
 onUnmounted(() => {
+  systemTheme.removeEventListener('change', applyTheme)
   // 不清的话热更新会累积多个定时器，反复打健康检查
   if (healthTimer) { clearInterval(healthTimer); healthTimer = null }
 })
@@ -96,17 +101,9 @@ onUnmounted(() => {
         <div class="spacer"></div>
 
         <div class="bar-act">
-          <button class="icon-btn" @click="toggleTheme"
-                  :aria-label="theme === 'dark' ? '切换到浅色' : '切换到深色'"
-                  :title="theme === 'dark' ? '切换到浅色' : '切换到深色'">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
-              <template v-if="theme === 'dark'">
-                <circle cx="12" cy="12" r="4.2"/>
-                <path d="M12 2.5v2M12 19.5v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2.5 12h2M19.5 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/>
-              </template>
-              <path v-else d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
-            </svg>
-          </button>
+          <select class="appearance" v-model="appearance" @change="chooseAppearance" aria-label="外观模式">
+            <option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option>
+          </select>
 
           <button class="ai-btn" aria-label="DeepSeek 分析" @click="store.openAiPanel()">
             <img src="/brand/deepseek.svg" alt="" class="ai-ico" />
@@ -274,4 +271,5 @@ onUnmounted(() => {
   transition: opacity .16s var(--ease);
 }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
+.appearance {background:var(--surface);color:var(--text-2);border:1px solid var(--line-2);border-radius:6px;font:inherit;font-size:12px;padding:5px;}
 </style>

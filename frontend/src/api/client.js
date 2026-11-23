@@ -78,6 +78,7 @@ export const api = {
 
   // 任务级媒体（无信令的纯码流包也能看到）
   taskMedia: (taskId, params) => client.get(`/tasks/${taskId}/media`, { params }).then(r => r.data),
+  mediaQuality: (id, signal) => client.get(`/tasks/${id}/media-quality`, { signal }).then(r => r.data),
   taskMetrics: (taskId, ids) => client.get(`/tasks/${taskId}/media-metrics`, {
     params: new URLSearchParams(ids.map(id => ['stream_id', id]))
   }).then(r => r.data),

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
+import { ref, shallowRef, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
 import { loadECharts } from '../utils/chartLoader'
 import { chartPalette, seriesPalette } from '../utils/chartTheme'
 import { bindChartResize } from '../utils/chartResize'
@@ -8,12 +8,10 @@ import PageNav from '../components/PageNav.vue'
 import { useTaskStore } from '../stores/task'
 
 const store = useTaskStore()
-const streams = ref([])
-const metricsMap = ref({})
-const sessions = ref([])
+const streams = shallowRef([])
 const err = ref('')
+const loading = ref(false)
 const activeMetric = ref('bitrate')
-const hasSignal = ref(true)
 
 const charts = {}
 let C = chartPalette()
@@ -25,87 +23,49 @@ async function chart(id, opt) {
   // 图表库是异步加载的，等它回来时容器可能已经因切换任务被移除
   const echarts = await loadECharts()
   if (!el.isConnected) return
-  if (!charts[id]) charts[id] = echarts.init(el)
-  charts[id].setOption(opt, true)
+  if (charts[id]?.getDom() !== el) {
+    charts[id]?.dispose()
+    charts[id] = echarts.init(el)
+  }
+  charts[id].setOption({ animation: false, ...opt }, true)
 }
 
-async function load() {
-  if (!store.currentTaskId) return
+watch(() => store.currentTaskId, async (id, _, onCleanup) => {
+  const controller = new AbortController()
+  onCleanup(() => controller.abort())
+  streams.value = []
+  err.value = ''
+  loading.value = !!id
+  if (!id) return
   try {
-    const ss = await api.sessions(store.currentTaskId, { page_size: 50 })
-    sessions.value = ss.items
-    // 拉媒体流：有会话时按会话取（带归属），无会话时按任务取
-    const all = []
-    const mm = {}
-
-    if (ss.items.length) {
-      const pairs = await Promise.all(
-        ss.items.map(async (s) => {
-          const [media, mt] = await Promise.all([
-            api.sessionMedia(s.id),
-            api.sessionMetrics(s.id)
-          ])
-          return { s, media, mt }
-        })
-      )
-      pairs.forEach(({ s, media, mt }) => {
-        media.items.forEach(st => {
-          st._sessionId = s.id
-          st._deviceId = s.device_id
-          all.push(st)
-        })
-        mt.items.forEach(x => { mm[x.stream_id] = x })
-      })
-
-      // 兜底：会话未覆盖的流也要展示
-      const covered = new Set(all.map(x => x.id))
-      const rest = await api.taskMedia(store.currentTaskId)
-      rest.items.forEach(st => {
-        if (!covered.has(st.id)) {
-          st._sessionId = null
-          st._orphan = true
-          all.push(st)
-        }
-      })
-    } else {
-      // 无信令：直接取任务下所有流
-      const r = await api.taskMedia(store.currentTaskId)
-      r.items.forEach(st => {
-        st._sessionId = null
-        st._orphan = true
-        all.push(st)
-      })
-    }
-
-    streams.value = all
-    metricsMap.value = mm
-
-    // 无信令时隐藏会话相关提示
-    hasSignal.value = ss.items.length > 0
-    await nextTick()
-    render()
-  } catch (e) { err.value = e.message }
-}
+    const result = await api.mediaQuality(id, controller.signal)
+    if (!controller.signal.aborted) streams.value = result.items
+  } catch (e) {
+    if (!controller.signal.aborted) err.value = e.message
+  } finally {
+    if (!controller.signal.aborted) loading.value = false
+  }
+}, { immediate: true })
 
 function render() {
   C = chartPalette()
   PALETTE = seriesPalette()
-  // 1. 码率趋势（多流）
-  const brSeries = streams.value
-    .map((st, i) => {
-      const m = metricsMap.value[st.id]
-      if (!m?.bitrate_series?.length) return null
-      return {
-        name: '0x' + (st.ssrc ? st.ssrc.toString(16) : i),
-        type: 'line', smooth: true, showSymbol: false,
-        lineStyle: { width: 1.6, color: PALETTE[i % PALETTE.length] },
-        data: m.bitrate_series.map(p => [p.t, p.v])
-      }
-    }).filter(Boolean)
+  if (activeMetric.value === 'gap') {
+    renderGaps()
+    return
+  }
+  const metric = activeMetric.value
+  const series = streams.value.flatMap((st, i) => st[metric].length ? [{
+    name: st.ssrc == null ? '流 #' + st.id : '0x' + st.ssrc.toString(16),
+    type: 'line', smooth: true, showSymbol: false,
+    itemStyle: { color: PALETTE[i % PALETTE.length] },
+    lineStyle: { width: 2, color: PALETTE[i % PALETTE.length] },
+    data: st[metric]
+  }] : [])
 
-  chart('c-bitrate', {
+  chart('c-' + metric, {
     backgroundColor: 'transparent',
-    grid: { left: 52, right: 16, top: 26, bottom: 26 },
+    grid: { left: 52, right: 38, top: 26, bottom: 26 },
     tooltip: {
       trigger: 'axis',
       backgroundColor: C.tipBg, borderColor: C.tipBorder,
@@ -114,7 +74,7 @@ function render() {
     legend: {
       top: 0, right: 0, itemWidth: 8, itemHeight: 8,
       textStyle: { color: C.dim, fontSize: 11 },
-      data: brSeries.map(s => s.name)
+      data: series.map(s => s.name)
     },
     xAxis: {
       type: 'value', name: '秒',
@@ -125,70 +85,29 @@ function render() {
       splitLine: { lineStyle: { color: C.line, type: 'dashed' } }
     },
     yAxis: {
-      type: 'value', name: 'kbps',
+      type: 'value', name: metric === 'bitrate' ? 'kbps' : 'ms',
       nameTextStyle: { color: C.faint, fontSize: 10 },
       axisLine: { show: false }, axisTick: { show: false },
       axisLabel: { color: C.dim, fontSize: 10.5 },
       splitLine: { lineStyle: { color: C.line, type: 'dashed' } }
     },
-    series: brSeries
+    series: series
   })
 
-  // 2. 抖动趋势
-  const jSeries = streams.value
-    .map((st, i) => {
-      const m = metricsMap.value[st.id]
-      if (!m?.jitter_series?.length) return null
-      return {
-        name: '0x' + (st.ssrc ? st.ssrc.toString(16) : i),
-        type: 'line', smooth: true, showSymbol: false,
-        lineStyle: { width: 1.6, color: PALETTE[i % PALETTE.length] },
-        data: m.jitter_series.map(p => [p.t, p.v])
-      }
-    }).filter(Boolean)
+}
 
-  chart('c-jitter', {
-    backgroundColor: 'transparent',
-    grid: { left: 52, right: 16, top: 26, bottom: 26 },
-    tooltip: {
-      trigger: 'axis',
-      backgroundColor: C.tipBg, borderColor: C.tipBorder,
-      textStyle: { color: C.tipText, fontSize: 11 }
-    },
-    legend: {
-      top: 0, right: 0, itemWidth: 8, itemHeight: 8,
-      textStyle: { color: C.dim, fontSize: 11 },
-      data: jSeries.map(s => s.name)
-    },
-    xAxis: {
-      type: 'value', name: '秒',
-      nameTextStyle: { color: C.faint, fontSize: 10 },
-      axisLine: { lineStyle: { color: C.line } },
-      axisTick: { show: false },
-      axisLabel: { color: C.dim, fontSize: 10.5 },
-      splitLine: { lineStyle: { color: C.line, type: 'dashed' } }
-    },
-    yAxis: {
-      type: 'value', name: 'ms',
-      nameTextStyle: { color: C.faint, fontSize: 10 },
-      axisLine: { show: false }, axisTick: { show: false },
-      axisLabel: { color: C.dim, fontSize: 10.5 },
-      splitLine: { lineStyle: { color: C.line, type: 'dashed' } }
-    },
-    series: jSeries
-  })
-
+function renderGaps() {
   // 3. 序号缺口事件时间轴
   const gapPoints = []
   streams.value.forEach((st, i) => {
-    const evs = (st.extra?.seq_gap_events) || []
+    const evs = st.gaps
     evs.slice(0, 100).forEach(e => {
       gapPoints.push([e.time, i, e.gap])
     })
   })
   chart('c-gap', {
     backgroundColor: 'transparent',
-    grid: { left: 52, right: 16, top: 22, bottom: 26 },
+    grid: { left: 52, right: 38, top: 22, bottom: 26 },
     tooltip: {
       backgroundColor: C.tipBg, borderColor: C.tipBorder,
       textStyle: { color: C.tipText, fontSize: 11 },
@@ -255,15 +174,21 @@ const fmt = (v, d = 2) => v == null ? '—' : Number(v).toFixed(d)
 
 let unbindResize = null
 onMounted(async () => {
-  await load()
+  window.addEventListener('alma-theme-changed', render)
+  render()
   unbindResize = bindChartResize(charts)
 })
-onUnmounted(() => unbindResize?.())
+onUnmounted(() => {
+  window.removeEventListener('alma-theme-changed', render)
+  unbindResize?.()
+  Object.values(charts).forEach(instance => instance.dispose())
+})
 
 // v-show 的图表在隐藏时 init 会得到 0 宽，切回来必须重新量一次
-watch(activeMetric, async (k) => {
+watch([activeMetric, streams, loading], async () => {
   await nextTick()
-  charts['c-' + k]?.resize()
+  render()
+  charts['c-' + activeMetric.value]?.resize()
 })
 </script>
 
@@ -273,16 +198,6 @@ watch(activeMetric, async (k) => {
       title="媒体质量分析"
       :sub="`任务 #${store.currentTaskId || '未选择'} · ${stats.total} 条 RTP 流`"
       :crumbs="[{label:'工作台', to:'/'}, {label:'媒体质量分析'}]">
-      <template #actions>
-        <div class="seg">
-          <button v-for="m in [
-              {k:'bitrate',l:'码率'},
-              {k:'jitter',l:'抖动'},
-              {k:'gap',l:'丢包'}
-            ]" :key="m.k" :class="{ on: activeMetric === m.k }"
-            @click="activeMetric = m.k">{{ m.l }}</button>
-        </div>
-      </template>
     </PageNav>
 
     <div v-if="err" class="err-box mb-12">{{ err }}</div>
@@ -292,6 +207,7 @@ watch(activeMetric, async (k) => {
     </div>
 
     <template v-else>
+      <p v-if="loading" role="status">正在读取媒体质量指标…</p>
       <!-- 统计卡 -->
       <div class="kpis mb-12">
         <div class="kpi">
@@ -334,40 +250,35 @@ watch(activeMetric, async (k) => {
       </div>
 
       <!-- 图表 -->
-      <div class="grid-2 mb-12">
-        <div class="card" v-show="activeMetric === 'bitrate'">
-          <div class="card-head">媒体码率趋势</div>
-          <div class="chart-lg" id="c-bitrate"></div>
-          <div v-if="!streams.length" class="empty">无媒体流</div>
-        </div>
-        <div class="card" v-show="activeMetric === 'jitter'">
-          <div class="card-head">RTP 抖动趋势（RFC 3550）</div>
-          <div class="chart-lg" id="c-jitter"></div>
-          <div v-if="!streams.length" class="empty">无媒体流</div>
-        </div>
-        <div class="card" v-show="activeMetric === 'gap'">
-          <div class="card-head">
-            序号缺口事件分布
-            <span class="spacer"></span>
-            <span class="hint-inline">点大小 = 缺失包数</span>
-          </div>
-          <div class="chart-lg" id="c-gap"></div>
-          <div v-if="!streams.length" class="empty">无媒体流</div>
-        </div>
-
+      <section class="card trend-panel mb-12">
+        <header class="trend-head"><h2>媒体传输趋势</h2><div class="seg">
+          <button v-for="m in [
+              {k:'bitrate',l:'码率'},
+              {k:'jitter',l:'抖动'},
+              {k:'gap',l:'丢包'}
+            ]" :key="m.k" :class="{ on: activeMetric === m.k }" :aria-pressed="activeMetric === m.k"
+            @click="activeMetric = m.k">{{ m.l }}</button>
+        </div></header>
+        <template v-if="streams.length">
+          <div v-for="metric in ['bitrate','jitter','gap']" :key="metric" v-show="metric===activeMetric" class="chart-lg" :id="'c-'+metric"></div>
+          <p v-if="activeMetric==='gap'" class="hint-inline">点大小表示序号缺失包数。</p>
+        </template>
+        <div v-else class="empty">{{loading ? '正在读取趋势…' : '无媒体流'}}</div>
+      </section>
+      <div class="mb-12">
         <div class="card">
           <div class="card-head">流质量对比</div>
-          <div class="card-body tight">
+          <div class="card-body tight stream-list">
             <table class="tbl" v-if="streams.length">
               <thead>
                 <tr>
-                  <th>SSRC</th><th>传输</th><th>包数</th><th>码率</th>
+                  <th>SSRC / 会话</th><th>传输</th><th>包数</th><th>码率</th>
                   <th>抖动</th><th>缺口</th><th>静默</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="st in streams" :key="st.id">
-                  <td class="mono">0x{{ st.ssrc?.toString(16) }}</td>
+                  <td class="stream-cell"><strong>{{ st.ssrc == null ? '未知 SSRC' : '0x' + st.ssrc.toString(16) }}</strong><router-link v-if="st.session_id" :to="'/sessions/'+st.session_id">会话 #{{st.session_id}} ↗</router-link><small v-else>未关联会话</small></td>
                   <td><span class="proto">{{ st.transport }}</span></td>
                   <td class="num">{{ st.packet_count }}</td>
                   <td class="num">{{ st.avg_bitrate != null ? fmt(st.avg_bitrate, 0) : '—' }}</td>
@@ -432,7 +343,14 @@ watch(activeMetric, async (k) => {
 <style scoped>
 .h1 { font-size: 19px; font-weight: 600; }
 .sub { font-size: 12px; color: var(--text-3); margin-top: 3px; }
-.chart-lg { height: 240px; }
+.trend-panel {overflow:hidden}
+.trend-head {display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 18px;background:var(--surface-2);border-bottom:1px solid var(--line)}
+.trend-head h2 {font-size:16px;font-weight:650}
+.chart-lg {height:clamp(220px,30vh,350px);margin:12px 8px 4px}
+.trend-panel .hint-inline {padding:0 18px 12px}
+.stream-list {overflow:auto;max-height:460px}
+.stream-list th {position:sticky;top:0;background:var(--surface-2)}
+
 .hint-inline { font-size: 11.5px; color: var(--text-4); font-weight: 400; }
 
 .notes { display: flex; flex-direction: column; gap: 13px; }
@@ -445,4 +363,5 @@ watch(activeMetric, async (k) => {
   font-size: 12px; color: var(--text-3);
   line-height: 1.75;
 }
+.stream-cell strong{display:block;font:600 12px var(--font-mono)}.stream-cell small,.stream-cell a{font-size:11px}.stream-cell small{color:var(--text-3)}
 </style>
