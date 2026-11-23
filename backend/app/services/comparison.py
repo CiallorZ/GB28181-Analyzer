@@ -25,7 +25,7 @@ LIMITATIONS = [
     '抓包点、时间窗、过滤条件不同都会造成差异。',
     '未对齐项不能视为「不存在」。',
 ]
-METHODS = '会话按 Call-ID 交集精确对齐，其次按唯一设备、通道和会话类型低置信度推断。流只在已对齐会话内按 SSRC 或唯一传输方式和载荷类型对齐。'
+METHODS = '会话按 Call-ID 交集精确对齐，其次按唯一设备、通道和会话类型低置信度推断。流只在已对齐会话内按 唯一 SSRC 精确对齐，或按唯一传输方式和载荷类型低置信度推断；流继承会话的低置信度。'
 
 
 def verdict(field, a, b):
@@ -67,10 +67,11 @@ def align(left, right, layer):
             nodes = indexes[0][key] + indexes[1][key]
             # Uniqueness is checked on the original two populations.
             if not exact and any(n in used for n in nodes):
-                for n in nodes:
-                    if n not in used:
-                        used.add(n)
-                        yield 'ambiguous' if layer == 'sessions' else 'unmatched', [sides[0][n[1]]] if n[0] == 0 else [], [sides[1][n[1]]] if n[0] else []
+                remaining = [[sides[side][i] for nside, i in nodes
+                              if nside == side and (side, i) not in used] for side in (0, 1)]
+                used.update(nodes)
+                if any(remaining):
+                    yield 'ambiguous' if layer == 'sessions' and all(remaining) else 'unmatched', *remaining
                 continue
             pivot = nodes[0]
             for node in nodes:
@@ -99,6 +100,15 @@ def align(left, right, layer):
                 yield 'unmatched', [] if side else [row], [row] if side else []
 
 
+def alignment_evidence(layer, method, a, b):
+    if method == 'exact':
+        if layer == 'sessions':
+            return {'call_ids': sorted(keys(a, layer, True) & keys(b, layer, True))}
+        return {'ssrc': a['ssrc']}
+    fields = ('device_id', 'channel_id', 'session_type') if layer == 'sessions' else ('transport', 'payload_type')
+    return {key: a[key] for key in fields}
+
+
 def snapshot(sessions, streams, events):
     result = {k: [] for k in LIMITS}
     result.update(unmatched=[], limitations=LIMITATIONS, methods=METHODS, tolerances=TOLERANCES)
@@ -117,7 +127,11 @@ def snapshot(sessions, streams, events):
                 for row in group:
                     unmatched_counts[layer] += 1
                     if unmatched_counts[layer] <= LIMITS[layer]:
+                        identifiers = {'sessions': ('call_ids', 'device_id', 'channel_id'),
+                                       'streams': ('session_id', 'ssrc', 'transport', 'payload_type'),
+                                       'diagnostics': ('rule_id', 'session_id', 'stream_id')}[layer]
                         result['unmatched'].append(dict(layer=layer, side=side, id=row['id'], method=method,
+                            observed={key: row[key] for key in identifiers},
                             status='ambiguous' if method == 'ambiguous' else 'only_' + side))
             return
         a, b = aa[0], bb[0]
@@ -137,7 +151,7 @@ def snapshot(sessions, streams, events):
             eligible[side][int(layer == 'streams')].add(row['id'])
         if counts[layer] <= LIMITS[layer]:
             result[layer].append(dict(a=a['id'], b=b['id'], session_a=a.get('session_id', a['id']),
-                session_b=b.get('session_id', b['id']), method=method,
+                session_b=b.get('session_id', b['id']), method=method, evidence=alignment_evidence(layer, method, a, b),
                 confidence='low' if 'inferred' in (method, confidence) else 'high', fields=cells))
 
     for method, aa, bb in align(*sessions, 'sessions'):
@@ -176,6 +190,15 @@ def snapshot(sessions, streams, events):
             result['diagnostics'].append(dict(rule_id=key, fields=fields))
     result['totals'] = {k: counts[k] for k in LIMITS}
     result['unmatched_totals'] = {k: unmatched_counts[k] for k in LIMITS}
-    result['truncated'] = any(max(counts[k], unmatched_counts[k]) > cap for k, cap in LIMITS.items())
+    # Reserve each layer's shared detail budget for aligned records first.
+    remaining = {layer: cap - len(result[layer]) for layer, cap in LIMITS.items()}
+    kept = []
+    for row in result['unmatched']:
+        layer = row['layer']
+        if remaining[layer]:
+            kept.append(row)
+            remaining[layer] -= 1
+    result['unmatched'] = kept
+    result['truncated'] = any(counts[k] + unmatched_counts[k] > cap for k, cap in LIMITS.items())
     summary['unaligned'] = sum(unmatched_counts.values())
     return result, summary

@@ -3,6 +3,7 @@ export const judgments = {
   unknown: '无法比较', ambiguous: '存在歧义'
 }
 const names = {
+  call_ids:'Call-ID', device_id:'设备编号', channel_id:'通道编号', session_type:'会话类型', session_id:'会话编号', rule_id:'规则编号',
   signal_status:'信令状态', media_status:'媒体状态', end_reason:'结束方式',
   negotiated_ip:'协商地址', negotiated_port:'协商端口', negotiated_transport:'协商传输方式',
   subject_ssrc:'Subject SSRC', sdp_ssrc:'SDP SSRC', invite_latency:'INVITE 耗时（秒）',
@@ -17,7 +18,19 @@ const names = {
   count:'事件数', severity:'最高严重级别'
 }
 export const fieldName = k => names[k] || k
-export const formatValue = v => v == null || v === '' || v === 'unknown' ? '未知' : typeof v === 'boolean' ? (v ? '是' : '否') : String(v)
+const values = {
+  success:'成功', failed:'失败', incomplete:'不完整', received:'已收到媒体', no_media:'未观察到媒体',
+  undecodable:'无法解码', normal:'正常结束', abnormal:'异常结束', capture_ended:'抓包结束',
+  critical:'严重', warning:'警告', info:'提示', live:'实时点播', playback:'录像回放'
+}
+export function formatValue(v, field) {
+  if (v == null || v === '' || v === 'unknown') return '未知'
+  if (typeof v === 'boolean') return v ? '是' : '否'
+  if (['signal_status','media_status','end_reason','rebuild','severity','session_type'].includes(field)) {
+    return values[v] || String(v)
+  }
+  return String(v)
+}
 export const groups = [
   ['信令与会话','sessions',k => !/^(negotiated_|subject_ssrc|sdp_)/.test(k)],
   ['SDP 协商','sessions',k => /^(negotiated_|subject_ssrc|sdp_)/.test(k)],

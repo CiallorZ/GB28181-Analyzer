@@ -62,7 +62,9 @@ def detail(db, row):
     for side, tid in [('a', row.task_a_id), ('b', row.task_b_id)]:
         task = db.get(AnalysisTask, tid)
         stale |= task is None or task.status != TaskStatus.COMPLETED or fingerprint(db, task) != row.fingerprint[side]
-        session_ids = db.scalars(select(BusinessSession.id).where(BusinessSession.task_id == tid)).all()
+        displayed = {pair['session_' + side] for layer in ('sessions', 'streams') for pair in row.result[layer]}
+        session_ids = db.scalars(select(BusinessSession.id).where(
+            BusinessSession.task_id == tid, BusinessSession.id.in_(displayed)).order_by(BusinessSession.id)).all()
         packet = db.scalar(select(PacketIndex.id).where(PacketIndex.task_id == tid).limit(1))
         links[side] = dict(sessions=session_ids, packets=packet is not None)
     return dict(**brief(row), fingerprint=row.fingerprint, result=row.result, stale=stale, links=links)
@@ -118,7 +120,10 @@ def remove(comparison_id: int, db: Session = Depends(get_db)):
 def cell(v):
     if v is None:
         return '未知'
-    return escape(str(v)).replace('|', '&#124;').replace('\n', ' ').replace('\r', ' ')
+    safe = escape(str(v)).replace('\\', '\\\\')
+    for char in ('[', ']', '*', '_', '`'):
+        safe = safe.replace(char, '\\' + char)
+    return safe.replace('|', '&#124;').replace('\n', ' ').replace('\r', ' ')
 
 
 def markdown(data):
@@ -128,20 +133,34 @@ def markdown(data):
     for side in 'ab':
         fp = data['fingerprint'][side]
         lines.append(f"- {side.upper()} · {cell(data['label_'+side])} · 指纹 {cell(json.dumps(fp, ensure_ascii=False))}")
+    summary = data['summary']
     lines.extend(['', '## 对齐方法与置信度', result['methods'], '', '## 结论摘要',
-                  json.dumps(data['summary'], ensure_ascii=False)])
+                  f"已对齐 {summary['aligned_sessions']} 个会话、{summary['aligned_streams']} 条媒体流。"
+                  f"结构或精确值差异 {summary['structural']} 项，超出对比容差 {summary['beyond_tolerance']} 项，"
+                  f"无法比较 {summary['unknown']} 项。单列未对齐记录 {summary['unaligned']} 条。"])
     unknowns = 0
-    for layer, name in [('sessions','信令与 SDP'), ('streams','媒体与编码'), ('diagnostics','诊断规则')]:
+    sdp = {k for k in SESSION_FIELDS if k.startswith(('negotiated_', 'sdp_'))} | {'subject_ssrc'}
+    encoding = {'codec', 'width', 'height', 'fps', 'keyframe_count', 'has_audio', 'rebuild'}
+    for layer, name, columns in (
+        ('sessions', '信令与会话', set(SESSION_FIELDS) - sdp), ('sessions', 'SDP 协商', sdp),
+        ('streams', '媒体传输', set(STREAM_FIELDS) - encoding), ('streams', '编码与重建', encoding),
+        ('diagnostics', '诊断规则', {'count', 'severity'}),
+    ):
         lines.extend(['', '## '+name, '| 对象 | 对齐 | 字段 | A | B | 判定 |', '|---|---|---|---|---|---|'])
         for r in result[layer]:
-            obj = r.get('rule_id') or f"#{r['a']} / #{r['b']}"
+            obj = r['rule_id'] if 'rule_id' in r else f"#{r['a']} / #{r['b']}"
             method = r.get('method', 'rule_id') + ('（低置信度）' if r.get('confidence') == 'low' else '')
+            if 'evidence' in r:
+                method += ' ' + cell(json.dumps(r['evidence'], ensure_ascii=False))
             for field, (a, b, status) in r['fields'].items():
+                if field not in columns:
+                    continue
                 unknowns += status == 'unknown'
                 note = '（超出对比容差）' if status == 'different' and field in result['tolerances'] else ''
                 lines.append(f'| {cell(obj)} | {method} | {field} | {cell(a)} | {cell(b)} | {status}{note} |')
     lines.extend(['', '## 未对齐项（不计入差异汇总）'])
-    lines.extend(f"- {r['layer']} · {r['side'].upper()} #{r['id']} · {r['method']} · {r['status']}" for r in result['unmatched'])
+    lines.extend(f"- {r['layer']} · {r['side'].upper()} #{r['id']} · {r['method']} · {r['status']} · "
+                 f"{cell(json.dumps(r['observed'], ensure_ascii=False))}" for r in result['unmatched'])
     lines.extend(['', '## 无法比较项', f'表内 {unknowns} 项标记 unknown。', '',
                   f"明细截断：{'是' if result['truncated'] else '否'}；完整数量 {result['totals']}；未对齐数量 {result['unmatched_totals']}",
                   '', '## 局限声明', *result['limitations']])
