@@ -19,9 +19,9 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
         job
     };
     let mut cmd = Command::new(engine);
-    cmd.args(["--no-browser", "--port", "0"]);
+    cmd.args(["--desktop-child", "--no-browser", "--port", "0"]);
     cmd.args(std::env::args_os().skip(1));
-    let mut child = cmd.creation_flags(0x08000000).stdout(Stdio::piped()).spawn()?;
+    let mut child = cmd.creation_flags(0x08000000).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn()?;
     if unsafe { AssignProcessToJobObject(job.as_raw_handle(), child.as_raw_handle()) } == 0 {
         let err = io::Error::last_os_error();
         let _ = child.kill();
@@ -47,6 +47,11 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
             .build()?;
         Ok(())
     }).run(tauri::generate_context!())?;
+    drop(child.stdin.take());
+    for _ in 0..30 {
+        if child.try_wait()?.is_some() { break; }
+        thread::sleep(Duration::from_millis(100));
+    }
     drop(job);
     Ok(())
 }

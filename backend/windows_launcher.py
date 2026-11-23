@@ -20,6 +20,7 @@ def main():
     parser = argparse.ArgumentParser(description='GB28181 Analyzer for Windows')
     parser.add_argument('--port', type=int, default=8791)
     parser.add_argument('--data-dir', type=Path)
+    parser.add_argument('--desktop-child', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--version', action='version', version=__version__)
     args = parser.parse_args()
@@ -77,6 +78,12 @@ def run_desktop(args, data_dir, listener):
     config = uvicorn.Config(app, host=HOST, port=args.port, proxy_headers=False,
                             http='h11', loop='asyncio', ws='none', access_log=False)
     server = DesktopServer(config)
+    if args.desktop_child:
+        def wait_for_window_close():
+            sys.stdin.buffer.read(1)
+            server.should_exit = True
+
+        Thread(target=wait_for_window_close, daemon=True).start()
     server.run(sockets=[listener])
     return 0 if server.started else 1
 

@@ -6,12 +6,12 @@
 [![GitHub Release](https://img.shields.io/github/v/release/CiallorZ/gb28181-analyzer)](https://github.com/CiallorZ/gb28181-analyzer/releases/latest)
 [![MIT License](https://img.shields.io/badge/license-MIT-3fb950)](LICENSE)
 
-**[下载 Windows x64 便携包（v0.1.0）](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v0.1.0/gb28181-analyzer-windows-x64-v0.1.0.zip)** · [所有版本](https://github.com/CiallorZ/gb28181-analyzer/releases) · [Windows 使用说明](docs/WINDOWS.md)
+**[下载 Windows x64 便携包（v0.7.0）](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v0.7.0/gb28181-analyzer-windows-x64-v0.7.0.zip)** · [所有版本](https://github.com/CiallorZ/gb28181-analyzer/releases) · [Windows 使用说明](docs/WINDOWS.md)
 
 ## Windows 快速开始
 
 1. 安装 [Wireshark x64](https://www.wireshark.org/download.html)，在安装选项中勾选 **TShark**。读取已有抓包可以跳过 Npcap。
-2. 完整解压 ZIP，双击 `GB28181-Analyzer.exe`。工作台会在默认浏览器的 `http://127.0.0.1:8791/` 打开，运行期间请保留启动窗口。
+2. 完整解压 ZIP，双击 `GB28181-Analyzer.exe`。工作台在独立桌面窗口打开，使用 Microsoft Edge WebView2 Runtime。关闭窗口即可退出。
 3. 点击「试用示例抓包」，或拖入自己的 `.pcap`、`.pcapng`、`.cap` 文件。导入完成后会自动开始分析。
 
 便携包已包含前后端运行环境，无需安装 Python 或 Node.js。需要还原视频时，将 `ffmpeg.exe` 和 `ffprobe.exe` 所在目录加入 `PATH`，重启应用后在「设置」检查工具状态。[FFmpeg Windows 构建](https://ffmpeg.org/download.html#build-windows)

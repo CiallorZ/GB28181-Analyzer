@@ -74,17 +74,16 @@ jobs:
           python -m pip install -r backend/requirements.txt pyinstaller==6.19.0
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./scripts/build-windows.ps1
-      - uses: actions/upload-artifact@v4
-        with:
-          name: desktop-cargo-lock
-          path: desktop/Cargo.lock
       - name: 验证 ZIP 解压与启动
-        run: python scripts/smoke-windows.py "build/windows/gb28181-analyzer-windows-x64-${{ github.ref_name }}.zip"
+        shell: pwsh
+        run: |
+          $archive = Get-Item build/windows/gb28181-analyzer-windows-x64-v*.zip
+          python scripts/smoke-windows.py $archive.FullName
       - uses: actions/upload-artifact@v4
         with:
           name: release-windows
           if-no-files-found: error
-          path: build/windows/gb28181-analyzer-windows-x64-${{ github.ref_name }}.zip
+          path: build/windows/gb28181-analyzer-windows-x64-v*.zip
 
   publish:
     if: startsWith(github.ref, 'refs/tags/')

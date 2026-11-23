@@ -40,7 +40,7 @@ try {
     $engine = Join-Path $bundle 'engine'
     New-Item -ItemType Directory -Force -Path $engine | Out-Null
     Copy-Item -Path "$output/app/AnalyzerEngine/*" -Destination $engine -Recurse -Force
-    cargo build --release --manifest-path desktop/Cargo.toml
+    cargo build --locked --release --manifest-path desktop/Cargo.toml
     if ($LASTEXITCODE -ne 0) { throw 'Tauri desktop build failed.' }
     Copy-Item desktop/target/release/gb28181-desktop.exe "$bundle/$name.exe" -Force
     $reported = & "$engine/AnalyzerEngine.exe" --version
