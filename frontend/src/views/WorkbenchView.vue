@@ -770,8 +770,9 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
         </div>
       </nav>
 
+      <CaptureFlow v-if="overview && !loadingResults" :stages="flowStages" :filename="task.file?.filename || task.name"
+                   :has-sessions="sessions.length > 0" @navigate="scrollTo" />
       <CaptureEvidence v-if="overview && !loadingResults" :key="task.id" :task-id="task.id" :streams="streams" />
-      <CaptureFlow v-if="overview && !loadingResults" :stages="flowStages" @navigate="scrollTo" />
       <section v-if="priorityFindings.length" class="sec mb-20 findings" aria-labelledby="findings-title">
         <div class="sec-head">
           <h2 id="findings-title" class="sec-title">优先排查</h2>

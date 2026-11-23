@@ -1,13 +1,7 @@
 <script setup>
-/**
- * SIP 信令梯形图（Ladder Diagram）
- *
- * ⚠️ 实现要点：SVG 内的 v-for 必须用字符串拼装 + v-html 渲染。
- * Vue 3 编译器在 <svg> 内对 v-for 生成的元素会调用 createElementVNode
- * （HTML 命名空间），浏览器会丢弃这些节点，导致图形不显示。
- * 用 v-html 注入由字符串拼出的 SVG 才能保证命名空间正确。
- */
 import { ref, computed, watch, nextTick } from 'vue'
+
+import { usePacketReplay } from '../utils/usePacketReplay'
 
 const props = defineProps({
   messages: { type: Array, default: () => [] }
@@ -17,8 +11,35 @@ const emit = defineEmits(['select'])
 const svgContainer = ref(null)
 const selected = ref(null)
 const zoom = ref(1)
-const ROW_H = 30
-watch(() => props.messages, () => { selected.value = null })
+const ROW_H = 48
+const FIRST_ROW = 82
+const { index, playing, reduced, play, pause, select } = usePacketReplay(() => props.messages.length)
+watch(() => props.messages, () => { selected.value = null; select(0) })
+const flight = computed(() => {
+  const msg = props.messages[index.value]
+  if (!msg) return null
+  const x = laneX(msg.source_ip, parties.value), end = laneX(msg.destination_ip, parties.value)
+  const y = FIRST_ROW + ROW_H * index.value
+  return { path: x === end ? `M${x} ${y}h28v10h-28` : `M${x} ${y}H${end}`, color: styleOf(msg).color, x, end, y, arrivalY: x === end ? y + 10 : y }
+})
+watch(index, i => {
+  if (!playing.value) return
+  const scroll = svgContainer.value?.closest('.ladder-scroll')
+  const hit = svgContainer.value?.querySelector(`.hit[data-idx="${i}"]`)
+  if (scroll && hit) {
+    const row = hit.getBoundingClientRect(), view = scroll.getBoundingClientRect()
+    if (row.bottom > view.bottom || row.top < view.top) scroll.scrollTop += row.top - view.top - 36
+  }
+})
+function exportSvg() {
+  const original = svgContainer.value?.querySelector('svg')
+  if (!original) return ''
+  const copy = original.cloneNode(true)
+  const theme = getComputedStyle(original)
+  return new XMLSerializer().serializeToString(copy).replace(/var\((--[\w-]+)\)/g,
+    (_, token) => theme.getPropertyValue(token).trim() || 'currentColor')
+}
+defineExpose({exportSvg})
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
@@ -67,7 +88,7 @@ function styleOf(m) {
     return { color: 'var(--info)', label: meth, marker: 'arwReq' }
   }
   const code = String(m.status_code || '')
-  if (code.startsWith('2')) return { color: 'var(--ok)', label: code, marker: 'arwOk' }
+  if (code.startsWith('2')) return { color: 'var(--ok)', label: code + (code === '200' ? ' OK' : ''), marker: 'arwOk' }
   if (code.startsWith('1')) return { color: 'var(--text-4)', label: code, marker: 'arwProv' }
   return { color: 'var(--critical)', label: code || 'ERR', marker: 'arwErr' }
 }
@@ -100,7 +121,7 @@ const svgHtml = computed(() => {
   // 参与方立柱 + 头部卡片
   list.forEach(p => {
     const x = laneX(p.ip, list)
-    out.push(`<line x1="${x}" y1="56" x2="${x}" y2="${H - 20}"
+    out.push(`<line x1="${x}" y1="49" x2="${x}" y2="${H - 20}"
       stroke="var(--line-2)" stroke-width="1" stroke-dasharray="4 4" opacity=".9"/>`)
     out.push(`<rect x="${x - 62}" y="8" width="124" height="38" rx="8"
       fill="var(--surface-2)" stroke="var(--line-2)" stroke-width="1"/>`)
@@ -114,7 +135,7 @@ const svgHtml = computed(() => {
   // 消息行
   msgs.forEach((m, i) => {
     const st = styleOf(m)
-    const y = 60 + i * ROW_H
+    const y = FIRST_ROW + i * ROW_H
     const x1 = laneX(m.source_ip, list)
     const x2 = laneX(m.destination_ip, list)
     const key = !!(m.method && KEY_METHODS.has(m.method))
@@ -122,7 +143,7 @@ const svgHtml = computed(() => {
 
     // 行底
     if (hl) {
-      out.push(`<rect x="0" y="${y - 12}" width="1000" height="${ROW_H - 4}"
+      out.push(`<rect x="0" y="${y - 25}" width="1000" height="${ROW_H - 4}"
         fill="${selected.value === i ? 'var(--surface-3)' : 'var(--surface-2)'}" rx="5"/>`)
     }
 
@@ -137,9 +158,9 @@ const svgHtml = computed(() => {
     const leftSide = x1 <= x2
     const lx = leftSide ? x1 + 7 : x1 - 67
     const tx = leftSide ? x1 + 37 : x1 - 37
-    out.push(`<rect x="${lx}" y="${y - 9}" width="60" height="17" rx="4"
+    out.push(`<rect x="${lx}" y="${y - 22}" width="60" height="17" rx="4"
       fill="${st.color}" opacity="${key ? .16 : .09}"/>`)
-    out.push(`<text x="${tx}" y="${y + 3}" text-anchor="middle"
+    out.push(`<text x="${tx}" y="${y - 10}" text-anchor="middle"
       fill="${st.color}" font-size="12" font-family="monospace"
       font-weight="600">${esc(st.label)}</text>`)
 
@@ -150,6 +171,10 @@ const svgHtml = computed(() => {
           Number(m.timestamp).toFixed(3)}s</text>`)
     }
 
+    out.push(`<circle cx="${x1}" cy="${y}" r="3" fill="${st.color}"/>`)
+    if (!m.gb_command && m.packet_id != null) {
+      out.push(`<text x="16" y="${y + 3}" fill="var(--text-3)" font-size="11" font-family="monospace">#${esc(m.packet_id)}</text>`)
+    }
     // 国标命令
     if (m.gb_command) {
       out.push(`<rect x="4" y="${y - 8}" width="72" height="15" rx="3"
@@ -160,7 +185,7 @@ const svgHtml = computed(() => {
     }
 
     // 透明热区（承接鼠标事件）
-    out.push(`<rect class="hit" data-idx="${i}" x="0" y="${y - 12}"
+    out.push(`<rect class="hit" data-idx="${i}" x="0" y="${y - 25}"
       width="1000" height="${ROW_H - 4}" fill="transparent"
       role="button" tabindex="0" aria-label="${esc(st.label)}，报文 ${esc(m.packet_id || '未知')}，${esc(m.source_ip || '未知端点')} 到 ${esc(m.destination_ip || '未知端点')}" style="cursor:pointer"/>`)
   })
@@ -177,6 +202,7 @@ function onSvgClick(e) {
     const idx = Number(t.dataset.idx)
     const m = props.messages[idx]
     if (m) {
+      select(idx)
       selected.value = idx
       emit('select', m)
     }
@@ -198,6 +224,7 @@ const failures = computed(() => props.messages.flatMap((message, index) =>
 async function nextFailure() {
   const index = failures.value.find(i => i > (selected.value ?? -1)) ?? failures.value[0]
   if (index === undefined) return
+  select(index)
   selected.value = index
   emit('select', props.messages[index])
   await nextTick()
@@ -215,18 +242,29 @@ function onWheel(e) {
 <template>
   <div class="ladder-wrap" @wheel="onWheel">
     <div class="ladder-tools">
+      <button v-if="messages.length" class="btn xs" @click="playing ? pause() : play()">{{playing?'暂停回放':'回放信令'}}</button>
+      <span v-if="messages.length" class="lt-hint">报文 {{index+1}} / {{messages.length}} · 等间隔演示</span>
       <button v-if="failures.length" class="btn xs" @click="nextFailure">定位失败响应 · {{ failures.length }}</button>
       <span class="lt-hint">Ctrl + 滚轮缩放</span>
       <span class="spacer"></span>
       <button class="btn icon xs" aria-label="缩小时序图" @click="zoom = Math.max(0.6, +(zoom - 0.1).toFixed(1))">−</button>
       <span class="lt-zoom mono">{{ Math.round(zoom * 100) }}%</span>
       <button class="btn icon xs" aria-label="放大时序图" @click="zoom = Math.min(2, +(zoom + 0.1).toFixed(1))">+</button>
-      <button class="btn icon xs" @click="zoom = 1">重置</button>
+      <button class="btn xs" @click="zoom = 1">重置</button>
     </div>
 
     <div class="ladder-scroll">
+      <div class="diagram-stage">
       <!-- eslint-disable-next-line vue/no-v-html -->
       <div ref="svgContainer" v-html="svgHtml" @click="onSvgClick" @keydown="onSvgKey"></div>
+      <svg v-if="flight" class="flight" :viewBox="`0 0 1000 ${svgH}`" aria-hidden="true">
+        <path :d="flight.path" fill="none" :stroke="flight.color" stroke-width="5" opacity=".16"/>
+        <circle :cx="flight.end" :cy="flight.arrivalY" r="6" :stroke="flight.color" fill="none" opacity=".65"/>
+        <path v-if="!reduced" :key="index" :d="flight.path" fill="none" :stroke="flight.color" stroke-width="5"
+              stroke-linecap="round" pathLength="100" stroke-dasharray="2.5 97.5" class="pulse"
+              :style="{animationPlayState:playing?'running':'paused'}"/>
+      </svg>
+      </div>
     </div>
 
     <div v-if="!messages.length" class="empty">
@@ -236,6 +274,10 @@ function onWheel(e) {
 </template>
 
 <style scoped>
+.diagram-stage{position:relative}.flight{pointer-events:none;position:absolute;inset:0;width:100%;height:100%}
+.pulse{animation:signal-travel 1.5s linear infinite}
+@keyframes signal-travel{from{stroke-dashoffset:2.5}to{stroke-dashoffset:-97.5}}
+
 .ladder-wrap {
   background: var(--surface);
   border: 1px solid var(--line);

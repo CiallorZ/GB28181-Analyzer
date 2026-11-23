@@ -6,6 +6,7 @@ import { chartBase as baseOption, chartPalette } from '../utils/chartTheme'
 import { bindChartResize } from '../utils/chartResize'
 import { api } from '../api/client'
 import { useTaskStore } from '../stores/task'
+import SipLadder from '../components/SipLadder.vue'
 import PageNav from '../components/PageNav.vue'
 
 const store = useTaskStore()
@@ -114,15 +115,7 @@ function renderCharts() {
   }))
 }
 
-const SIG_ROLES = computed(() => {
-  // 从 SIP 消息里抽取参与方（按出现顺序）
-  const seen = []
-  sip.value.forEach(m => {
-    if (m.source_ip && !seen.includes(m.source_ip)) seen.push(m.source_ip)
-    if (m.destination_ip && !seen.includes(m.destination_ip)) seen.push(m.destination_ip)
-  })
-  return seen.slice(0, 4)
-})
+const ladder = ref(null)
 
 const filteredSip = computed(() => {
   let arr = sip.value
@@ -141,18 +134,6 @@ const methods = computed(() => {
   return [...s].sort()
 })
 
-// 时序图布局
-const TIMELINE_H = computed(() => Math.max(200, filteredSip.value.length * 26 + 70))
-
-function laneX(ip) {
-  const roles = SIG_ROLES.value
-  const n = roles.length || 1
-  if (n === 1) return 500
-  const idx = Math.max(0, roles.indexOf(ip))
-  const pad = 130
-  return pad + idx * ((1000 - pad * 2) / (n - 1))
-}
-
 function selectMsg(m) {
   selectedMsg.value = m
 }
@@ -163,14 +144,14 @@ function gotoPacket(packetId) {
 }
 
 function downloadSvg() {
-  const svg = document.getElementById('sip-timeline')
-  if (!svg) return
-  const data = new XMLSerializer().serializeToString(svg)
+  const data = ladder.value?.exportSvg()
+  if (!data) return
   const blob = new Blob([data], { type: 'image/svg+xml' })
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
   a.download = `session-${sid}-timeline.svg`
   a.click()
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000)
 }
 
 const fmt = (v, d = 3) => v == null ? '—' : Number(v).toFixed(d)
@@ -325,59 +306,7 @@ onUnmounted(() => {
           <button class="btn-mini" @click="downloadSvg">导出 SVG</button>
         </div>
         <div class="card-body timeline-body">
-          <div class="tl-scroll">
-            <svg id="sip-timeline" class="tl-svg" :viewBox="`0 0 1000 ${TIMELINE_H}`"
-                 :style="{ height: TIMELINE_H + 'px' }">
-              <!-- 参与方竖线 -->
-              <g v-for="ip in SIG_ROLES" :key="ip">
-                <line :x1="laneX(ip)" y1="34" :x2="laneX(ip)" :y2="TIMELINE_H - 14"
-                      stroke="var(--line-2)" stroke-width="1" stroke-dasharray="3 3" />
-                <text :x="laneX(ip)" y="22" text-anchor="middle"
-                      fill="var(--text-3)" font-size="10.5" font-family="monospace">{{ ip }}</text>
-              </g>
-
-              <!-- 消息箭头 -->
-              <g v-for="(m, i) in filteredSip" :key="m.id"
-                 @click="selectMsg(m)" style="cursor:pointer">
-                <rect x="0" :y="44 + i * 26 - 10" width="1000" height="24"
-                      :fill="selectedMsg?.id === m.id ? 'var(--ds-soft)' : 'transparent'" />
-                <line
-                  :x1="laneX(m.source_ip || SIG_ROLES[0])"
-                  :y1="44 + i * 26"
-                  :x2="laneX(m.destination_ip || SIG_ROLES[1] || SIG_ROLES[0])"
-                  :y2="44 + i * 26"
-                  :stroke="m.is_request ? 'var(--ds)' : (String(m.status_code || '').startsWith('2') ? 'var(--ok)' : 'var(--critical)')"
-                  stroke-width="1.4"
-                  :marker-end="`url(#arr${m.is_request ? 'Req' : (String(m.status_code || '').startsWith('2') ? 'Ok' : 'Err')})`" />
-                <text :x="laneX(m.source_ip || SIG_ROLES[0])" :y="40 + i * 26"
-                      text-anchor="middle" fill="var(--text-3)" font-size="10" font-family="monospace">
-                  {{ m.is_request ? m.method : m.status_code }}
-                </text>
-                <text x="995" :y="47 + i * 26" text-anchor="end"
-                      fill="var(--text-4)" font-size="10" font-family="var(--font-mono)">
-                  {{ m.timestamp.toFixed(3) }}s
-                </text>
-              </g>
-
-              <defs>
-                <marker id="arrReq" viewBox="0 0 10 10" refX="9" refY="5"
-                        markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-                  <path d="M0,0 L10,5 L0,10 z" fill="var(--ds)"/>
-                </marker>
-                <marker id="arrOk" viewBox="0 0 10 10" refX="9" refY="5"
-                        markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-                  <path d="M0,0 L10,5 L0,10 z" fill="var(--ok)"/>
-                </marker>
-                <marker id="arrErr" viewBox="0 0 10 10" refX="9" refY="5"
-                        markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-                  <path d="M0,0 L10,5 L0,10 z" fill="var(--critical)"/>
-                </marker>
-              </defs>
-            </svg>
-          </div>
-          <div v-if="!filteredSip.length" class="empty">
-            该会话没有关联到 SIP 消息
-          </div>
+          <SipLadder ref="ladder" :messages="filteredSip" @select="selectMsg" />
         </div>
       </div>
 

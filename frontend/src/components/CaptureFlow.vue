@@ -1,11 +1,17 @@
 <script setup>
-defineProps({ stages: { type: Array, required: true } })
+defineProps({ stages: { type: Array, required: true }, filename: String, hasSessions: Boolean })
 const emit = defineEmits(['navigate'])
 </script>
 
 <template>
   <section class="flow-map" aria-labelledby="flow-title">
-    <header class="flow-head"><h2 id="flow-title">抓包证据链</h2><p>当前文件的信令、传输与画面重建结果</p></header>
+    <header class="flow-head">
+      <div class="flow-identity">
+        <span class="source"><img src="/brand/analyzer.svg" alt="" width="22" height="22">抓包证据链</span>
+        <h2 id="flow-title">{{ filename }}</h2>
+      </div>
+      <router-link v-if="hasSessions" class="signal-link" to="/sip">查看信令交互 <span aria-hidden="true">↗</span></router-link>
+    </header>
     <ol class="flow-stages">
       <li v-for="(stage, index) in stages" :key="stage.key" :class="stage.tone">
         <button type="button" :disabled="!stage.available" @click="emit('navigate', stage.key)">
@@ -19,9 +25,13 @@ const emit = defineEmits(['navigate'])
 </template>
 
 <style scoped>
-.flow-map { margin-bottom:20px; padding:clamp(16px,2.5vw,32px); border:1px solid var(--line-2); border-radius:12px; background:var(--surface); }
-.flow-head { display:flex; align-items:baseline; flex-wrap:wrap; gap:6px 16px; margin-bottom:20px; }
-.flow-head h2 { font-size:22px; letter-spacing:-.035em; }
+.flow-map { margin-bottom:20px; padding:clamp(16px,2.5vw,32px); border:1px solid var(--line-2); border-radius:12px; background:linear-gradient(110deg,var(--surface),var(--surface-2)); }
+.flow-head { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px 16px; margin-bottom:20px; }
+.flow-identity { min-width:0; }
+.source { display:flex; align-items:center; gap:8px; color:var(--brand-lt); font-weight:600; font-size:12px; }
+.signal-link { color:var(--brand-lt); border:1px solid var(--line-2); background:var(--surface); padding:8px 14px; border-radius:6px; font-weight:600; text-decoration:none; }
+.signal-link:hover { border-color:var(--brand-lt); }
+.flow-head h2 { margin-top:6px; overflow-wrap:anywhere; font-size:clamp(20px,3vw,36px); letter-spacing:-.035em; }
 .flow-head p,.stage-detail { color:var(--text-3); font-size:12px; }
 .flow-stages { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); list-style:none; }
 .flow-stages li { min-width:0; }
