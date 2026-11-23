@@ -1460,7 +1460,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
 }
 .page :is(section[id^="sec-"]) { scroll-margin-top: calc(var(--app-header-height) + 58px); }
 .spy-in {
-  max-width: 1720px; margin: 0 auto;
+  min-width: 0; margin: 0 auto;
   height: 48px; display: flex; align-items: center; gap: 4px;
 }
 .spy-btn {

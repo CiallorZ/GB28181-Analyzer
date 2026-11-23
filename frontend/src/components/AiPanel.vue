@@ -555,7 +555,7 @@ watch(() => props.open, async (v) => {
   display: flex; justify-content: flex-end;
 }
 .drawer {
-  width:min(720px,58vw); min-width:0; max-width:100%; height:100%;
+  width:clamp(580px,44vw,880px); min-width:0; max-width:100%; height:100%;
   background: var(--bg-2);
   border-left: 1px solid var(--line-strong);
   display: flex; flex-direction: column;
@@ -586,7 +586,20 @@ watch(() => props.open, async (v) => {
 }
 .logos { display:flex; align-items:center;gap:7px }
 .tower-mark {width:38px;height:38px}.brand-join {width:16px;height:1px;background:linear-gradient(90deg,var(--brand),var(--ds))}
-.head-in {background:linear-gradient(115deg,var(--brand-soft),transparent 26%,var(--ds-soft))}
+.head-in { background:linear-gradient(115deg,var(--ds-soft),transparent 75%); }
+@supports (backdrop-filter:blur(1px)) {
+  .drawer.glass-panel {
+    background:color-mix(in srgb,var(--bg-2) 86%,transparent);
+    backdrop-filter:blur(24px) saturate(115%);
+  }
+}
+@media (min-width:851px) {
+  .drawer.glass-panel {
+    margin:12px; height:calc(100% - 24px); overflow:hidden;
+    border:1px solid var(--line-strong); border-radius:16px;
+    box-shadow:0 12px 42px rgb(0 0 0 / 18%);
+  }
+}
 @media (max-width:850px) { .drawer { width:min(100%,640px); } }
 @media (max-width:480px) {
   .head-in { gap:8px; padding-inline:12px; }
@@ -831,7 +844,7 @@ watch(() => props.open, async (v) => {
   flex: none;
 }
 .chat-log {
-  max-height: 300px; overflow-y: auto;
+  max-height: min(32dvh, 420px); overflow-y: auto;
   padding: 14px 16px 0;
   display: flex; flex-direction: column; gap: 12px;
 }
@@ -842,7 +855,7 @@ watch(() => props.open, async (v) => {
 .prompt-list button { padding: 7px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface-2); color: var(--text-2); font: inherit; font-size: 11px; cursor: pointer; transition: border-color .18s, color .18s, transform .18s; }
 .prompt-list button:hover { border-color: var(--ds); color: var(--ds); transform: translateY(-1px); }
 .prompt-list button span { color: var(--ds); margin-left: 3px; }
-.chat-hint { padding: 0 16px 13px; color: var(--text-3); font-size: 10px; }
+.chat-hint { padding: 0 16px 13px; color: var(--text-3); font-size: 12px; }
 .cmsg { display: flex; gap: 9px; }
 .cmsg.user { flex-direction: row-reverse; }
 .cav {

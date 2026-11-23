@@ -103,3 +103,10 @@ body { font-family:var(--font-sans); font-variant-numeric:tabular-nums; }
 .station .event-list td { padding-block:calc(var(--ui-row-y) - 3px); }
 .station .assist { border-radius:var(--radius-lg); }
 :root[data-material="glass"] .station .assist { background:color-mix(in srgb,var(--ds-soft) 62%,var(--ui-layer)); }
+
+/* Use native text rasterization and stable weights for mixed Chinese and Latin. */
+body { font-weight:400; letter-spacing:normal; }
+h1,h2,h3 { font-weight:650; letter-spacing:normal; }
+@media (min-width:1081px) {
+  .page,.wrap { padding-inline:clamp(20px,1.6vw,48px); }
+}

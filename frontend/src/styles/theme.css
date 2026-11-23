@@ -175,7 +175,7 @@ body {
   font-size: 14px;
   line-height: 1.65;
   letter-spacing: 0;
-  -webkit-font-smoothing: antialiased;
+  -webkit-font-smoothing: auto;
   font-variant-numeric: tabular-nums;
 }
 
@@ -213,8 +213,8 @@ code, .mono {
 /* ============================================================
    布局
    ============================================================ */
-.wrap { max-width: 1720px; margin: 0 auto; padding: 0 28px; }
-.page { padding: 26px 28px 72px; max-width: 1720px; margin: 0 auto; }
+.wrap { min-width: 0; margin: 0 auto; padding: 0 28px; }
+.page { padding: 26px 28px 72px; min-width: 0; margin: 0 auto; }
 
 .row { display: flex; align-items: center; gap: 11px; }
 .row-between { display: flex; align-items: center; justify-content: space-between; gap: 14px; }

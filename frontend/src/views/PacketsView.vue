@@ -272,7 +272,7 @@ if(props.embedded && items.value[0])openPacket(items.value[0])
 
 <style scoped>
 .packets-page {
-  padding: 26px 28px 24px; max-width: 1720px; margin: 0 auto;
+  padding: 26px 28px 24px; min-width: 0; margin: 0 auto;
   height: 100%; display: flex; flex-direction: column;
 }
 
