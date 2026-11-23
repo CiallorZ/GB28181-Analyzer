@@ -80,8 +80,9 @@ a.crumb:hover { color: var(--text); text-decoration: none; }
 .heading { min-width: 0; }
 .pnav-title { margin-top: 5px; }
 .pnav-title .t {
-  font-size: 22px; font-weight: 700;
-  letter-spacing: -.4px; line-height: 1.25;
+  font-family:var(--font-heading);
+  font-size:clamp(20px,2.05vw,27px); font-weight:720;
+  letter-spacing:-.025em; line-height:1.2;
 }
 .pnav-title .s {
   font-size: 12px; color: var(--text-3);

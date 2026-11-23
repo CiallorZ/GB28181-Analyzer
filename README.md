@@ -6,7 +6,7 @@
 [![GitHub Release](https://img.shields.io/github/v/release/CiallorZ/gb28181-analyzer)](https://github.com/CiallorZ/gb28181-analyzer/releases/latest)
 [![MIT License](https://img.shields.io/badge/license-MIT-3fb950)](LICENSE)
 
-**[下载 Windows x64 便携包（v1.1.1）](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v1.1.1/gb28181-analyzer-windows-x64-v1.1.1.zip)** · [所有版本](https://github.com/CiallorZ/gb28181-analyzer/releases) · [Windows 使用说明](docs/WINDOWS.md)
+**[下载 Windows x64 便携包（v1.1.2）](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v1.1.2/gb28181-analyzer-windows-x64-v1.1.2.zip)** · [所有版本](https://github.com/CiallorZ/gb28181-analyzer/releases) · [Windows 使用说明](docs/WINDOWS.md)
 
 ## Windows 快速开始
 
@@ -97,6 +97,7 @@ npm run dev
 
 - [架构与数据流](ARCHITECTURE.md)
 - [贡献指南与验证命令](CONTRIBUTING.md)
+- 界面字体采用 [GoodUI Sans / Display](https://goodui.dev/fonts)，按 [OFL 1.1](frontend/public/assets/fonts/goodui/OFL.txt) 随包分发。空态、表格与对话参考其公开区块，在 Vue 中接入本项目的数据和控件。
 - [当前实施状态与已知限制](IMPLEMENTATION_STATUS.md)
 - [发布与 Windows 打包流程](docs/RELEASE.md)
 - [测试抓包与预期结果](backend/tests/fixtures/README.md)

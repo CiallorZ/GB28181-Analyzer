@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { api } from '../api/client'
+import InterfaceState from './InterfaceState.vue'
 
 const props = defineProps({
   busy: Boolean,
@@ -63,13 +64,16 @@ const layers = [
   { icon: 'codec', code: 'PS / ES', name: '封装与编码', detail: 'H.264 / H.265 · 画面重建' }
 ]
 
-onMounted(async () => {
+async function loadHistory() {
+  historyError.value = false
+  history.value = null
   try {
     history.value = (await api.tasks({ page_size: 4 })).items
   } catch {
     historyError.value = true
   }
-})
+}
+onMounted(loadHistory)
 
 function pick(event) {
   if (event.target.files[0]) emit('file', event.target.files[0])
@@ -96,7 +100,7 @@ function drop(event) {
             <AppIcon name="upload" />
             {{ busy ? `正在导入 ${progress}%` : dragging ? '松开以导入' : '选择抓包文件' }}
           </button>
-          <button type="button" class="sample-button" :disabled="busy" @click="emit('sample')">试用示例抓包 <span aria-hidden="true"><AppIcon name="open" /></span></button>
+          <button type="button" class="sample-button" data-cue="confirm" :disabled="busy" @click="emit('sample')">试用示例抓包 <span aria-hidden="true"><AppIcon name="open" /></span></button>
         </div>
         </div>
         <details class="live"><summary>从本机网卡采集</summary><button class="btn" @click="loadAdapters" :disabled="recording">读取网卡</button>
@@ -133,7 +137,11 @@ function drop(event) {
     <section class="workspace" aria-label="分析路径和最近任务">
       <div class="workspace-body">
         <section class="recent" aria-labelledby="recent-title"><div class="section-head"><div><h2 id="recent-title">最近分析</h2></div><router-link to="/tasks" class="all-link">全部任务 <span aria-hidden="true"><AppIcon name="forward" /></span></router-link></div>
-          <p v-if="historyError" class="history-empty">历史记录暂时无法读取。</p><p v-else-if="history === null" class="history-empty" role="status">正在读取历史记录…</p><p v-else-if="!history.length" class="history-empty">导入首份抓包后，任务会出现在这里。</p>
+          <InterfaceState v-if="historyError" kind="error" title="历史记录暂时无法读取">
+            <button type="button" class="btn sm" @click="loadHistory">重试</button>
+          </InterfaceState>
+          <InterfaceState v-else-if="history === null" kind="loading" title="正在读取历史记录…" />
+          <InterfaceState v-else-if="!history.length" title="还没有分析任务" detail="导入首份抓包后，任务会出现在这里。" icon="history" />
           <ul v-else class="history-list"><li v-for="item in history" :key="item.id"><router-link :to="{ name: 'task', params: { id: item.id } }"><span class="file-icon" aria-hidden="true"><AppIcon name="file" /></span><span class="file-info"><strong class="truncate" :title="item.name">{{ item.name }}</strong><time :datetime="item.created_at">{{ localDate(item.created_at) }}</time></span><span class="badge" :class="status[item.status]?.[1]">{{ status[item.status]?.[0] || item.status }}</span><span class="row-arrow" aria-hidden="true"><AppIcon name="open" /></span></router-link></li></ul>
         </section>
         <section class="layers" aria-labelledby="layers-title"><div class="section-head"><div><h2 id="layers-title">协议分析路径</h2></div><router-link to="/compare" class="all-link">双包对比 <AppIcon name="open" /></router-link></div>
@@ -147,6 +155,14 @@ function drop(event) {
 
 <style scoped>
 .capture-home { padding:4px 0 32px; }
+.capture-home .workspace-body { gap:var(--ui-gap); }
+.capture-home :is(.recent,.layers) {
+  background:var(--ui-layer); border:1px solid var(--line); border-radius:var(--radius-lg);
+  padding:var(--ui-inset); box-shadow:var(--shadow-sm);
+}
+.capture-home .section-head { padding-block:0 10px; }
+.capture-home .section-head h2 { font-size:16px; }
+.capture-home :is(.history-list,.layer-list) li:last-child :is(a),.capture-home .layer-list li:last-child { border-bottom:0; }
 .hero { min-height:370px; position:relative; overflow:hidden; display:grid; grid-template-columns:minmax(0,1fr) minmax(300px,.95fr); background:radial-gradient(ellipse at 5% 0,var(--brand-soft),transparent 48%),color-mix(in srgb,var(--info) 4%,var(--bg-2)); border:1px solid var(--line-2); border-radius:14px; color:var(--text); backdrop-filter:blur(20px); box-shadow:var(--shadow); }
 .hero-copy { z-index:1; padding:32px clamp(24px,3vw,48px); }
 .hero-meta { font-size:12px; font-weight:600; letter-spacing:.04em; color:var(--brand-lt); display:flex; align-items:center; gap:9px; }

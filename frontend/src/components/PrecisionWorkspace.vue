@@ -220,7 +220,7 @@ watch(filtered, (items) => {
             </div>
             <div class="finding-actions">
               <button v-if="first" @click="evidenceOf(first, $event.currentTarget)">查看证据 ›</button>
-              <button type="button" class="finding-ai" @click="store.openAiPanel()">
+              <button type="button" class="finding-ai" data-cue="confirm" @click="store.openAiPanel()">
                 <img src="/brand/deepseek.svg" alt="" />DeepSeek 会诊
               </button>
             </div>

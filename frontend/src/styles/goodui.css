@@ -1,0 +1,105 @@
+/* Offline type from goodui. See public/assets/fonts/goodui/OFL.txt. */
+@font-face {
+  font-family:"goodui Sans";
+  src:url("/assets/fonts/goodui/GooduiSans-Variable.woff2") format("woff2");
+  font-style:normal;
+  font-weight:300 900;
+  font-display:swap;
+}
+@font-face {
+  font-family:"goodui Display";
+  src:url("/assets/fonts/goodui/GooduiDisplay-Variable.woff2") format("woff2");
+  font-style:normal;
+  font-weight:300 900;
+  font-display:swap;
+}
+
+/* Color, material and density can be set independently. */
+:root {
+  --font-cjk:"Microsoft YaHei UI","PingFang SC","Noto Sans CJK SC",system-ui,sans-serif;
+  --font-sans:"goodui Sans",var(--font-cjk);
+  --font-heading:"goodui Display",var(--font-cjk);
+  --ui-row-y:10px;
+  --ui-inset:18px;
+  --ui-gap:14px;
+  --radius-sm:7px;
+  --radius:10px;
+  --radius-lg:13px;
+  --radius-xl:16px;
+  --ui-focus:var(--info);
+  --ui-layer:var(--surface);
+  --ui-layer-raised:var(--surface-2);
+  --ui-press:scale(.98);
+}
+:root[data-theme="dark"] {
+  --bg:#111721;
+  --bg-2:#151e2a;
+  --surface:#1a2532;
+  --surface-2:#202e3d;
+  --surface-3:#2a3b4d;
+  --line:#344456;
+  --line-2:#415469;
+}
+:root[data-theme="light"] {
+  --bg:#edf2f7;
+  --bg-2:#f4f7fa;
+  --surface:#fff;
+  --surface-2:#f4f7fb;
+  --surface-3:#e7eef6;
+  --line:#d8e2ec;
+  --line-2:#cbd8e6;
+}
+:root[data-density="compact"] {
+  --ui-row-y:6px;
+  --ui-inset:12px;
+  --ui-gap:9px;
+}
+:root[data-material="glass"] {
+  --ui-layer:color-mix(in srgb,var(--surface) 79%,transparent);
+  --ui-layer-raised:color-mix(in srgb,var(--surface-2) 82%,transparent);
+}
+:root[data-material="glass"] :is(.card,.glass-panel,.instrument,.assist,.drawer) {
+  backdrop-filter:blur(16px) saturate(1.12);
+}
+
+body { font-family:var(--font-sans); font-variant-numeric:tabular-nums; }
+:where(h1,h2,h3,.brand-name) { font-family:var(--font-heading); }
+:where(.mono,.mono-sm,.num,pre,code) { font-family:var(--font-mono); }
+:where(button,select,input,textarea) { font-family:var(--font-sans); }
+:is(.card,.instrument,.assist) { border-radius:var(--radius-lg); }
+:is(.card,.instrument) { background:var(--ui-layer); }
+.card-body:not(.tight) { padding:var(--ui-inset); }
+.tbl :is(th,td) { padding-block:var(--ui-row-y); }
+.tbl thead th { background:var(--ui-layer-raised); }
+:where(.card,.instrument) :where(.tbl,.pane-body) { scrollbar-color:var(--line-strong) transparent; }
+:where(.btn,.btn-mini,.mini,.ai-btn,.station button,.upload-button,.sample-button) {
+  transition:translate 130ms var(--ease),scale 130ms var(--ease),
+    background-color 130ms var(--ease),border-color 130ms var(--ease),box-shadow 130ms var(--ease);
+}
+:where(.btn,.btn-mini,.mini,.ai-btn,.station button,.upload-button,.sample-button):active:not(:disabled) {
+  scale:.98;
+  translate:0 1px;
+}
+:where(button,a,input,select,textarea,[tabindex]):focus-visible { outline:2px solid var(--ui-focus); outline-offset:2px; }
+@media (prefers-reduced-motion:reduce) {
+  :where(.btn,.btn-mini,.mini,.ai-btn,.station button,.upload-button,.sample-button):active:not(:disabled) {
+    scale:1;
+    translate:none;
+  }
+}
+
+/* Compact telemetry surfaces keep the same reading order in both materials. */
+.station .instrument-grid { gap:var(--ui-gap); }
+.station .readings { gap:calc(var(--ui-gap) - 3px); }
+.station .readings article {
+  padding-block:var(--ui-row-y);
+  border-radius:var(--radius);
+  background:var(--ui-layer-raised);
+}
+.station .readings strong { font-family:var(--font-heading); font-variant-numeric:tabular-nums; }
+.station .finding { border-radius:var(--radius); padding-block:var(--ui-row-y); }
+.station .instrument > header { background:var(--ui-layer-raised); }
+.station .pane-head { background:var(--ui-layer-raised); }
+.station .event-list td { padding-block:calc(var(--ui-row-y) - 3px); }
+.station .assist { border-radius:var(--radius-lg); }
+:root[data-material="glass"] .station .assist { background:color-mix(in srgb,var(--ds-soft) 62%,var(--ui-layer)); }

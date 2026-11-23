@@ -116,7 +116,7 @@ onUnmounted(() => {
             <option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option>
           </select>
 
-          <button class="ai-btn" aria-label="DeepSeek 分析" @click="store.openAiPanel()">
+          <button class="ai-btn" data-cue="confirm" aria-label="DeepSeek 分析" @click="store.openAiPanel()">
             <img src="/brand/deepseek.svg" alt="" class="ai-ico" />
             <span>AI 分析助手</span>
           </button>
@@ -280,12 +280,17 @@ onUnmounted(() => {
 .route-slide-enter-from { opacity:0; translate:0 7px; }
 .route-slide-leave-to { opacity:0; }
 .bar-nav a { transition:color .16s var(--ease), background-color .16s var(--ease); }
-.bar-nav a::after {
-  content:''; position:absolute; height:2px; left:10px; right:10px; bottom:0;
-  border-radius:2px 2px 0 0; background:var(--brand); transform:scaleX(.5); opacity:0;
-  transition:transform .2s var(--ease-out), opacity .16s var(--ease);
+.bar-nav a {
+  align-self:center;
+  min-height:34px;
+  border-radius:var(--radius-sm);
 }
-.bar-nav a:is(.router-link-exact-active,.current)::after { transform:scaleX(1); opacity:1; }
+.bar-nav a:is(.router-link-exact-active,.current) {
+  background:var(--brand-soft);
+  color:var(--brand-lt);
+}
+.bar-nav a:not(.router-link-exact-active,.current):hover { background:var(--surface-2); }
+.bar-nav a:is(.router-link-exact-active,.current) .app-icon { color:var(--brand-lt); }
 .bar-nav a .app-icon { width:16px; height:16px; }
 @media (max-width:1279px) { .bar .brand-desc { display:none; } }
 @media (max-width:900px) {
@@ -303,6 +308,6 @@ onUnmounted(() => {
   .bar-nav a { font-size:12px; }
 }
 .appearance {background:var(--surface);color:var(--text-2);border:1px solid var(--line-2);border-radius:6px;font:inherit;font-size:12px;padding:5px;}
-@media(min-width:1081px){.bar-in{max-width:none;padding:0 20px;gap:20px}.brand-txt{display:flex;align-items:center;gap:18px}.brand-desc{font-size:12px;border-left:1px solid var(--line);padding-left:16px}.bar-task{display:none}.bar{box-shadow:none}.bar-nav .current,.bar-nav .router-link-exact-active{background:var(--brand-soft);color:var(--text)}}
+@media(min-width:1081px){.bar-in{max-width:none;padding:0 20px;gap:20px}.brand-txt{display:flex;align-items:center;gap:18px}.brand-desc{font-size:12px;border-left:1px solid var(--line);padding-left:16px}.bar-task{display:none}.bar{box-shadow:none}}
 .brand .brand-name{color:var(--text)}@media(min-width:1100px){.bar-in{gap:18px}.dep{border-radius:5px}.bar-nav{margin-left:12px}}@media(max-width:1100px){.bar-in>.dep{display:none}}
 </style>

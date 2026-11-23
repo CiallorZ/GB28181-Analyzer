@@ -11,6 +11,8 @@
 import { ref, reactive, computed, watch, nextTick, onUnmounted } from 'vue'
 import { api } from '../api/client'
 import AiContextPreview from './AiContextPreview.vue'
+import InterfaceState from './InterfaceState.vue'
+import { feedback } from '../stores/interface'
 import { useTaskStore } from '../stores/task'
 import { renderMd } from '../utils/markdown'
 
@@ -234,10 +236,12 @@ async function runAnalyze(contextHash) {
     if (!report.value.trim()) throw new Error('模型没有返回内容')
     reportContextHash.value = contextHash
     think.finish()
+    feedback('success')
   } catch (e) {
     report.value = ''
     err.value = e.message
     think.fail()
+    if (e.name !== 'AbortError') feedback('error')
   } finally {
     running.value = false
     reportController = null
@@ -245,10 +249,17 @@ async function runAnalyze(contextHash) {
 }
 
 /* ---- 追问 ---- */
+function composerKeydown(event) {
+  if (event.isComposing || event.keyCode === 229 || event.shiftKey) return
+  event.preventDefault()
+  sendQuestion()
+}
+
 async function sendQuestion() {
   const q = question.value.trim()
   if (!q || chatBusy.value || running.value || !reportContextHash.value || !store.currentTaskId) return
 
+  feedback('send')
   question.value = ''
   const userMessage = reactive({ role: 'user', content: q })
   chat.value.push(userMessage)
@@ -310,10 +321,12 @@ async function sendQuestion() {
     }
     if (!completed) throw new Error('连接中断，回答不完整，请重试')
     if (!slot.content.trim()) throw new Error('模型没有返回内容')
+    feedback('success')
   } catch (e) {
     userMessage.failed = true
     slot.failed = true
     slot.content = '对话失败：' + e.message
+    if (e.name !== 'AbortError') feedback('error')
   } finally {
     slot.streaming = false
     chatBusy.value = false
@@ -428,10 +441,8 @@ watch(() => props.open, async (v) => {
 
           <!-- 报告 -->
           <div v-else class="body flush">
-            <div v-if="!canAnalyze" class="empty">
-              请先完成一次抓包分析
-              <div class="hint">分析完成后才能让 AI 定位故障卡点</div>
-            </div>
+            <InterfaceState v-if="!canAnalyze" icon="signal" title="请先完成一次抓包分析"
+              detail="会诊将使用当前任务的信令、媒体与规则诊断摘要。" />
 
             <template v-else>
               <AiContextPreview v-if="previewOpen" :task-id="store.currentTaskId" @cancel="previewOpen = false" @confirm="runAnalyze" />
@@ -493,15 +504,20 @@ watch(() => props.open, async (v) => {
 
               <!-- 对话 -->
               <div v-if="report" class="chat">
-                <div class="chat-log" ref="chatBox">
+                <div class="chat-log" ref="chatBox" aria-label="会诊对话" :aria-busy="chatBusy">
                   <div v-for="(m, i) in chat" :key="i" class="cmsg" :class="m.role">
                     <div class="cav" :class="m.role">
                       <img v-if="m.role === 'assistant'" src="/brand/deepseek.svg" alt="" />
                       <span v-else>我</span>
                     </div>
-                    <div class="cbub" :class="{ streaming: m.streaming }">
-                      <div v-if="m.role === 'assistant'" v-html="renderMd(m.content)"></div>
-                      <div v-else>{{ m.content }}</div>
+                    <div class="message-content">
+                      <div class="message-byline">{{ m.role === 'assistant' ? 'DeepSeek' : '你' }}</div>
+                      <div class="cbub" :class="{ streaming: m.streaming, 'message-failed': m.failed }">
+                        <div v-if="m.role === 'assistant'" v-html="renderMd(m.content)"></div>
+                        <div v-else>{{ m.content }}</div>
+                      </div>
+                      <button v-if="m.role === 'user' && m.failed && !chatBusy" type="button" class="btn-mini"
+                        @click="useSuggestion(m.content)">填回输入框</button>
                     </div>
                   </div>
                 </div>
@@ -515,7 +531,7 @@ watch(() => props.open, async (v) => {
                   <textarea ref="questionInput" v-model="question" rows="1" aria-label="输入追问"
                             :disabled="running || !reportContextHash"
                             placeholder="继续追问，例如：这个 SSRC 要去哪里改？"
-                            @keydown.enter.exact.prevent="sendQuestion"></textarea>
+                            @keydown.enter="composerKeydown"></textarea>
                   <button class="send" @click="sendQuestion" aria-label="发送追问"
                           :disabled="chatBusy || running || !reportContextHash || !question.trim()">
                     <AppIcon name="send" />
@@ -539,7 +555,7 @@ watch(() => props.open, async (v) => {
   display: flex; justify-content: flex-end;
 }
 .drawer {
-  width: min(720px, 58vw); max-width: 100vw; height: 100%;
+  width:min(720px,58vw); min-width:0; max-width:100%; height:100%;
   background: var(--bg-2);
   border-left: 1px solid var(--line-strong);
   display: flex; flex-direction: column;
@@ -571,7 +587,14 @@ watch(() => props.open, async (v) => {
 .logos { display:flex; align-items:center;gap:7px }
 .tower-mark {width:38px;height:38px}.brand-join {width:16px;height:1px;background:linear-gradient(90deg,var(--brand),var(--ds))}
 .head-in {background:linear-gradient(115deg,var(--brand-soft),transparent 26%,var(--ds-soft))}
-@media(max-width:850px){.drawer{width:min(100vw,640px)}}
+@media (max-width:850px) { .drawer { width:min(100%,640px); } }
+@media (max-width:480px) {
+  .head-in { gap:8px; padding-inline:12px; }
+  .logos .tower-mark { width:28px; height:28px; }
+  .brand-join { display:none; }
+  .head-txt { min-width:0; }
+  .head-sub { overflow-wrap:anywhere; }
+}
 
 .lg-ds { height: 20px; width: auto; }
 .head-txt { line-height: 1.35; min-width: 0; }
@@ -837,11 +860,17 @@ watch(() => props.open, async (v) => {
   border: 1px solid var(--line-2);
   color: var(--text-3);
 }
+.message-content { max-width:min(88%,54ch); min-width:0; }
+.message-byline { margin:0 0 5px; color:var(--text-3); font-size:11px; font-weight:650; }
+.cmsg.user .message-byline { text-align:right; }
 .cbub {
-  max-width: calc(100% - 38px);
-  padding: 9px 13px; border-radius: 10px;
-  font-size: 12px; line-height: 1.75;
+  padding: 9px 13px; border-radius: var(--radius-lg);
+  font-size: 13px; line-height: 1.6;
+  overflow-wrap:anywhere;
 }
+.message-content .btn-mini { margin-top:4px; }
+
+.head-name,.start h3 { font-family:var(--font-heading); }
 .cmsg.assistant .cbub {
   background: var(--ds-soft);
   border: 1px solid var(--ds-line);
@@ -852,6 +881,7 @@ watch(() => props.open, async (v) => {
   border: 1px solid var(--line-2);
   color: var(--text-2);
 }
+.cmsg .cbub.message-failed { border-color:var(--critical); }
 .cbub.streaming::after {
   content: '▊'; color: var(--ds-lt);
   animation: blink 1s step-end infinite;
@@ -869,8 +899,13 @@ watch(() => props.open, async (v) => {
 
 .chat-in {
   display: flex; gap: 9px; align-items: flex-end;
-  padding: 12px 16px 7px;
+  padding:8px;
+  margin:12px 16px 6px;
+  background:var(--ui-layer-raised);
+  border:1px solid var(--line);
+  border-radius:var(--radius-lg);
 }
+.chat-in:focus-within { border-color:var(--ds); }
 .chat-in textarea {
   flex: 1;
   background: var(--bg);
@@ -880,7 +915,8 @@ watch(() => props.open, async (v) => {
   color: var(--text);
   font-size: 12.5px;
   font-family: inherit;
-  resize: none;
+  min-width:0;
+  resize: vertical;
   max-height: 110px;
   line-height: 1.6;
   transition: .15s;

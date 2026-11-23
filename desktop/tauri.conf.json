@@ -1,6 +1,6 @@
 {
   "productName": "GB28181 Analyzer",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "identifier": "org.gb28181.analyzer",
   "app": {
     "windows": []

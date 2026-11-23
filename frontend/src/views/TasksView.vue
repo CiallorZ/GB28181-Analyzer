@@ -3,6 +3,8 @@ import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api/client'
 import PageNav from '../components/PageNav.vue'
+import InterfaceState from '../components/InterfaceState.vue'
+import { feedback } from '../stores/interface'
 import { useTaskStore } from '../stores/task'
 
 const router = useRouter()
@@ -15,7 +17,7 @@ const pageSize = 20
 const pageRevision = ref(0)
 const keyword = ref('')
 const statusFilter = ref('')
-const loading = ref(false)
+const loading = ref(true)
 const err = ref('')
 const storage = ref(null)
 const purging = ref(false)
@@ -30,7 +32,7 @@ async function purge(keep) {
   purgeMsg.value = ''
   try {
     const r = await api.storagePurge(keep)
-    purgeMsg.value = `已清理 ${r.actions?.length || 0} 个任务，释放 ${r.usage?.total_mb ?? 0} MB 占用`
+    purgeMsg.value = `已清理 ${r.actions?.length || 0} 个任务，当前占用 ${r.usage?.total_mb ?? 0} MB`
     await Promise.all([load(), loadStorage()])
   } catch (e) {
     purgeMsg.value = '清理失败：' + e.message
@@ -85,8 +87,9 @@ async function openTask(t) {
 async function reanalyze(t) {
   try {
     await api.analyze(t.id)
+    feedback('confirm')
     await load()
-  } catch (e) { err.value = e.message }
+  } catch (e) { feedback('error'); err.value = e.message }
 }
 
 async function removeTask(t) {
@@ -129,18 +132,22 @@ onMounted(loadStorage)
       :sub="`共 ${total} 个任务`"
       :crumbs="[{label:'工作台', to:'/'}, {label:'分析任务'}]">
       <template #actions>
-        <input v-model="keyword" class="inp sm" placeholder="搜索文件名" @keyup.enter="filter(1)" />
-        <select v-model="statusFilter" class="inp sm" @change="filter(1)">
+        <input v-model="keyword" class="inp sm" placeholder="搜索文件名" aria-label="搜索抓包文件名" @keyup.enter="filter(1)" />
+        <select v-model="statusFilter" aria-label="任务状态" class="inp sm" @change="filter(1)">
           <option value="">全部状态</option>
           <option value="completed">已完成</option>
           <option value="analyzing">分析中</option>
           <option value="failed">失败</option>
+          <option value="pending">待分析</option>
+          <option value="cancelled">已取消</option>
         </select>
         <button class="btn sm" @click="filter(1)">刷新</button>
       </template>
     </PageNav>
 
-    <div v-if="err" class="err-box">{{ err }}</div>
+    <InterfaceState v-if="err" class="card task-error" kind="error" title="任务请求失败" :detail="err">
+      <button class="btn sm" type="button" @click="load">刷新列表</button>
+    </InterfaceState>
 
     <!-- 存储管理 -->
     <div v-if="storage" class="storage-card glass-panel">
@@ -177,12 +184,12 @@ onMounted(loadStorage)
           彻底清理
         </button>
       </div>
-      <div v-if="purgeMsg" class="sc-msg">{{ purgeMsg }}</div>
+      <div v-if="purgeMsg" class="sc-msg" role="status">{{ purgeMsg }}</div>
     </div>
 
-    <div class="card">
-      <div class="card-body tight">
-        <table class="tbl clickable">
+    <div class="card task-list" :aria-busy="loading">
+      <div v-if="list.length" class="table-scroll">
+        <table class="tbl clickable" aria-label="分析任务">
           <thead>
             <tr>
               <th>ID</th><th>文件名</th><th>状态</th><th>报文</th>
@@ -190,9 +197,9 @@ onMounted(loadStorage)
             </tr>
           </thead>
           <tbody :key="pageRevision" class="page-content-in">
-            <tr v-for="t in list" :key="t.id" tabindex="0" @click="openTask(t)" @keydown.enter="openTask(t)">
+            <tr v-for="t in list" :key="t.id" tabindex="0" @click="openTask(t)" @keydown.enter.self="openTask(t)">
               <td class="mono">#{{ t.id }}</td>
-              <td class="truncate" style="max-width:260px">{{ t.name }}</td>
+              <td class="task-name"><span class="task-file"><AppIcon name="file" /><span class="truncate" :title="t.name">{{ t.name }}</span></span></td>
               <td>
                 <span class="badge" :class="{
                   ok: t.status === 'completed',
@@ -216,11 +223,13 @@ onMounted(loadStorage)
             </tr>
           </tbody>
         </table>
-        <div v-if="!list.length && !loading" class="empty">
-          还没有分析任务
-          <div class="hint">到「分析总览」上传抓包文件开始</div>
-        </div>
       </div>
+      <InterfaceState v-else-if="loading" kind="loading" title="正在读取分析任务…" />
+      <InterfaceState v-else-if="!err" :title="keyword || statusFilter ? '没有匹配的任务' : '还没有分析任务'"
+        :detail="keyword || statusFilter ? '清除筛选可以恢复全部任务。' : '选择抓包文件即可开始。'" icon="history">
+        <button v-if="keyword || statusFilter" type="button" class="btn sm" @click="keyword = ''; statusFilter = ''; filter(1)">清除筛选</button>
+        <router-link v-else to="/" class="btn primary sm">导入抓包</router-link>
+      </InterfaceState>
     </div>
 
     <div class="row mt-16" style="justify-content:flex-end">
@@ -249,7 +258,14 @@ onMounted(loadStorage)
   padding: 14px 18px;
   margin-bottom: 16px;
 }
-.sc-left { display: flex; align-items: center; gap: 13px; flex: 1; min-width: 260px; }
+.sc-left { display:flex; align-items:center; gap:13px; flex:1 1 230px; min-width:0; }
+.task-list .table-scroll { overflow:auto; }
+.task-list table { min-width:690px; }
+.task-name { max-width:245px; }
+.task-file { display:flex; align-items:center; gap:8px; min-width:0; font-weight:650; }
+.task-file .app-icon { color:var(--brand-lt); }
+.task-error { margin-bottom:var(--ui-gap); }
+.task-list tr:focus-visible { outline-offset:-2px; }
 .sc-icon {
   width: 38px; height: 38px; flex: none;
   border-radius: 10px;

@@ -17,6 +17,7 @@ import { useTaskStore } from '../stores/task'
 import VideoPlayer from '../components/VideoPlayer.vue'
 import AiSummarySection from '../components/AiSummarySection.vue'
 import CaptureIntake from '../components/CaptureIntake.vue'
+import { feedback } from '../stores/interface'
 import CaptureEvidence from '../components/CaptureEvidence.vue'
 import CaptureFlow from '../components/CaptureFlow.vue'
 
@@ -405,7 +406,12 @@ function startPoll() {
       busyPct.value = task.value.progress || 0
       if (!['pending', 'analyzing'].includes(task.value.status)) {
         stopPoll()
-        if (task.value.status === 'completed') await loadAll()
+        if (task.value.status === 'completed') {
+          feedback('success')
+          await loadAll()
+        } else if (task.value.status === 'failed') {
+          feedback('error')
+        }
       }
     } catch {
       if (active()) err.value = '暂时无法读取分析进度，正在重试…'

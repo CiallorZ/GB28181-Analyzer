@@ -1,4 +1,5 @@
 <script setup>
+import InterfacePreferences from '../components/InterfacePreferences.vue'
 import { ref, onMounted } from 'vue'
 import { api } from '../api/client'
 import PageNav from '../components/PageNav.vue'
@@ -23,6 +24,7 @@ onMounted(async () => {
       sub="运行环境与诊断规则说明"
       :crumbs="[{label:'工作台', to:'/'}, {label:'系统设置'}]" />
 
+    <InterfacePreferences />
     <div v-if="err" class="err-box">{{ err }}</div>
 
     <div class="card mb-16">
