@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-
 import hashlib
 import json
 import os
@@ -14,16 +13,18 @@ import uuid
 
 from fastapi import (APIRouter, BackgroundTasks, Depends, File, HTTPException,
                      Response, UploadFile)
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, selectinload
 
+from ..core import analysis_control
 from ..core.config import settings
-from ..core.db import SessionLocal, get_db, session_scope
+from ..core.db import SessionLocal, get_db
 from ..core.security import looks_like_capture
 from ..models.entities import (
     AnalysisTask, CaptureFile, DiagnosticEvent, TaskStatus, BusinessSession,
     MediaStream,
 )
+from ..parsers import capture
 from ..services import analyzer, report
 from ..services.diagnosis import severity_order_clause
 from ..schemas import task as S
@@ -291,8 +292,11 @@ def start_analyze(task_id: int, bg: BackgroundTasks,
             409, '源文件已不存在（可能被保留策略清理）：%s，请重新上传'
                  % '、'.join(missing))
 
-    # 判定是否为"僵尸 analyzing"：状态是 analyzing 但本进程没有对应 worker
-    # （典型场景：分析中途服务重启/崩溃，状态留在 analyzing 永远不动）
+    if task.status == TaskStatus.COMPLETED and not (
+        capture.TSHARK and os.path.isfile(capture.TSHARK)
+    ):
+        raise HTTPException(409, '未找到 tshark，已保留现有分析结果。请安装 Wireshark 后重启工作台。')
+
     with _run_lock:
         # 只要本进程还有该任务的 worker 在跑，就一律拒绝 ——
         # 不能只看 DB 状态：worker 启动后有一小段时间状态仍是 PENDING，
@@ -300,38 +304,23 @@ def start_analyze(task_id: int, bg: BackgroundTasks,
         if task_id in _running:
             raise HTTPException(409, '任务正在分析中')
 
-        stale = (task.status == TaskStatus.ANALYZING)
-
         running = sum(1 for v in _running.values() if v)
         if running >= settings.MAX_CONCURRENT_TASKS:
             raise HTTPException(429, '同时分析的任务过多（上限 %d）'
                                 % settings.MAX_CONCURRENT_TASKS)
         # 占位必须与"检查"在同一把锁内完成，否则两个并发请求都能通过检查
-        _running[task_id] = True
+        _running[task_id] = analysis_control.Control()
 
-    try:
-        if stale:
-            # 清理僵尸状态，允许重新分析
-            with session_scope() as s2:
-                t2 = s2.get(AnalysisTask, task_id)
-                if t2:
-                    t2.error_message = '上次分析未正常结束（服务重启），已重置'
-                    t2.progress = 0
-
-        task.status = TaskStatus.PENDING
-        task.progress = 0
-        task.stage = '排队中'
-        task.error_message = None
-        db.commit()
-
-        # 用线程而不是 BackgroundTasks：后者要等 HTTP 响应发出后才执行，
-        # 大文件分析会拖住连接；独立线程可立即返回 task_id 供前端轮询
-        threading.Thread(target=_worker, args=(task_id,), daemon=True).start()
-    except BaseException:
-        # 线程没起来就必须归还槽位，否则这个任务永远无法再次分析
-        with _run_lock:
+        try:
+            task.status = TaskStatus.PENDING
+            task.progress = 0
+            task.stage = '排队中'
+            task.error_message = None
+            db.commit()
+            threading.Thread(target=_worker, args=(task_id,), daemon=True).start()
+        except BaseException:
             _running.pop(task_id, None)
-        raise
+            raise
 
     db.refresh(task)
     return _task_brief(db, task)
@@ -340,11 +329,13 @@ def start_analyze(task_id: int, bg: BackgroundTasks,
 def _worker(task_id: int):
     """后台分析线程 —— 不阻塞 HTTP 请求"""
     db = SessionLocal()
+    token = analysis_control.current.set(_running[task_id])
     try:
         analyzer.run_analysis(db, task_id)
     except Exception:
         pass          # 状态已由 run_analysis 写入
     finally:
+        analysis_control.current.reset(token)
         db.close()
         with _run_lock:
             _running.pop(task_id, None)
@@ -352,19 +343,21 @@ def _worker(task_id: int):
 
 @router.post('/{task_id}/cancel', response_model=S.TaskBrief)
 def cancel_task(task_id: int, db: Session = Depends(get_db)):
-    """取消任务
-
-    说明：后台线程无法安全强杀（可能正在调用 tshark），
-    这里把状态置为 cancelled，worker 完成后不会覆盖。
-    """
-    task = db.get(AnalysisTask, task_id)
-    if not task:
-        raise HTTPException(404, '任务不存在')
-    if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
-        raise HTTPException(409, '任务已结束，无法取消')
-    task.status = TaskStatus.CANCELLED
-    task.stage = '已取消'
-    db.commit()
+    """取消指定任务并结束其正在运行的解析与重建进程。"""
+    with _run_lock:
+        task = db.get(AnalysisTask, task_id)
+        if not task:
+            raise HTTPException(404, '任务不存在')
+        changed = db.execute(update(AnalysisTask).where(
+            AnalysisTask.id == task_id,
+            AnalysisTask.status.notin_((TaskStatus.COMPLETED, TaskStatus.FAILED)),
+        ).values(status=TaskStatus.CANCELLED, stage='已取消')).rowcount
+        if not changed:
+            raise HTTPException(409, '任务已结束，无法取消')
+        db.commit()
+        control = _running.get(task_id)
+        if control:
+            control.cancel()
     db.refresh(task)
     return _task_brief(db, task)
 

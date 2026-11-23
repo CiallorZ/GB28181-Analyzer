@@ -22,6 +22,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 
+from ..core import analysis_control
 from ..parsers import capture
 
 MAX_SECONDS = 60          # 单条流转码时长上限
@@ -114,7 +115,7 @@ def probe(path: str) -> dict:
     if not capture.FFPROBE:
         return {}
     try:
-        r = subprocess.run(
+        r = analysis_control.run(
             [capture.FFPROBE, '-v', 'error', '-show_streams', '-show_format',
              '-of', 'json', path],
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
@@ -162,7 +163,7 @@ def count_frames(path: str) -> int | None:
     if not capture.FFMPEG:
         return None
     try:
-        r = subprocess.run(
+        r = analysis_control.run(
             [capture.FFMPEG, '-nostdin', '-hide_banner', '-i', path, '-an',
              '-map', '0:v:0', '-f', 'null', '-'],
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
@@ -209,7 +210,7 @@ def transcode(ps_path: str, mp4_path: str, poster_path: str | None = None
             '-y', temporary_mp4,
         ]
         try:
-            r = subprocess.run(cmd, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), capture_output=True, text=True,
+            r = analysis_control.run(cmd, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), capture_output=True, text=True,
                                errors='replace', timeout=FFMPEG_TIMEOUT)
         except subprocess.TimeoutExpired:
             return False, '转码超时（%d 秒）' % FFMPEG_TIMEOUT
@@ -226,7 +227,7 @@ def transcode(ps_path: str, mp4_path: str, poster_path: str | None = None
             os.remove(poster_path)
         for ss in ('1', '0'):
             try:
-                subprocess.run(
+                analysis_control.run(
                     [capture.FFMPEG, '-nostdin', '-hide_banner', '-loglevel', 'error',
                      '-ss', ss, '-i', mp4_path, '-frames:v', '1',
                      '-q:v', '4', '-y', poster_path],
@@ -238,7 +239,7 @@ def transcode(ps_path: str, mp4_path: str, poster_path: str | None = None
                 break
         else:
             try:
-                subprocess.run(
+                analysis_control.run(
                     [capture.FFMPEG, '-nostdin', '-hide_banner', '-loglevel', 'error',
                      '-i', mp4_path, '-frames:v', '1', '-q:v', '4',
                      '-y', poster_path],
@@ -261,6 +262,7 @@ def rebuild_stream(pkts, out_dir: str, tag: str,
     out_dir: 输出目录
     tag: 文件名前缀（如 tcp0 / udp1）
     """
+    analysis_control.checkpoint()
     res = RebuildResult()
 
     if not pkts:
@@ -332,6 +334,7 @@ def rebuild_streams_parallel(tasks: list, out_dir: str,
     ffmpeg 单实例只用 1-2 核，多流并行能把总耗时压到接近 1/N。
     默认 3 并发，避免 IO 与内存压力过大。
     """
+    from contextvars import copy_context
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     if not tasks:
@@ -344,12 +347,14 @@ def rebuild_streams_parallel(tasks: list, out_dir: str,
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {}
         for tag, pkts, dur in tasks:
-            fut = pool.submit(rebuild_stream, pkts, out_dir, tag, dur)
+            fut = pool.submit(copy_context().run, rebuild_stream, pkts, out_dir, tag, dur)
             futures[fut] = tag
         for fut in as_completed(futures):
             tag = futures[fut]
             try:
                 results[tag] = fut.result()
+            except analysis_control.Cancelled:
+                raise
             except Exception as e:
                 r = RebuildResult()
                 r.error = '重建异常：%s' % e

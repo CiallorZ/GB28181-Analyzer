@@ -96,7 +96,9 @@ def _startup():
     try:
         with session_scope() as s:
             stale = s.scalars(_select(AnalysisTask).where(
-                AnalysisTask.status == TaskStatus.ANALYZING)).all()
+                (AnalysisTask.status == TaskStatus.ANALYZING) |
+                ((AnalysisTask.status == TaskStatus.PENDING) &
+                 (AnalysisTask.stage == '排队中')))).all()
             for t in stale:
                 t.status = TaskStatus.FAILED
                 t.error_message = '分析进程中断（服务重启），请重新分析'

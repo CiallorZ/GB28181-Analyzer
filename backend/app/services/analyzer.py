@@ -25,6 +25,7 @@ import os
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
+from ..core import analysis_control
 from ..core.config import settings
 from ..core.timeutil import utcnow
 from ..models.entities import (
@@ -38,10 +39,18 @@ from . import diagnosis as diag_engine
 log = logging.getLogger('gb28181.analyzer')
 
 
-def _set_progress(db: Session, task: AnalysisTask, stage: str, pct: int):
-    task.stage = stage
-    task.progress = pct
+def _update_active(db, task_id, **values):
+    changed = db.execute(update(AnalysisTask).where(
+        AnalysisTask.id == task_id, AnalysisTask.status != TaskStatus.CANCELLED,
+    ).values(**values)).rowcount
     db.commit()
+    return bool(changed)
+
+
+def _set_progress(db: Session, task: AnalysisTask, stage: str, pct: int):
+    analysis_control.checkpoint()
+    if not _update_active(db, task.id, stage=stage, progress=pct):
+        raise analysis_control.Cancelled()
 
 
 # ===============================================================
@@ -68,10 +77,10 @@ def run_analysis(db: Session, task_id: int):
         _mark_failed(db, task_id, msg, '源文件缺失')
         raise capture.CaptureError(msg)
 
-    task.status = TaskStatus.ANALYZING
-    task.started_at = utcnow()
-    task.error_message = None
-    db.commit()
+    analysis_control.checkpoint()
+    if not _update_active(db, task_id, status=TaskStatus.ANALYZING,
+                          started_at=utcnow(), error_message=None):
+        return
 
     # 注意删除顺序：先删子表再删父表，避免外键约束报错
     stream_ids = [r[0] for r in db.execute(
@@ -87,6 +96,9 @@ def run_analysis(db: Session, task_id: int):
 
     try:
         _run(db, task)
+    except analysis_control.Cancelled:
+        db.rollback()
+        return
     except capture.CaptureError as e:
         db.rollback()
         _mark_failed(db, task_id, str(e), '解析失败')
@@ -97,21 +109,9 @@ def run_analysis(db: Session, task_id: int):
         _mark_failed(db, task_id, '%s: %s' % (type(e).__name__, e), '分析异常')
         raise
 
-    # _run 期间任务可能已被取消（cancel 只置状态，不强杀线程）。
-    # 这里必须重新读状态，不能用内存里的 task 对象无条件写 COMPLETED，
-    # 否则用户点了取消却看到"完成"。
-    db.expire_all()
-    task = db.get(AnalysisTask, task_id)
-    if task is None:
+    if not _update_active(db, task_id, status=TaskStatus.COMPLETED,
+                          completed_at=utcnow(), progress=100, stage='完成'):
         return
-    if task.status == TaskStatus.CANCELLED:
-        log.info('任务 #%s 分析完成，但已被取消，保留取消状态', task_id)
-    else:
-        task.status = TaskStatus.COMPLETED
-        task.completed_at = utcnow()
-        task.progress = 100
-        task.stage = '完成'
-    db.commit()
 
     # 按保留策略清理（不阻塞主流程，失败不影响结果）
     try:
@@ -122,24 +122,11 @@ def run_analysis(db: Session, task_id: int):
 
 
 def _mark_failed(db: Session, task_id: int, message: str, stage: str):
-    """把任务置为失败，且不覆盖已取消状态
-
-    注意：rollback() 不会让已加载的对象失效（本项目的 session 设了
-    expire_on_commit=False），必须显式 expire_all，否则会从 identity map
-    拿到旧状态，把另一个会话刚写的 CANCELLED 覆盖成 FAILED。
-    """
+    """保留并发取消的终态。"""
     try:
         db.rollback()
-        db.expire_all()
-        task = db.get(AnalysisTask, task_id)
-        if task is None:
-            return
-        if task.status == TaskStatus.CANCELLED:
-            return
-        task.status = TaskStatus.FAILED
-        task.error_message = message
-        task.stage = stage
-        db.commit()
+        _update_active(db, task_id, status=TaskStatus.FAILED,
+                       error_message=message, stage=stage)
     except Exception:
         log.exception('写入任务 #%s 失败状态时出错', task_id)
 
@@ -219,6 +206,7 @@ def _run(db: Session, task: AnalysisTask):
             length=p['length'], summary=_packet_summary(p),
         ))
         if len(batch) >= 2000:
+            analysis_control.checkpoint()
             db.bulk_save_objects(batch)
             db.commit()
             batch.clear()
@@ -656,11 +644,14 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
                 1, min(4, (os.cpu_count() or 2) // 2))
             rb_map = rb_mod.rebuild_streams_parallel(rb_tasks, out_dir,
                                                      max_workers=workers)
+        except analysis_control.Cancelled:
+            raise
         except Exception:
             log.exception('并行重建媒体流失败（不影响统计结果）')
             rb_map = {}
 
         for tag, pkts, st, key, transport, meta, ps in pending:
+            analysis_control.checkpoint()
             row = _save_stream(db, task, st, key, transport, meta, ps,
                                rb_map.get(tag))
             streams.append(row)

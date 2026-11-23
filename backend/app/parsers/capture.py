@@ -23,6 +23,8 @@ import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from ..core import analysis_control
+
 # ---------------------------------------------------------------
 # 工具定位
 # ---------------------------------------------------------------
@@ -94,7 +96,7 @@ class FileInfo:
 
 def _run(cmd: list[str], timeout: int, what: str) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(cmd, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), capture_output=True, text=True,
+        return analysis_control.run(cmd, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), capture_output=True, text=True,
                               errors='replace', timeout=timeout)
     except subprocess.TimeoutExpired:
         raise CaptureError('%s 超时（%d 秒）' % (what, timeout))
@@ -275,41 +277,42 @@ def iter_packets(path: str, display_filter: str | None = None,
                             text=True, errors='replace', bufsize=1 << 20)
     count = 0
     try:
-        for line in proc.stdout:
-            parts = line.rstrip('\r\n').split('\x1f')
-            while len(parts) < len(PACKET_FIELDS):
-                parts.append('')
-            (num, ts, ln, ip_src, ip_dst, v6_src, v6_dst,
-             t_sport, t_dport, u_sport, u_dport, protos) = parts[:12]
+        with analysis_control.track(proc):
+            for line in proc.stdout:
+                parts = line.rstrip('\r\n').split('\x1f')
+                while len(parts) < len(PACKET_FIELDS):
+                    parts.append('')
+                (num, ts, ln, ip_src, ip_dst, v6_src, v6_dst,
+                 t_sport, t_dport, u_sport, u_dport, protos) = parts[:12]
 
-            if not num:
-                continue
-            transport = ''
-            if t_sport or t_dport:
-                transport = 'TCP'
-            elif u_sport or u_dport:
-                transport = 'UDP'
+                if not num:
+                    continue
+                transport = ''
+                if t_sport or t_dport:
+                    transport = 'TCP'
+                elif u_sport or u_dport:
+                    transport = 'UDP'
 
-            def _int(v):
-                try:
-                    return int(v)
-                except (TypeError, ValueError):
-                    return None
+                def _int(v):
+                    try:
+                        return int(v)
+                    except (TypeError, ValueError):
+                        return None
 
-            yield {
-                'number': _int(num),
-                'ts': float(ts) if ts else None,
-                'src_ip': ip_src or v6_src or None,
-                'dst_ip': ip_dst or v6_dst or None,
-                'src_port': _int(t_sport) or _int(u_sport),
-                'dst_port': _int(t_dport) or _int(u_dport),
-                'transport': transport,
-                'length': _int(ln) or 0,
-                'protocols': protos or '',
-            }
-            count += 1
-            if limit and count >= limit:
-                break
+                yield {
+                    'number': _int(num),
+                    'ts': float(ts) if ts else None,
+                    'src_ip': ip_src or v6_src or None,
+                    'dst_ip': ip_dst or v6_dst or None,
+                    'src_port': _int(t_sport) or _int(u_sport),
+                    'dst_port': _int(t_dport) or _int(u_dport),
+                    'transport': transport,
+                    'length': _int(ln) or 0,
+                    'protocols': protos or '',
+                }
+                count += 1
+                if limit and count >= limit:
+                    break
     finally:
         try:
             if proc.poll() is None:
