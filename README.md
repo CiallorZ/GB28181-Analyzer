@@ -6,7 +6,7 @@
 [![GitHub Release](https://img.shields.io/github/v/release/CiallorZ/gb28181-analyzer)](https://github.com/CiallorZ/gb28181-analyzer/releases/latest)
 [![MIT License](https://img.shields.io/badge/license-MIT-3fb950)](LICENSE)
 
-**[下载 Windows x64 便携包（v1.0.0）](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v1.0.0/gb28181-analyzer-windows-x64-v1.0.0.zip)** · [所有版本](https://github.com/CiallorZ/gb28181-analyzer/releases) · [Windows 使用说明](docs/WINDOWS.md)
+**[下载 Windows x64 便携包（v1.1.0）](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v1.1.0/gb28181-analyzer-windows-x64-v1.1.0.zip)** · [所有版本](https://github.com/CiallorZ/gb28181-analyzer/releases) · [Windows 使用说明](docs/WINDOWS.md)
 
 ## Windows 快速开始
 
@@ -20,14 +20,14 @@ Windows 版默认仅监听本机，数据保存在 `%LOCALAPPDATA%\GB28181 Analy
 
 ## 一次抓包怎么查
 
-1. **先看「优先排查」**。严重和警告事件会显示证据等级。有报文证据时可以跳到对应包号，有会话关联时可以继续查看详情。
+1. **先看「关键诊断」**。严重和警告事件会显示证据等级。有报文证据时可以跳到对应包号，有会话关联时可以继续查看详情。
 2. **再核对信令和协商**。从 SIP 时序图查看 INVITE、响应和 ACK，核对 SDP 中的地址、端口和 SSRC。遇到 SSRC 不一致，可回到携带 Subject 和 SDP 的原始信令。
 3. **最后检查媒体和画面**。查看 RTP 是否到达，以及码率、抖动、序号缺口和静默。解析出编码信息后，可查看源编码参数。成功重建的媒体流可在浏览器中播放。
 4. **留档**。从工作台导出 Markdown 或 JSON 报告。报告使用已有结果，导出时无需重新分析抓包。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/overview-dark.png">
-  <img src="docs/images/overview-light.png" alt="分析总览显示优先告警、关联报文、SIP 响应码与媒体状态">
+  <img src="docs/images/overview-light.png" alt="分析工作台展示关键诊断、SIP 信令、媒体质量和规则证据">
 </picture>
 
 <details>
