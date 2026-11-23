@@ -517,3 +517,17 @@ class Report(Base):
     path: Mapped[str] = mapped_column(String(512))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     size: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class TaskComparison(Base):
+    __tablename__ = 'task_comparison'
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_a_id: Mapped[int] = mapped_column(ForeignKey('analysis_task.id', ondelete='CASCADE'), index=True)
+    task_b_id: Mapped[int] = mapped_column(ForeignKey('analysis_task.id', ondelete='CASCADE'), index=True)
+    label_a: Mapped[str | None] = mapped_column(String(100))
+    label_b: Mapped[str | None] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    fingerprint: Mapped[dict] = mapped_column(JSON)
+    result: Mapped[dict] = mapped_column(JSON)
+    summary: Mapped[dict] = mapped_column(JSON)
