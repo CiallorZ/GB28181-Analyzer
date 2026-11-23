@@ -23,7 +23,7 @@ def main():
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--version', action='version', version=__version__)
     args = parser.parse_args()
-    if not 1 <= args.port <= 65535:
+    if not 0 <= args.port <= 65535:
         parser.error('--port must be between 1 and 65535')
 
     user_dir = Path(os.environ.get('LOCALAPPDATA') or Path.home() / 'AppData' / 'Local')
@@ -43,6 +43,7 @@ def main():
             listener.bind((HOST, args.port))
         except OSError as error:
             parser.exit(1, f'Cannot use {HOST}:{args.port}. Try --port 8792. ({error})\n')
+        args.port = listener.getsockname()[1]
         return run_desktop(args, data_dir, listener)
 
 
@@ -67,6 +68,7 @@ def run_desktop(args, data_dir, listener):
         async def startup(self, sockets=None):
             await super().startup(sockets=sockets)
             if self.started:
+                print(f'DESKTOP_READY={args.port}', flush=True)
                 print(f'GB28181 Analyzer {__version__} | {address}', flush=True)
                 print(f'Data: {data_dir} | Ctrl+C to stop', flush=True)
                 if not args.no_browser:

@@ -1,0 +1,12 @@
+[package]
+name = "gb28181-desktop"
+version = "0.7.0"
+edition = "2021"
+publish = false
+
+[build-dependencies]
+tauri-build = "2"
+
+[dependencies]
+tauri = "2"
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_Security", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }

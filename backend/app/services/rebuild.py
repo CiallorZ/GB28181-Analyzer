@@ -117,6 +117,7 @@ def probe(path: str) -> dict:
         r = subprocess.run(
             [capture.FFPROBE, '-v', 'error', '-show_streams', '-show_format',
              '-of', 'json', path],
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
             capture_output=True, text=True, errors='replace', timeout=120)
         j = json.loads(r.stdout or '{}')
     except Exception:
@@ -164,6 +165,7 @@ def count_frames(path: str) -> int | None:
         r = subprocess.run(
             [capture.FFMPEG, '-hide_banner', '-i', path, '-an',
              '-map', '0:v:0', '-f', 'null', '-'],
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
             capture_output=True, text=True, errors='replace',
             timeout=FFMPEG_TIMEOUT)
     except subprocess.TimeoutExpired:
@@ -207,7 +209,7 @@ def transcode(ps_path: str, mp4_path: str, poster_path: str | None = None
             '-y', temporary_mp4,
         ]
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True,
+            r = subprocess.run(cmd, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), capture_output=True, text=True,
                                errors='replace', timeout=FFMPEG_TIMEOUT)
         except subprocess.TimeoutExpired:
             return False, '转码超时（%d 秒）' % FFMPEG_TIMEOUT
@@ -228,6 +230,7 @@ def transcode(ps_path: str, mp4_path: str, poster_path: str | None = None
                     [capture.FFMPEG, '-hide_banner', '-loglevel', 'error',
                      '-ss', ss, '-i', mp4_path, '-frames:v', '1',
                      '-q:v', '4', '-y', poster_path],
+                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
                     capture_output=True, timeout=90)
             except subprocess.TimeoutExpired:
                 pass
@@ -239,6 +242,7 @@ def transcode(ps_path: str, mp4_path: str, poster_path: str | None = None
                     [capture.FFMPEG, '-hide_banner', '-loglevel', 'error',
                      '-i', mp4_path, '-frames:v', '1', '-q:v', '4',
                      '-y', poster_path],
+                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
                     capture_output=True, timeout=90)
             except subprocess.TimeoutExpired:
                 pass

@@ -25,7 +25,7 @@ try {
 
     $packArgs = @(
         '--noconfirm', '--clean', '--noupx', '--onedir', '--console',
-        '--name', $name, '--paths', "$root/backend",
+        '--name', 'AnalyzerEngine', '--paths', "$root/backend",
         '--hidden-import', 'uvicorn.loops.asyncio',
         '--hidden-import', 'uvicorn.protocols.http.h11_impl',
         '--hidden-import', 'uvicorn.lifespan.on',
@@ -36,8 +36,14 @@ try {
     & $Python -m PyInstaller @packArgs
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller failed.' }
 
-    $bundle = Join-Path "$output/app" $name
-    $reported = & "$bundle/$name.exe" --version
+    $bundle = Join-Path "$output/desktop" $name
+    $engine = Join-Path $bundle 'engine'
+    New-Item -ItemType Directory -Force -Path $engine | Out-Null
+    Copy-Item -Path "$output/app/AnalyzerEngine/*" -Destination $engine -Recurse -Force
+    cargo build --release --manifest-path desktop/Cargo.toml
+    if ($LASTEXITCODE -ne 0) { throw 'Tauri desktop build failed.' }
+    Copy-Item desktop/target/release/gb28181-desktop.exe "$bundle/$name.exe" -Force
+    $reported = & "$engine/AnalyzerEngine.exe" --version
     if ($LASTEXITCODE -ne 0 -or $reported -ne $version) { throw 'Portable version check failed.' }
     Copy-Item -LiteralPath 'LICENSE' -Destination $bundle
     Copy-Item -LiteralPath 'docs/WINDOWS.md' -Destination "$bundle/README-Windows.md"

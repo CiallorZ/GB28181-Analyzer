@@ -76,3 +76,6 @@ docs/samples/*.mp4
 coverage.xml
 htmlcov/
 frontend/dist-demo/
+
+desktop/target/
+desktop/gen/

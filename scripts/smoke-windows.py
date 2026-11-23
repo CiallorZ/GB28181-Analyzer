@@ -33,7 +33,7 @@ def smoke(archive):
         root = Path(temp)
         with zipfile.ZipFile(archive) as bundle:
             bundle.extractall(root)
-        exe = root / 'GB28181-Analyzer' / 'GB28181-Analyzer.exe'
+        exe = root / 'GB28181-Analyzer' / 'engine' / 'AnalyzerEngine.exe'
         version = subprocess.check_output([exe, '--version'], text=True, timeout=10).strip()
         port = free_port()
         base = f'http://127.0.0.1:{port}'

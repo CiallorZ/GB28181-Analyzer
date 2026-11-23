@@ -94,7 +94,7 @@ class FileInfo:
 
 def _run(cmd: list[str], timeout: int, what: str) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(cmd, capture_output=True, text=True,
+        return subprocess.run(cmd, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), capture_output=True, text=True,
                               errors='replace', timeout=timeout)
     except subprocess.TimeoutExpired:
         raise CaptureError('%s 超时（%d 秒）' % (what, timeout))
@@ -271,7 +271,7 @@ def iter_packets(path: str, display_filter: str | None = None,
     for f in PACKET_FIELDS:
         cmd += ['-e', f]
 
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    proc = subprocess.Popen(cmd, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True, errors='replace', bufsize=1 << 20)
     count = 0
     try:

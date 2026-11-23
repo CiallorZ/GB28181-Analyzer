@@ -135,6 +135,7 @@ def _build_layers(path: str, number: int) -> list[dict]:
     try:
         r = subprocess.run(
             [capture.TSHARK, '-r', path, '-Y', 'frame.number==%d' % number, '-V'],
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
             capture_output=True, text=True, errors='replace', timeout=60)
     except Exception:
         return []

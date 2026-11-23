@@ -1,0 +1,14 @@
+{
+  "productName": "GB28181 Analyzer",
+  "version": "0.7.0",
+  "identifier": "org.gb28181.analyzer",
+  "app": {
+    "windows": []
+  },
+  "bundle": {
+    "active": false,
+    "icon": [
+      "icons/icon.ico"
+    ]
+  }
+}
