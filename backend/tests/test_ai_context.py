@@ -114,7 +114,7 @@ def test_context_hides_sensitive_fields_and_chat_reuses_preview(client, db, make
     assert '设备1' in context and '地址1:8808' in context
     captured = {}
 
-    def fake_chat(db, task_id, history, question, on_delta=None, context=None):
+    def fake_chat(db, task_id, history, question, on_delta=None, context=None, expert='general'):
         captured['context'] = context
         return '回答'
 

@@ -689,7 +689,7 @@ SQLite 外键与 WAL（实测 `foreign_keys=1`、`journal_mode=wal`）。
 
 ### 阶段 3：功能补齐（按价值排序）
 
-Windows v0.8.0 已接入以下工作台入口：
+Windows v0.8.1 已接入以下工作台入口：
 
 1. 设备拓扑与媒体证据：按需读取 TShark 识别的 RTCP 报告块；RTT 缺失时显示未知。
 2. 报告导出：Markdown、JSON、单文件 HTML、诊断事件 CSV。

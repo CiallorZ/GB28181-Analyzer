@@ -159,6 +159,7 @@ function startThinking() {
       clearInterval(timer)
       steps.value.forEach(s => { s.state = 'done' })
       thinkDone.value = true
+      thinkOpen.value = false
       thinkTitle.value = '分析完成'
     },
     fail() {
@@ -352,7 +353,7 @@ watch(() => props.open, async (v) => {
           <!-- 双品牌头部 -->
           <div class="head">
             <div class="head-in">
-              <div class="logos">
+              <div class="logos"><img src="/brand/analyzer.svg" class="tower-mark" alt="铁塔抓包分析"><span class="brand-join" aria-hidden="true"></span>
                 <img src="/brand/deepseek.svg" alt="" class="lg-ds" />
               </div>
               <div class="head-txt">
@@ -456,14 +457,14 @@ watch(() => props.open, async (v) => {
 
               <!-- 思考过程 -->
               <div v-if="steps.length" class="think" :class="{ done: thinkDone }">
-                <div class="think-head" @click="thinkOpen = !thinkOpen">
+                <button type="button" class="think-head" :aria-expanded="thinkOpen" @click="thinkOpen = !thinkOpen">
                   <img src="/brand/deepseek.svg" alt="" class="whale" />
                   <span class="t-title">{{ thinkTitle }}</span>
                   <span v-if="!thinkDone" class="t-dots"><i></i><i></i><i></i></span>
                   <span class="spacer"></span>
                   <span class="t-time mono">{{ elapsed }}s</span>
                   <span class="t-arrow" :class="{ open: thinkOpen }">›</span>
-                </div>
+                </button>
                 <div v-show="thinkOpen" class="t-steps">
                   <div v-for="(s, i) in steps" :key="i" class="tstep" :class="s.state">
                     <span class="sdot"></span>
@@ -538,7 +539,7 @@ watch(() => props.open, async (v) => {
   display: flex; justify-content: flex-end;
 }
 .drawer {
-  width: 600px; max-width: 94vw; height: 100%;
+  width: min(720px, 58vw); max-width: 100vw; height: 100%;
   background: var(--bg-2);
   border-left: 1px solid var(--line-strong);
   display: flex; flex-direction: column;
@@ -567,11 +568,15 @@ watch(() => props.open, async (v) => {
   display: flex; align-items: center; gap: 12px;
   padding: 14px 16px;
 }
-.logos { display: flex; align-items: center; }
+.logos { display:flex; align-items:center;gap:7px }
+.tower-mark {width:38px;height:38px}.brand-join {width:16px;height:1px;background:linear-gradient(90deg,var(--brand),var(--ds))}
+.head-in {background:linear-gradient(115deg,var(--brand-soft),transparent 26%,var(--ds-soft))}
+@media(max-width:850px){.drawer{width:min(100vw,640px)}}
+
 .lg-ds { height: 20px; width: auto; }
 .head-txt { line-height: 1.35; min-width: 0; }
 .head-name {
-  font-size: 14px; font-weight: 600;
+  font-size: 18px; font-weight: 600;
   color: var(--text); letter-spacing: -.1px;
 }
 .head-sub {
@@ -687,6 +692,7 @@ watch(() => props.open, async (v) => {
   overflow: hidden;
 }
 .think-head {
+  width:100%; background:transparent; color:inherit; border:0; text-align:left;
   display: flex; align-items: center; gap: 9px;
   padding: 11px 14px; cursor: pointer;
 }
