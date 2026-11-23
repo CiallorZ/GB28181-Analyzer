@@ -18,6 +18,27 @@ def test_resume_checks_bytes_and_survives_retry(client):
     assert client.post(url + '/finish').json()['task_id'] == task
 
 
+def test_multichunk_resume_keeps_uploaded_prefix(client, db):
+    from app.api.intake import CHUNK
+    from app.models.entities import CaptureFile
+
+    first = bytes.fromhex('d4c3b2a1') + bytes(CHUNK - 4)
+    last = b'last fragment'
+    manifest = {'name': 'resume.pcap', 'size': len(first) + len(last),
+                'hashes': [hashlib.sha256(part).hexdigest() for part in (first, last)]}
+    base = '/api/v1/intake/resume'
+    key = client.post(base, json=manifest).json()['key']
+    url = f'{base}/{key}'
+    assert client.put(url+'/0', files={'file': ('chunk', first)}).is_success
+    assert client.post(url+'/finish').status_code == 409
+    assert client.post(base, json=manifest).json() == {'key': key, 'received': [0]}
+    assert client.put(url+'/1', files={'file': ('chunk', last)}).is_success
+    response = client.post(url+'/finish')
+    assert response.is_success
+    stored = db.query(CaptureFile).filter_by(task_id=response.json()['task_id']).one()
+    assert stored.checksum == hashlib.sha256(first + last).hexdigest()
+
+
 def test_report_blocks_and_export(client, make_task, tmp_path, monkeypatch):
     path = tmp_path / 'evidence.pcap'
     path.touch()

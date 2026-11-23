@@ -27,7 +27,9 @@ const info = computed(() => {
     codec: s.codec,
     width: s.width,
     height: s.height,
-    fps: s.fps,
+    outputCodec: rb.output_codec,
+    outputWidth: rb.output_width,
+    outputHeight: rb.output_height,
     frames: s.frame_count
   }
 })
@@ -55,7 +57,7 @@ function onError() {
 function download() {
   const a = document.createElement('a')
   a.href = videoUrl.value
-  a.download = `stream-${props.stream.ssrc ? props.stream.ssrc.toString(16) : props.stream.id}.mp4`
+  a.download = `stream-${props.stream.ssrc != null ? props.stream.ssrc.toString(16) : props.stream.id}.mp4`
   a.click()
 }
 
@@ -83,17 +85,14 @@ watch(() => props.stream.id, () => {
                controls playsinline
                @loadeddata="onLoaded" @error="onError"></video>
 
-        <div v-else class="vp-cover" @click="play">
+        <div v-else class="vp-cover" role="button" tabindex="0" aria-label="播放重建视频" @click="play" @keydown.enter.prevent="play" @keydown.space.prevent="play">
           <img :src="posterUrl" alt="" class="vp-poster"
                @error="(e) => e.target.style.display = 'none'" />
           <div class="vp-play">
-            <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="M8 5v14l11-7z"/>
-            </svg>
+            <AppIcon name="play" />
           </div>
           <div class="vp-badge">
-            {{ info.width }}×{{ info.height }}
-            <template v-if="info.fps"> · {{ info.fps }}fps</template>
+            MP4 <template v-if="info.outputWidth && info.outputHeight">· {{ info.outputWidth }}×{{ info.outputHeight }}</template>
             <template v-if="info.duration"> · {{ info.duration.toFixed(2) }}s</template>
           </div>
         </div>
@@ -106,12 +105,7 @@ watch(() => props.stream.id, () => {
 
       <div v-else class="vp-none">
         <div class="vn-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-            <rect x="2" y="4" width="20" height="14" rx="2"/>
-            <line x1="2" y1="20" x2="22" y2="20"/>
-            <line x1="7" y1="9" x2="10" y2="12"/>
-            <line x1="10" y1="9" x2="7" y2="12"/>
-          </svg>
+          <AppIcon name="monitor" />
         </div>
         <div class="vn-title">未解出画面</div>
         <div class="vn-reason">{{ info.error || '该流没有可解码的视频载荷' }}</div>
@@ -122,7 +116,7 @@ watch(() => props.stream.id, () => {
     <div class="vp-info">
       <div class="vi-row">
         <span class="vi-k">SSRC</span>
-        <span class="vi-v mono">0x{{ stream.ssrc?.toString(16) }}</span>
+        <span class="vi-v mono">{{ stream.ssrc == null ? '未知' : '0x' + stream.ssrc.toString(16) }}</span>
       </div>
       <div class="vi-row">
         <span class="vi-k">传输</span>
@@ -130,10 +124,15 @@ watch(() => props.stream.id, () => {
       </div>
       <template v-if="info.ok">
         <div class="vi-row">
-          <span class="vi-k">编码</span>
+          <span class="vi-k">源流</span>
           <span class="vi-v">
             <span class="badge brand">{{ info.codec || '未知' }}</span>
+            <template v-if="info.width && info.height">{{ info.width }}×{{ info.height }}</template>
           </span>
+        </div>
+        <div class="vi-row">
+          <span class="vi-k">预览编码</span>
+          <span class="vi-v mono">{{ info.outputCodec || '未知' }}</span>
         </div>
         <div class="vi-row">
           <span class="vi-k">帧数</span>

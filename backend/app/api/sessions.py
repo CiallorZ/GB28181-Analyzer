@@ -54,6 +54,14 @@ def get_session(session_id: int, db: Session = Depends(get_db)):
     return S.SessionDetail.model_validate(row)
 
 
+@router.get('/sessions/{session_id}/source')
+def session_source(session_id: int, db: Session = Depends(get_db)):
+    task_id = db.scalar(select(BusinessSession.task_id).where(BusinessSession.id == session_id))
+    if task_id is None:
+        raise HTTPException(404, '会话不存在')
+    return {'task_id': task_id}
+
+
 @router.get('/sessions/{session_id}/sip')
 def session_sip(session_id: int, db: Session = Depends(get_db)):
     """会话关联的 SIP 消息（M06 时序图数据源）"""

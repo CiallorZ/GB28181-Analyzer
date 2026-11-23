@@ -37,4 +37,4 @@ def test_rules_endpoint_exposes_status(client):
     assert data['total'] == 21
     assert data['implemented'] == len(diagnosis.RULE_IMPLEMENTED)
     assert any(x['implemented'] for x in data['rules'])
-    assert any(not x['implemented'] for x in data['rules'])
+    assert all(x['implemented'] for x in data['rules'])

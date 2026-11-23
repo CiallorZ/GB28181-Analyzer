@@ -67,6 +67,7 @@ export const api = {
 
   sessions: (taskId, params) => client.get(`/tasks/${taskId}/sessions`, { params }).then(r => r.data),
   session: (id) => client.get(`/sessions/${id}`).then(r => r.data),
+  sessionSource: id => client.get(`/sessions/${id}/source`).then(r => r.data),
   sessionSip: (id) => client.get(`/sessions/${id}/sip`).then(r => r.data),
   sessionTimeline: (id) => client.get(`/sessions/${id}/timeline`).then(r => r.data),
   sessionMedia: (id) => client.get(`/sessions/${id}/media`).then(r => r.data),
@@ -86,6 +87,10 @@ export const api = {
 
   packets: (taskId, params) => client.get(`/tasks/${taskId}/packets`, { params }).then(r => r.data),
   packet: (id) => client.get(`/packets/${id}`).then(r => r.data),
+
+  comparisons: (offset=0) => client.get('/comparisons', {params:{offset}}).then(r=>r.data),
+  comparison: id => client.get('/comparisons/'+id).then(r=>r.data),
+  compare: body => client.post('/comparisons',body).then(r=>r.data),
 
   // DeepSeek
   aiContext: (taskId) => client.get(`/ai/context/${taskId}`).then(r => r.data),

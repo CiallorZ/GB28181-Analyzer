@@ -20,12 +20,12 @@ import os
 import shutil
 from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
 from ..core.timeutil import utcnow
-from ..models.entities import AnalysisTask, TaskStatus
+from ..models.entities import AnalysisTask, TaskComparison, TaskStatus
 
 
 def _task_size(task: AnalysisTask) -> int:
@@ -192,6 +192,9 @@ def auto_purge(db: Session) -> dict:
     # ---- 2. 保留天数 ----
     if settings.KEEP_DAYS > 0:
         cutoff = utcnow() - timedelta(days=settings.KEEP_DAYS)
+        expired = db.execute(delete(TaskComparison).where(TaskComparison.created_at < cutoff))
+        if expired.rowcount:
+            db.commit()
         for t in tasks:
             if t.created_at and t.created_at < cutoff:
                 if t.files and not (t.configuration or {}).get('media_purged'):

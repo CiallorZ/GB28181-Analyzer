@@ -62,6 +62,8 @@ def test_failed_transcode_does_not_reuse_or_overwrite_old_preview(tmp_path, monk
 
     def fail_with_partial_output(cmd, **_kwargs):
         from pathlib import Path
+        # The desktop host keeps stdin open to signal engine shutdown.
+        assert '-nostdin' in cmd[:cmd.index('-i')]
         Path(cmd[-1]).write_bytes(b'partial-output' * 200)
         return SimpleNamespace(returncode=1, stderr='invalid input')
 

@@ -12,7 +12,8 @@ from ..schemas import task as S
 
 SEV_LABEL = {'critical': '严重', 'warning': '警告', 'info': '提示',
              'unknown': '未知'}
-LEVEL_LABEL = {'confirmed': '已确认', 'suspected': '疑似', 'unknown': '未知'}
+LEVEL_LABEL = {'confirmed': '已确认', 'suspected': '疑似',
+               'insufficient': '证据不足', 'unknown': '未知'}
 # 枚举直接 f-string 会输出 SignalStatus.SUCCESS 这种名字，报告里必须转中文
 SIGNAL_LABEL = {'success': '成功', 'failed': '失败',
                 'incomplete': '不完整', 'unknown': '未知'}

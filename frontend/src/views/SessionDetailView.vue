@@ -5,8 +5,11 @@ import { loadECharts } from '../utils/chartLoader'
 import { chartBase as baseOption, chartPalette } from '../utils/chartTheme'
 import { bindChartResize } from '../utils/chartResize'
 import { api } from '../api/client'
+import { useTaskStore } from '../stores/task'
+import SipLadder from '../components/SipLadder.vue'
 import PageNav from '../components/PageNav.vue'
 
+const store = useTaskStore()
 const route = useRoute()
 const router = useRouter()
 const sid = Number(route.params.id)
@@ -47,7 +50,11 @@ let C = chartPalette()
 async function load() {
   loading.value = true
   try {
-    session.value = await api.session(sid)
+    const [detail, source] = await Promise.all([api.session(sid), api.sessionSource(sid)])
+    if (!active) return
+    session.value = { ...detail, task_id: source.task_id }
+    store.setCurrent(source.task_id)
+    if (!store.task) store.loadTask(source.task_id).catch(() => {})
     const [sipRes, tlRes, mediaRes, metricRes, diagRes] = await Promise.all([
       api.sessionSip(sid), api.sessionTimeline(sid),
       api.sessionMedia(sid), api.sessionMetrics(sid),
@@ -59,7 +66,7 @@ async function load() {
     metrics.value = metricRes.items || []
     diagnostics.value = diagRes.items || []
     await nextTick()
-    renderCharts()
+    if (active) renderCharts()
   } catch (e) {
     err.value = e.message
   } finally {
@@ -108,15 +115,7 @@ function renderCharts() {
   }))
 }
 
-const SIG_ROLES = computed(() => {
-  // 从 SIP 消息里抽取参与方（按出现顺序）
-  const seen = []
-  sip.value.forEach(m => {
-    if (m.source_ip && !seen.includes(m.source_ip)) seen.push(m.source_ip)
-    if (m.destination_ip && !seen.includes(m.destination_ip)) seen.push(m.destination_ip)
-  })
-  return seen.slice(0, 4)
-})
+const ladder = ref(null)
 
 const filteredSip = computed(() => {
   let arr = sip.value
@@ -135,18 +134,6 @@ const methods = computed(() => {
   return [...s].sort()
 })
 
-// 时序图布局
-const TIMELINE_H = computed(() => Math.max(200, filteredSip.value.length * 26 + 70))
-
-function laneX(ip) {
-  const roles = SIG_ROLES.value
-  const n = roles.length || 1
-  if (n === 1) return 500
-  const idx = Math.max(0, roles.indexOf(ip))
-  const pad = 130
-  return pad + idx * ((1000 - pad * 2) / (n - 1))
-}
-
 function selectMsg(m) {
   selectedMsg.value = m
 }
@@ -157,18 +144,19 @@ function gotoPacket(packetId) {
 }
 
 function downloadSvg() {
-  const svg = document.getElementById('sip-timeline')
-  if (!svg) return
-  const data = new XMLSerializer().serializeToString(svg)
+  const data = ladder.value?.exportSvg()
+  if (!data) return
   const blob = new Blob([data], { type: 'image/svg+xml' })
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
   a.download = `session-${sid}-timeline.svg`
   a.click()
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000)
 }
 
 const fmt = (v, d = 3) => v == null ? '—' : Number(v).toFixed(d)
 
+let active = true
 let unbindResize = null
 onMounted(async () => {
   window.addEventListener('alma-theme-changed', renderCharts)
@@ -176,6 +164,7 @@ onMounted(async () => {
   await load()
 })
 onUnmounted(() => {
+  active = false
   window.removeEventListener('alma-theme-changed', renderCharts)
   unbindResize?.()
   Object.values(charts).forEach(instance => instance.dispose())
@@ -187,7 +176,7 @@ onUnmounted(() => {
     <PageNav
       :title="`会话 #${sid}`"
       :sub="session ? `${session.device_id || '未知设备'} · ${session.session_type === 'live' ? '实时点播' : '回放'} · ${session.start_time?.toFixed(2)}s 开始` : ''"
-      :crumbs="[{label:'工作台', to:'/'}, {label:'点播会话', to:'/sessions'}, {label:`会话 #${sid}`}]" />
+      :crumbs="[{label:'工作台', to:'/'}, {label:session ? '任务 #'+session.task_id : '历史任务', to:session ? '/tasks/'+session.task_id : '/tasks'}, {label:`会话 #${sid}`}]" />
 
     <div v-if="err" class="err-box">{{ err }}</div>
 
@@ -274,7 +263,7 @@ onUnmounted(() => {
           </div>
           <div v-if="session.subject_ssrc && session.sdp_ssrc && session.subject_ssrc.replace(/^0+/,'') !== session.sdp_ssrc.replace(/^0+/,'')"
                class="ssrc-warn">
-            ⚠ SSRC 不一致：Subject 为 {{ session.subject_ssrc }}，SDP y= 为 {{ session.sdp_ssrc }}
+            <AppIcon name="warning" /> SSRC 不一致：Subject 为 {{ session.subject_ssrc }}，SDP y= 为 {{ session.sdp_ssrc }}
           </div>
         </div>
       </div>
@@ -317,59 +306,7 @@ onUnmounted(() => {
           <button class="btn-mini" @click="downloadSvg">导出 SVG</button>
         </div>
         <div class="card-body timeline-body">
-          <div class="tl-scroll">
-            <svg id="sip-timeline" class="tl-svg" :viewBox="`0 0 1000 ${TIMELINE_H}`"
-                 :style="{ height: TIMELINE_H + 'px' }">
-              <!-- 参与方竖线 -->
-              <g v-for="ip in SIG_ROLES" :key="ip">
-                <line :x1="laneX(ip)" y1="34" :x2="laneX(ip)" :y2="TIMELINE_H - 14"
-                      stroke="var(--line-2)" stroke-width="1" stroke-dasharray="3 3" />
-                <text :x="laneX(ip)" y="22" text-anchor="middle"
-                      fill="var(--text-3)" font-size="10.5" font-family="monospace">{{ ip }}</text>
-              </g>
-
-              <!-- 消息箭头 -->
-              <g v-for="(m, i) in filteredSip" :key="m.id"
-                 @click="selectMsg(m)" style="cursor:pointer">
-                <rect x="0" :y="44 + i * 26 - 10" width="1000" height="24"
-                      :fill="selectedMsg?.id === m.id ? 'var(--ds-soft)' : 'transparent'" />
-                <line
-                  :x1="laneX(m.source_ip || SIG_ROLES[0])"
-                  :y1="44 + i * 26"
-                  :x2="laneX(m.destination_ip || SIG_ROLES[1] || SIG_ROLES[0])"
-                  :y2="44 + i * 26"
-                  :stroke="m.is_request ? 'var(--ds)' : (String(m.status_code || '').startsWith('2') ? 'var(--ok)' : 'var(--critical)')"
-                  stroke-width="1.4"
-                  :marker-end="`url(#arr${m.is_request ? 'Req' : (String(m.status_code || '').startsWith('2') ? 'Ok' : 'Err')})`" />
-                <text :x="laneX(m.source_ip || SIG_ROLES[0])" :y="40 + i * 26"
-                      text-anchor="middle" fill="var(--text-3)" font-size="10" font-family="monospace">
-                  {{ m.is_request ? m.method : m.status_code }}
-                </text>
-                <text x="995" :y="47 + i * 26" text-anchor="end"
-                      fill="var(--text-4)" font-size="10" font-family="var(--font-mono)">
-                  {{ m.timestamp.toFixed(3) }}s
-                </text>
-              </g>
-
-              <defs>
-                <marker id="arrReq" viewBox="0 0 10 10" refX="9" refY="5"
-                        markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-                  <path d="M0,0 L10,5 L0,10 z" fill="var(--ds)"/>
-                </marker>
-                <marker id="arrOk" viewBox="0 0 10 10" refX="9" refY="5"
-                        markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-                  <path d="M0,0 L10,5 L0,10 z" fill="var(--ok)"/>
-                </marker>
-                <marker id="arrErr" viewBox="0 0 10 10" refX="9" refY="5"
-                        markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-                  <path d="M0,0 L10,5 L0,10 z" fill="var(--critical)"/>
-                </marker>
-              </defs>
-            </svg>
-          </div>
-          <div v-if="!filteredSip.length" class="empty">
-            该会话没有关联到 SIP 消息
-          </div>
+          <SipLadder ref="ladder" :messages="filteredSip" @select="selectMsg" />
         </div>
       </div>
 

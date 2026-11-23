@@ -947,7 +947,7 @@ dependencies = [
 
 [[package]]
 name = "gb28181-desktop"
-version = "0.8.4"
+version = "1.0.0"
 dependencies = [
  "tauri",
  "tauri-build",

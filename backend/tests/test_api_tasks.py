@@ -9,6 +9,8 @@
 """
 from __future__ import annotations
 
+import subprocess
+import sys
 import threading
 import time
 
@@ -90,7 +92,7 @@ def test_concurrent_analyze_starts_only_one_worker(client, db, make_task,
 
     from app.api import tasks as tasks_api
     with tasks_api._run_lock:
-        assert tasks_api._running.get(task.id) is True
+        assert task.id in tasks_api._running
 
     release.set()
     assert _wait_until(lambda: not _running_has(task.id)), \
@@ -257,9 +259,6 @@ def test_cancelled_status_not_overwritten_by_completion(db, make_task,
                                                         monkeypatch):
     """用户点了取消，worker 跑完不能把状态改回 completed"""
     task = make_task(path=__file__)
-    task.status = TaskStatus.CANCELLED
-    db.commit()
-
     def fake_run(_db, t):
         # 模拟分析期间用户点取消：worker 内部看到的是旧对象，
         # 所以取消必须由另一个会话写库才贴近真实场景
@@ -286,9 +285,6 @@ def test_failed_status_not_overwritten_when_cancelled(db, make_task,
                                                       monkeypatch):
     """取消后即使分析失败，也不该被改成 failed"""
     task = make_task(path=__file__)
-    task.status = TaskStatus.CANCELLED
-    db.commit()
-
     def boom(_db, t):
         from app.core.db import SessionLocal
         s = SessionLocal()
@@ -306,3 +302,65 @@ def test_failed_status_not_overwritten_when_cancelled(db, make_task,
 
     db.expire_all()
     assert db.get(AnalysisTask, task.id).status == TaskStatus.CANCELLED
+
+
+def test_cancelled_before_worker_preserves_results(db, make_task, monkeypatch):
+    task = make_task(path=__file__)
+    task.status = TaskStatus.CANCELLED
+    task.stage = '已取消'
+    db.commit()
+    monkeypatch.setattr(analyzer, '_run', lambda *_: pytest.fail('cancelled worker ran'))
+    analyzer.run_analysis(db, task.id)
+    db.refresh(task)
+    assert (task.status, task.stage) == (TaskStatus.CANCELLED, '已取消')
+
+
+def test_cancel_terminates_owned_child_and_returns_slot(client, db, make_task, monkeypatch):
+    from app.core import analysis_control
+
+    started = threading.Event()
+    children = []
+
+    def analyze(_db, _task_id):
+        with subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']) as proc:
+            children.append(proc)
+            with analysis_control.track(proc):
+                started.set()
+                proc.wait(timeout=10)
+
+    monkeypatch.setattr(analyzer, 'run_analysis', analyze)
+    task = make_task(path=__file__)
+    endpoint = f'/api/v1/tasks/{task.id}'
+    assert client.post(endpoint + '/analyze').status_code == 200
+    assert started.wait(5)
+    assert client.post(endpoint + '/cancel').json()['status'] == 'cancelled'
+    assert _wait_until(lambda: not _running_has(task.id))
+    assert children[0].returncode is not None
+    assert client.get(endpoint).json()['stage'] == '已取消'
+
+
+def test_task_without_tshark_reports_failure(client, db, make_task, monkeypatch):
+    from app.parsers import capture
+
+    monkeypatch.setattr(capture, 'TSHARK', None)
+    task = make_task(path=__file__)
+    endpoint = f'/api/v1/tasks/{task.id}'
+    assert client.post(endpoint + '/analyze').status_code == 200
+    assert _wait_until(lambda: not _running_has(task.id))
+    detail = client.get(endpoint).json()
+    assert detail['status'] == 'failed'
+    assert 'tshark' in detail['error_message']
+    assert client.get(endpoint + '/report').status_code == 409
+
+
+def test_reanalysis_without_tshark_preserves_report(client, db, make_task, monkeypatch):
+    from app.parsers import capture
+
+    task = make_task(path=__file__, status=TaskStatus.COMPLETED)
+    _add_old_result(db, task.id)
+    endpoint = f'/api/v1/tasks/{task.id}'
+    original = client.get(endpoint + '/report?format=json')
+    assert original.status_code == 200
+    monkeypatch.setattr(capture, 'TSHARK', None)
+    assert client.post(endpoint + '/analyze').status_code == 409
+    assert client.get(endpoint + '/report?format=json').json() == original.json()

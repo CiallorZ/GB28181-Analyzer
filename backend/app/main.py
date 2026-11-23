@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import __version__
-from .api import ai, diagnostics, evidence, intake, sessions, tasks
+from .api import ai, comparisons, diagnostics, evidence, intake, sessions, tasks
 from .core.config import settings
 from .core.db import init_db
 from .core.security import origin_allowed
@@ -81,6 +81,7 @@ app.include_router(sessions.router, prefix=API)
 app.include_router(diagnostics.router, prefix=API)
 app.include_router(evidence.router, prefix=API)
 app.include_router(intake.router, prefix=API)
+app.include_router(comparisons.router, prefix=API)
 app.include_router(ai.router, prefix=API)
 
 
@@ -95,7 +96,9 @@ def _startup():
     try:
         with session_scope() as s:
             stale = s.scalars(_select(AnalysisTask).where(
-                AnalysisTask.status == TaskStatus.ANALYZING)).all()
+                (AnalysisTask.status == TaskStatus.ANALYZING) |
+                ((AnalysisTask.status == TaskStatus.PENDING) &
+                 (AnalysisTask.stage == '排队中')))).all()
             for t in stale:
                 t.status = TaskStatus.FAILED
                 t.error_message = '分析进程中断（服务重启），请重新分析'

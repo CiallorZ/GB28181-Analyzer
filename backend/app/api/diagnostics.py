@@ -37,7 +37,7 @@ def list_diagnostics(task_id: int, page: int = 1, page_size: int = 50,
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
     rows = db.scalars(
         stmt.order_by(severity_order_clause(DiagnosticEvent.severity),
-                      DiagnosticEvent.timestamp)
+                      DiagnosticEvent.timestamp, DiagnosticEvent.id)
         .offset((page - 1) * page_size).limit(page_size)).all()
 
     return S.DiagnosticList(

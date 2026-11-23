@@ -19,6 +19,6 @@ def serve_frontend(app: FastAPI, dist: Path) -> None:
         if path.is_dir():
             app.mount(f'/{directory}', StaticFiles(directory=path), name=directory)
 
-    for route in ('/', '/sip', '/media', '/diagnostics', '/packets',
+    for route in ('/', '/compare', '/compare/{comparison_id:int}', '/sip', '/media', '/diagnostics', '/packets',
                   '/tasks', '/tasks/{task_id:int}', '/sessions/{session_id:int}', '/settings'):
         app.add_api_route(route, frontend, methods=['GET', 'HEAD'], include_in_schema=False)

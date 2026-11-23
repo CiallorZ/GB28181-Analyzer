@@ -15,13 +15,18 @@ def test_connection_accepts_environment_key(monkeypatch):
     assert ai.test_connection() == 'OK'
 
 
-def test_preview_and_analysis_use_same_context(client, make_task, monkeypatch):
-    from app.models.entities import TaskStatus
+def test_preview_and_analysis_use_same_context(client, db, make_task, monkeypatch):
+    from app.models.entities import TaskStatus, MediaStream
 
     task = make_task(status=TaskStatus.COMPLETED)
+    for ssrc in (None, 0, 37):
+        db.add(MediaStream(task_id=task.id, ssrc=ssrc, start_time=0, end_time=1))
+    db.commit()
     preview = client.get(f'/api/v1/ai/context/{task.id}')
     assert preview.status_code == 200
     data = preview.json()
+    for value in ('SSRC=未知 ', 'SSRC=0x00000000 ', 'SSRC=0x00000025 '):
+        assert data['context'].count(value) == 1
     seen = {}
 
     def fake_analyze(db, task_id, on_delta=None, context=None, expert='general'):

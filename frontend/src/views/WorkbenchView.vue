@@ -7,7 +7,8 @@
  *   每节可折叠、可跳转，滚动时自动高亮当前节（滚动叙事）。
  */
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import BackButton from '../components/BackButton.vue'
+import { useRoute, useRouter } from 'vue-router'
 import { loadECharts } from '../utils/chartLoader'
 import { chartPalette } from '../utils/chartTheme'
 import { bindChartResize } from '../utils/chartResize'
@@ -20,6 +21,7 @@ import CaptureEvidence from '../components/CaptureEvidence.vue'
 import CaptureFlow from '../components/CaptureFlow.vue'
 
 const router = useRouter()
+const route = useRoute()
 const store = useTaskStore()
 
 const task = ref(null)
@@ -344,7 +346,7 @@ async function handleFile(f) {
       startFailure.value = { id: res.task_id, message: error.message }
     }
     if (router.currentRoute.value === uploadRoute) {
-      await router.replace({ name: 'task', params: { id: res.task_id } })
+      await router.push({ name: 'task', params: { id: res.task_id } })
     }
   } catch (e) {
     err.value = e.message
@@ -464,10 +466,7 @@ function clearResults() {
 }
 
 function reset() {
-  clearResults()
-  store.setCurrent(null)
-  // 若停留在 /tasks/:id，回到工作台首页，避免 URL 与页面状态不一致
-  if (router.currentRoute.value.name === 'task') router.replace('/')
+  if (router.currentRoute.value.name === 'task') router.push('/')
 }
 
 // 分析步骤（与后端 stage 百分比对齐）
@@ -486,7 +485,7 @@ const ANALYSIS_STEPS = [
 const summary = computed(() => overview.value?.summary || {})
 const diagTotal = computed(() => {
   const d = summary.value.diagnostics || {}
-  return (d.critical || 0) + (d.warning || 0) + (d.info || 0)
+  return (d.critical || 0) + (d.warning || 0) + (d.info || 0) + (d.unknown || 0)
 })
 // 异常的严重度决定颜色：只有警告时不该显示成故障红
 const diagTone = computed(() => {
@@ -585,12 +584,12 @@ const priorityFindings = computed(() => diagnostics.value
 const flowStages = computed(() => {
   const s = summary.value
   const d = s.diagnostics || {}
-  const alerts = (d.critical || 0) + (d.warning || 0)
+  const linked = streams.value.filter(stream => stream.session_id != null).length
   return [
-    { key: 'signal', label: '信令会话', value: s.session_count != null ? `${s.session_count} 个会话` : '暂无数据', detail: 'SIP / SDP', available: hasSignal.value },
-    { key: 'media', label: '媒体传输', value: `${streams.value.length} 条流`, detail: 'RTP / TCP', available: hasMedia.value },
-    { key: 'codec', label: '视频重建', value: `${playableStreams.value.length} 条可预览`, detail: '仅代表本机重建结果', available: hasCodec.value },
-    { key: 'diag', label: '诊断事件', value: `${alerts} 条严重或警告`, detail: '查看规则与证据', available: hasDiag.value, tone: d.critical ? 'critical' : d.warning ? 'warning' : '' }
+    { key: 'signal', icon: 'signal', label: '信令会话', value: s.session_count != null ? `${s.session_count} 个会话` : '暂无数据', detail: 'SIP / SDP', available: hasSignal.value },
+    { key: 'media', icon: 'wave', label: '媒体传输', value: `${streams.value.length} 条流`, detail: `已关联 ${linked} · 未关联 ${streams.value.length - linked}`, available: hasMedia.value },
+    { key: 'video', icon: 'monitor', label: '视频重建', value: `${playableStreams.value.length} 条可预览`, detail: '本机生成的 MP4', available: hasMedia.value },
+    { key: 'diag', icon: 'file', label: '诊断事件', value: `${diagTotal.value} 条事件`, detail: `${d.critical ?? 0} 严重 · ${d.warning ?? 0} 警告 · ${d.info ?? 0} 提示`, available: hasDiag.value, tone: d.critical ? 'critical' : d.warning ? 'warning' : '' }
   ]
 })
 
@@ -624,11 +623,16 @@ function setupScrollSpy() {
   })
 }
 
-function scrollTo(sec) {
+async function scrollTo(sec) {
+  const section = sec === 'video' ? 'media' : sec
+  if (section in openSections.value && !openSections.value[section]) {
+    openSections.value[section] = true
+    await nextTick()
+  }
   const el = document.getElementById('sec-' + sec)
   const motion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
   if (el) {
-    activeSection.value = sec
+    activeSection.value = section
     el.scrollIntoView({ behavior: motion ? 'auto' : 'smooth', block: 'start' })
   }
 }
@@ -652,8 +656,9 @@ onUnmounted(() => {
   scrollObs?.disconnect()
   window.removeEventListener('alma-theme-changed', onThemeChange)
 })
-watch(() => store.currentTaskId, async (tid) => {
+watch(() => route.name === 'task' ? Number(route.params.id) : null, async (tid) => {
   clearResults()
+  if (!tid) return
   await loadAll()
   if (tid === store.currentTaskId &&
       (task.value?.status === 'analyzing' || task.value?.stage === '排队中')) startPoll()
@@ -664,7 +669,15 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
 
 <template>
   <div class="page">
+    <nav v-if="route.name === 'task'" class="task-breadcrumb" aria-label="任务导航">
+      <BackButton fallback="/tasks" /><router-link to="/">工作台</router-link><span>/</span>
+      <router-link to="/tasks">历史任务</router-link><span>/</span><strong>任务 #{{ route.params.id }}</strong>
+    </nav>
     <div v-if="!task && loadingResults" class="fail-wrap" role="status">正在读取任务…</div>
+    <div v-else-if="!task && route.name === 'task'" class="fail-wrap">
+      <p class="err-box" role="alert">{{ err || '无法读取任务' }}</p>
+      <button class="btn" @click="loadAll">重试</button>
+    </div>
     <CaptureIntake v-else-if="!task" :busy="uploading || loadingSample" :progress="uploadPct" :error="err"
                    @recorded="id => router.push({name: 'task', params:{id}})" @file="handleFile" @sample="loadSample" />
 
@@ -745,7 +758,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
     <!-- ==================== 结果瀑布 ==================== -->
     <template v-else-if="task.status === 'completed'">
       <!-- 进度导航 -->
-      <nav class="spy">
+      <nav class="spy glass-panel">
         <div class="spy-in">
           <button v-for="s in spyList" :key="s.k" class="spy-btn"
             :class="{ on: activeSection === s.k }"
@@ -770,13 +783,14 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
         </div>
       </nav>
 
+      <CaptureFlow v-if="overview && !loadingResults" :stages="flowStages" :filename="task.file?.filename || task.name"
+                   :has-sessions="sessions.length > 0" @navigate="scrollTo" />
       <CaptureEvidence v-if="overview && !loadingResults" :key="task.id" :task-id="task.id" :streams="streams" />
-      <CaptureFlow v-if="overview && !loadingResults" :stages="flowStages" @navigate="scrollTo" />
       <section v-if="priorityFindings.length" class="sec mb-20 findings" aria-labelledby="findings-title">
         <div class="sec-head">
           <h2 id="findings-title" class="sec-title">优先排查</h2>
           <span class="spacer"></span>
-          <router-link to="/diagnostics" class="btn-mini">全部诊断 →</router-link>
+          <router-link to="/diagnostics" class="btn-mini">全部诊断 <AppIcon name="forward" /></router-link>
         </div>
         <ul>
           <li v-for="d in priorityFindings" :key="d.id">
@@ -788,9 +802,9 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
             <span class="badge" :class="EV_CLS[d.evidence_level]">{{ EV[d.evidence_level] }}</span>
             <div v-if="d.related_packet_ids?.length" class="evidence-links">
               <router-link v-for="packet in d.related_packet_ids.slice(0, 2)" :key="packet"
-                           :to="{ name: 'packets', query: { number: packet } }">报文 #{{ packet }} →</router-link>
+                           :to="{ name: 'packets', query: { number: packet } }">报文 #{{ packet }} <AppIcon name="forward" /></router-link>
             </div>
-            <router-link v-else-if="d.session_id" :to="`/sessions/${d.session_id}`">查看会话 →</router-link>
+            <router-link v-else-if="d.session_id" :to="`/sessions/${d.session_id}`">查看会话 <AppIcon name="forward" /></router-link>
           </li>
         </ul>
       </section>
@@ -798,7 +812,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
         <div class="sec-head">
           <h2 id="findings-empty-title" class="sec-title">优先排查</h2>
           <span class="spacer"></span>
-          <router-link to="/diagnostics" class="btn-mini">全部诊断 →</router-link>
+          <router-link to="/diagnostics" class="btn-mini">全部诊断 <AppIcon name="forward" /></router-link>
         </div>
         <p class="findings-empty">当前规则未发现严重或警告事件。结论仅覆盖已实现的规则和本次抓包范围，不能据此确认端到端正常。</p>
       </section>
@@ -978,10 +992,10 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
         <div class="sec-head clickable" @click="toggle('signal')">
           <span class="sec-num">{{ secNums.signal }}</span>
           <span class="sec-title">SIP 信令分析</span>
-          <span class="sec-sub">{{ sessions.length }} 个会话</span>
+          <span class="sec-sub">{{ summary.session_count ?? sessions.length }} 个会话</span>
           <span class="spacer"></span>
-          <router-link to="/sip" class="btn-mini" @click.stop>信令时序图 →</router-link>
-          <span class="chev" :class="{ open: openSections.signal }">›</span>
+          <router-link to="/sip" class="btn-mini" @click.stop>信令时序图 <AppIcon name="forward" /></router-link>
+          <span class="chev" :class="{ open: openSections.signal }"><AppIcon name="next" /></span>
         </div>
         <div v-show="openSections.signal" class="sec-body flush">
           <table class="tbl clickable" v-if="sessions.length">
@@ -1037,8 +1051,8 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
           <span class="sec-sub">{{ streams.length }} 条流</span>
           <span class="spacer"></span>
           <span v-if="!streams.length" class="badge critical">未捕获媒体</span>
-          <router-link to="/media" class="btn-mini" @click.stop>详细分析 →</router-link>
-          <span class="chev" :class="{ open: openSections.media }">›</span>
+          <router-link to="/media" class="btn-mini" @click.stop>详细分析 <AppIcon name="forward" /></router-link>
+          <span class="chev" :class="{ open: openSections.media }"><AppIcon name="next" /></span>
         </div>
         <div v-show="openSections.media" class="sec-body">
           <template v-if="streams.length">
@@ -1058,12 +1072,11 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
             </div>
 
             <!-- 重建视频 -->
-            <div v-if="playableStreams.length" class="video-sec">
+            <div v-if="playableStreams.length" id="sec-video" class="video-sec">
               <div class="vs-head">
                 <span class="vs-title">视频画面还原</span>
                 <span class="vs-sub">
-                  {{ playableStreams.length }} 条流成功解码
-                  · RTP → PS → ES → H.264
+                  {{ playableStreams.length }} 条流已生成预览
                   <template v-if="!hasSignal"> · 无信令，按 SSRC 编号</template>
                 </span>
               </div>
@@ -1081,12 +1094,9 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
               </div>
             </div>
 
-            <div v-else class="video-none">
+            <div v-else id="sec-video" class="video-none">
               <div class="vn-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-                  <rect x="2" y="4" width="20" height="14" rx="2"/>
-                  <line x1="2" y1="20" x2="22" y2="20"/>
-                </svg>
+                <AppIcon name="monitor" />
               </div>
               <div>
                 <div class="vn-t">未能还原出视频画面</div>
@@ -1149,7 +1159,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
           </span>
           <span class="spacer"></span>
           <span v-if="!codecList.length" class="text-na">无数据</span>
-          <span class="chev" :class="{ open: openSections.codec }">›</span>
+          <span class="chev" :class="{ open: openSections.codec }"><AppIcon name="next" /></span>
         </div>
         <div v-show="openSections.codec" class="sec-body">
           <template v-if="codecList.length">
@@ -1236,8 +1246,8 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
           <span v-if="summary.diagnostics?.critical" class="badge critical">
             {{ summary.diagnostics.critical }} 严重
           </span>
-          <router-link to="/diagnostics" class="btn-mini" @click.stop>全部 →</router-link>
-          <span class="chev" :class="{ open: openSections.diag }">›</span>
+          <router-link to="/diagnostics" class="btn-mini" @click.stop>全部 <AppIcon name="forward" /></router-link>
+          <span class="chev" :class="{ open: openSections.diag }"><AppIcon name="next" /></span>
         </div>
         <div v-show="openSections.diag" class="sec-body">
           <div v-if="diagnostics.length" class="diag-list">
@@ -1276,8 +1286,8 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
           <span class="sec-title">原始报文</span>
           <span class="sec-sub">{{ packetTotal.toLocaleString() }} 条</span>
           <span class="spacer"></span>
-          <router-link to="/packets" class="btn-mini" @click.stop>查看全部 →</router-link>
-          <span class="chev" :class="{ open: openSections.packet }">›</span>
+          <router-link to="/packets" class="btn-mini" @click.stop>查看全部 <AppIcon name="forward" /></router-link>
+          <span class="chev" :class="{ open: openSections.packet }"><AppIcon name="next" /></span>
         </div>
         <div v-show="openSections.packet" class="sec-body flush">
           <table class="tbl clickable">
@@ -1318,6 +1328,10 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
 </template>
 
 <style scoped>
+#sec-video { scroll-margin-top:calc(var(--app-header-height) + 58px); }
+.task-breadcrumb { display:flex; align-items:center; gap:10px; color:var(--text-3); font-size:12px; margin-bottom:32px; }
+.task-breadcrumb strong { color:var(--text-2); }
+
 /* ============ 分析中 ============ */
 .analyzing-wrap {
   min-height: calc(100vh - var(--app-header-height));
