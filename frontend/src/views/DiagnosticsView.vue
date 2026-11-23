@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api/client'
 import PageNav from '../components/PageNav.vue'
@@ -15,22 +15,46 @@ const ruleFilter = ref('')
 const err = ref('')
 const expanded = ref({})
 
-async function load() {
-  if (!store.currentTaskId) return
+const total = ref(0)
+const page = ref(0)
+const loading = ref(false)
+let request = 0
+
+async function load(append = false) {
+  const id = ++request
+  const task = store.currentTaskId
+  const next = append ? page.value + 1 : 1
+  err.value = ''
+  if (!append) {
+    items.value = []
+    expanded.value = {}
+    total.value = 0
+    page.value = 0
+    ruleStats.value = null
+  }
+  loading.value = Boolean(task)
+  if (!task) return
   try {
     const [d, rs, rl] = await Promise.all([
-      api.diagnostics(store.currentTaskId, {
-        page_size: 200,
+      api.diagnostics(task, {
+        page: next, page_size: 200,
         severity: sevFilter.value || undefined,
         rule_id: ruleFilter.value || undefined
       }),
-      api.ruleStats(store.currentTaskId),
-      api.rules()
+      append ? ruleStats.value : api.ruleStats(task),
+      rules.value.length ? { rules: rules.value } : api.rules()
     ])
-    items.value = d.items
+    if (id !== request) return
+    items.value = append ? items.value.concat(d.items) : d.items
+    total.value = d.total
+    page.value = next
     ruleStats.value = rs
     rules.value = rl.rules || []
-  } catch (e) { err.value = e.message }
+  } catch (e) {
+    if (id === request) err.value = e.message
+  } finally {
+    if (id === request) loading.value = false
+  }
 }
 
 const ruleName = computed(() => {
@@ -45,6 +69,15 @@ const sorted = computed(() =>
   [...items.value].sort((a, b) =>
     (sevOrder[a.severity] ?? 9) - (sevOrder[b.severity] ?? 9)))
 
+const groups = computed(() => {
+  const result = new Map()
+  for (const item of sorted.value) {
+    if (!result.has(item.rule_id)) result.set(item.rule_id, [])
+    result.get(item.rule_id).push(item)
+  }
+  return result
+})
+
 const EV_LABEL = { confirmed: '已确认', suspected: '疑似', insufficient: '证据不足' }
 const EV_CLS = { confirmed: 'ok', suspected: 'warning', insufficient: 'unknown' }
 
@@ -54,31 +87,31 @@ function goPacket(taskId, num) {
   router.push({ name: 'packets', query: { task: taskId, number: num } })
 }
 
-onMounted(load)
+watch([() => store.currentTaskId, sevFilter, ruleFilter], () => load(), { immediate: true })
 </script>
 
 <template>
   <div class="page">
     <PageNav
       title="智能故障诊断"
-      :sub="`任务 #${store.currentTaskId || '未选择'} · 共 ${items.length} 条诊断`"
+      :sub="`任务 #${store.currentTaskId || '未选择'} · ${loading && !page ? '正在读取诊断' : err && !page ? '诊断读取失败' : `共 ${total} 条诊断`}`"
       :crumbs="[{label:'工作台', to:'/'}, {label:'智能故障诊断'}]">
       <template #actions>
-        <select v-model="sevFilter" class="inp sm" @change="load()">
+        <select aria-label="诊断等级" v-model="sevFilter" class="inp sm">
           <option value="">全部等级</option>
-          <option value="critical">Critical</option>
-          <option value="warning">Warning</option>
-          <option value="info">Info</option>
-          <option value="unknown">Unknown</option>
+          <option value="critical">严重</option>
+          <option value="warning">警告</option>
+          <option value="info">提示</option>
+          <option value="unknown">未知</option>
         </select>
-        <select v-model="ruleFilter" class="inp sm" @change="load()">
+        <select aria-label="诊断规则" v-model="ruleFilter" class="inp sm">
           <option value="">全部规则</option>
           <option v-for="r in rules" :key="r.id" :value="r.id">{{ r.id }} · {{ r.name }}</option>
         </select>
       </template>
     </PageNav>
 
-    <div v-if="err" class="err-box">{{ err }}</div>
+    <div v-if="err" class="err-box" role="alert">{{ err }} <button class="btn" @click="load(page > 0)">重试</button></div>
 
     <div v-if="!store.currentTaskId" class="card">
       <div class="empty">
@@ -111,62 +144,68 @@ onMounted(load)
 
       <!-- 诊断列表 -->
       <div class="diag-list">
-        <div v-for="d in sorted" :key="d.id" class="diag-card" :class="d.severity">
-          <button class="diag-head" type="button" :aria-expanded="!!expanded[d.id]" @click="toggle(d.id)">
-            <span class="badge" :class="d.severity">{{ severityLabel[d.severity] || d.severity }}</span>
-            <span class="rule-id mono">{{ d.rule_id }}</span>
-            <span class="diag-title">{{ d.title }}</span>
-            <span class="spacer"></span>
-            <span class="badge" :class="EV_CLS[d.evidence_level] || 'unknown'">
-              {{ EV_LABEL[d.evidence_level] || d.evidence_level }}
-            </span>
-            <span class="toggle"><AppIcon :name="expanded[d.id] ? 'down' : 'next'" /></span>
-          </button>
-
-          <div class="diag-body">
-            <div class="diag-desc">{{ d.description }}</div>
-
-            <div class="meta-row">
-              <span v-if="d.device_id" class="meta-item">
-                设备 <b class="mono">{{ d.device_id }}</b>
+        <details class="rule-group" v-for="[rule, events] in groups" :key="rule">
+          <summary><b class="mono">{{ rule }}</b> {{ ruleName[rule] }} · 已载入 {{ events.length }} 条</summary>
+          <div v-for="d in events" :key="d.id" class="diag-card" :class="d.severity">
+            <button class="diag-head" type="button" :aria-expanded="!!expanded[d.id]" @click="toggle(d.id)">
+              <span class="badge" :class="d.severity">{{ severityLabel[d.severity] || d.severity }}</span>
+              <span class="rule-id mono">{{ d.rule_id }}</span>
+              <span class="diag-title">{{ d.title }}</span>
+              <span class="spacer"></span>
+              <span class="badge" :class="EV_CLS[d.evidence_level] || 'unknown'">
+                {{ EV_LABEL[d.evidence_level] || d.evidence_level }}
               </span>
-              <span v-if="d.timestamp != null" class="meta-item">
-                时间 <b class="mono">{{ d.timestamp.toFixed(3) }}s</b>
-              </span>
-              <button v-if="d.session_id" class="meta-item link" type="button" @click="goSession(d.session_id)">
-                会话 #{{ d.session_id }} <AppIcon name="forward" />
-              </button>
-            </div>
+              <span class="toggle"><AppIcon :name="expanded[d.id] ? 'down' : 'next'" /></span>
+            </button>
 
-            <div v-if="expanded[d.id]">
-              <div v-if="Object.keys(d.evidence || {}).length" class="block">
-                <div class="block-label">观测证据</div>
-                <pre class="ev-pre">{{ JSON.stringify(d.evidence, null, 2) }}</pre>
+            <div class="diag-body">
+              <div class="diag-desc">{{ d.description }}</div>
+
+              <div class="meta-row">
+                <span v-if="d.device_id" class="meta-item">
+                  设备 <b class="mono">{{ d.device_id }}</b>
+                </span>
+                <span v-if="d.timestamp != null" class="meta-item">
+                  时间 <b class="mono">{{ d.timestamp.toFixed(3) }}s</b>
+                </span>
+                <button v-if="d.session_id" class="meta-item link" type="button" @click="goSession(d.session_id)">
+                  会话 #{{ d.session_id }} <AppIcon name="forward" />
+                </button>
               </div>
-              <div v-if="d.possible_causes?.length" class="block">
-                <div class="block-label">可能原因</div>
-                <ul><li v-for="(c, i) in d.possible_causes" :key="i">{{ c }}</li></ul>
-              </div>
-              <div v-if="d.recommendations?.length" class="block">
-                <div class="block-label">建议排查</div>
-                <ul><li v-for="(c, i) in d.recommendations" :key="i">{{ c }}</li></ul>
-              </div>
-              <div v-if="d.related_packet_ids?.length" class="block">
-                <div class="block-label">关联报文</div>
-                <div class="row" style="gap:6px;flex-wrap:wrap">
-                  <button v-for="p in d.related_packet_ids.slice(0, 20)" :key="p"
-                     type="button" class="pkt-link mono" @click="goPacket(store.currentTaskId, p)">#{{ p }}</button>
+
+              <div v-if="expanded[d.id]">
+                <div v-if="Object.keys(d.evidence || {}).length" class="block">
+                  <div class="block-label">观测证据</div>
+                  <pre class="ev-pre">{{ JSON.stringify(d.evidence, null, 2) }}</pre>
+                </div>
+                <div v-if="d.possible_causes?.length" class="block">
+                  <div class="block-label">可能原因</div>
+                  <ul><li v-for="(c, i) in d.possible_causes" :key="i">{{ c }}</li></ul>
+                </div>
+                <div v-if="d.recommendations?.length" class="block">
+                  <div class="block-label">建议排查</div>
+                  <ul><li v-for="(c, i) in d.recommendations" :key="i">{{ c }}</li></ul>
+                </div>
+                <div v-if="d.related_packet_ids?.length" class="block">
+                  <div class="block-label">关联报文</div>
+                  <div class="row" style="gap:6px;flex-wrap:wrap">
+                    <button v-for="p in d.related_packet_ids.slice(0, 20)" :key="p"
+                       type="button" class="pkt-link mono" @click="goPacket(store.currentTaskId, p)">#{{ p }}</button>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
+        </details>
       </div>
-
-      <div v-if="!sorted.length" class="card">
+      <div v-if="loading" class="empty" role="status">正在读取诊断…</div>
+      <button v-else-if="!err && items.length < total" type="button" class="btn" @click="load(true)">
+        加载更多（{{ items.length }} / {{ total }}）
+      </button>
+      <div v-if="!loading && !err && !sorted.length" class="card">
         <div class="empty">
-          未发现异常
-          <div class="hint">规则引擎未在该任务中检测到问题</div>
+          暂无匹配的诊断
+          <div class="hint">当前任务及筛选条件下没有诊断记录</div>
         </div>
       </div>
     </template>
@@ -191,6 +230,8 @@ onMounted(load)
 .ev-label { font-size: 11.5px; color: var(--text-4); }
 
 .diag-list { display: flex; flex-direction: column; gap: 10px; }
+.rule-group > summary { cursor: pointer; padding: 12px 8px; color: var(--text); border-bottom: 1px solid var(--line); }
+.rule-group[open] .diag-card { margin-top: 8px; }
 .diag-card {
   background: var(--surface); border: 1px solid var(--line-2);
   border-left: 3px solid var(--line-strong);
