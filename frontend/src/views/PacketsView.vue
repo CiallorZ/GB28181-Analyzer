@@ -20,6 +20,7 @@ const protoFilter = ref('')
 const callIdFilter = ref('')
 const err = ref('')
 
+const selectedId = ref(null)
 const detail = ref(null)
 const detailLoading = ref(false)
 
@@ -32,6 +33,8 @@ async function load() {
   listLoading.value = true
   err.value = ''
   detailSeq++
+  packetLookup++
+  selectedId.value = null
   detail.value = null
   detailLoading.value = false
   try {
@@ -62,7 +65,10 @@ let detailSeq = 0
 async function openPacket(p) {
   const seq = ++detailSeq
   const taskId = store.currentTaskId
+  packetLookup++
+  selectedId.value = p.id
   detail.value = null
+  err.value = ''
   detailLoading.value = true
   try {
     const result = await api.packet(p.id)
@@ -92,7 +98,6 @@ const hexRows = computed(() => {
   return rows
 })
 
-const selectedId = computed(() => detail.value?.id)
 
 function fmtTime(t) { return t != null ? t.toFixed(3) : '—' }
 
@@ -105,6 +110,8 @@ async function locatePacket(value) {
   detailLoading.value = false
   if (!Number.isInteger(num) || num < 1 || !taskId) return
   err.value = ''
+  detail.value = null
+  selectedId.value = null
   try {
     const hit = items.value.find(p => p.packet_number === num)
     const result = hit ? null : await api.packets(taskId, {
@@ -155,7 +162,7 @@ if(props.embedded && items.value[0])openPacket(items.value[0])
     </PageNav>
 
     <form v-if="embedded" class="packet-filters" @submit.prevent="page=1;load()"><input class="inp sm" v-model="ipFilter" placeholder="源或目的 IP" aria-label="IP 过滤"><input class="inp sm" v-model="protoFilter" placeholder="协议" aria-label="协议过滤"><button>查询</button><small v-if="range">捕获时间选区已应用</small></form>
-    <div v-if="err" class="err-box">{{ err }}</div>
+    <div v-if="err" role="alert" class="err-box">{{ err }}</div>
 
     <div v-if="!store.currentTaskId" class="card">
       <div class="empty">尚未选择分析任务</div>
@@ -174,9 +181,9 @@ if(props.embedded && items.value[0])openPacket(items.value[0])
         <div class="pane-body">
           <table class="pkt-tbl">
             <thead>
-              <tr><th><button aria-label="切换报文号排序" @click="descending=!descending;page=1;load()">No. {{descending?'↓':'↑'}}</button></th><th>时间</th><th>源</th><th>目的</th><th>协议</th><th>长度</th><th>信息</th></tr>
+              <tr><th :aria-sort="descending ? 'descending' : 'ascending'"><button aria-label="切换报文号排序" @click="descending=!descending;page=1;load()">No. {{descending?'↓':'↑'}}</button></th><th>时间</th><th>源</th><th>目的</th><th>协议</th><th>长度</th><th>信息</th></tr>
             </thead>
-            <tbody>
+            <tbody v-if="!listLoading">
               <tr v-for="p in items" :key="p.id"
                   :class="{ active: selectedId === p.id }"
                   tabindex="0" :aria-selected="selectedId === p.id"

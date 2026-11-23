@@ -381,3 +381,36 @@ def test_packet_range_sort_and_pagination(client, db, make_task):
         assert result['total'] == 2
         assert [row['packet_number'] for row in result['items']] == [expected]
     assert client.get(url).json()['items'][0]['packet_number'] == 1
+
+
+@pytest.mark.parametrize('query', [
+    {'time_from': 'NaN'}, {'time_to': 'inf'}, {'time_from': '-inf'}, {'time_from': 1, 'time_to': 0},
+])
+def test_invalid_packet_interval_returns_validation_error(client, make_task, query):
+    task = make_task()
+    assert client.get(f'/api/v1/tasks/{task.id}/packets', params=query).status_code == 422
+
+
+def test_zero_and_unknown_ssrc_are_distinct_and_metrics_scoped(client, db, make_task):
+    from app.models.entities import BusinessSession, MediaStream
+
+    task, other = make_task(), make_task(name='其他任务')
+    session = BusinessSession(task_id=task.id)
+    db.add(session)
+    db.flush()
+    zero, unknown = [MediaStream(task_id=task.id, session_id=session.id, ssrc=value,
+                                 start_time=0.0, end_time=1.0) for value in (0, None)]
+    outside = MediaStream(task_id=other.id, ssrc=0, start_time=0.0, end_time=1.0)
+    db.add_all([zero, unknown, outside])
+    db.commit()
+    report = client.get(f'/api/v1/tasks/{task.id}/media-metrics',
+                        params={'stream_id': [zero.id, unknown.id, outside.id]})
+    assert report.status_code == 200
+    assert {v['stream_id']: v['ssrc'] for v in report.json()['items']} == {
+        zero.id: '00000000', unknown.id: None,
+    }
+    events = client.get(f'/api/v1/sessions/{session.id}/timeline').json()['items']
+    for stream, expected in [(zero, '00000000'), (unknown, '未知')]:
+        assert [e['detail'] for e in events if e['stream_id'] == stream.id] == [
+            f'SSRC={expected} UDP', f'SSRC={expected}',
+        ]

@@ -140,11 +140,12 @@ def session_timeline(session_id: int, db: Session = Depends(get_db)):
     streams = db.scalars(
         select(MediaStream).where(MediaStream.session_id == session_id)).all()
     for st in streams:
+        ssrc = f'{st.ssrc:08x}' if st.ssrc is not None else '未知'
         events.append({
             'type': 'media',
             'timestamp': st.start_time,
             'label': 'RTP 首包',
-            'detail': 'SSRC=%08x %s' % (st.ssrc or 0, st.transport),
+            'detail': f'SSRC={ssrc} {st.transport}',
             'stream_id': st.id,
             'severity': 'normal',
         })
@@ -152,7 +153,7 @@ def session_timeline(session_id: int, db: Session = Depends(get_db)):
             'type': 'media',
             'timestamp': st.end_time,
             'label': 'RTP 末包',
-            'detail': 'SSRC=%08x' % (st.ssrc or 0),
+            'detail': f'SSRC={ssrc}',
             'stream_id': st.id,
             'severity': 'normal',
         })
@@ -221,7 +222,7 @@ def _metric_series(db: Session, streams):
         metrics = metrics_by_stream[st.id]
         out.append({
             'stream_id': st.id,
-            'ssrc': '%08x' % (st.ssrc or 0) if st.ssrc else None,
+            'ssrc': f'{st.ssrc:08x}' if st.ssrc is not None else None,
             'transport': st.transport,
             'clock_rate': st.clock_rate,
             'bitrate_series': [

@@ -189,8 +189,13 @@
   border-color: var(--critical);
   background: var(--critical-soft);
 }
-.finding > svg {
-  color: var(--warning);
+.finding > svg { color: var(--info); }
+.finding.unknown > svg { color: var(--text-3); }
+.finding.warning > svg { color: var(--warning); }
+.finding.critical > svg { color: var(--critical); }
+#station-events .inspect:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: -2px;
 }
 .finding > b {
   white-space: nowrap;

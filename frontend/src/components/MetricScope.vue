@@ -43,12 +43,12 @@ function resetRange() {
   end.value = null
   windowRange.value = null
   emit('range', null)
-  instance?.dispatchAction({ type: 'dataZoom', start: 0, end: 100 })
+  draw()
 }
 function applyRange() {
-  if (!Number.isFinite(start.value) || !Number.isFinite(end.value) || start.value > end.value) return
-  instance?.dispatchAction({ type: 'dataZoom', startValue: start.value, endValue: end.value })
+  if (!Number.isFinite(start.value) || !Number.isFinite(end.value) || start.value >= end.value) return
   range(start.value, end.value)
+  draw()
 }
 async function draw() {
   const seq = ++generation
@@ -74,6 +74,7 @@ async function draw() {
       if (grid == null) return
       const [t] = instance.convertFromPixel({ gridIndex: grid }, pixel)
       range(Math.max(0, t - 0.5), t + 0.5)
+      draw()
     })
     instance.on('updateAxisPointer', (ev) => {
       if (ev.axesInfo?.length) cursor.value = ev.axesInfo[0].value
@@ -94,8 +95,9 @@ async function draw() {
   const c = chartPalette(),
     colors = [c.info, '#b993ff', c.ok, c.warn, c.crit]
   const xs = lines.value.flatMap((l) => l.data.map((pt) => pt[0]))
-  const min = xs.reduce((a, b) => Math.min(a, b), Infinity),
-    max = xs.reduce((a, b) => Math.max(a, b), -Infinity)
+  const selection = windowRange.value
+  const min = xs.reduce((a, b) => Math.min(a, b), selection?.[0] ?? Infinity),
+    max = xs.reduce((a, b) => Math.max(a, b), selection?.[1] ?? -Infinity)
   instance.setOption(
     {
       ...chartBase(),
@@ -137,6 +139,7 @@ async function draw() {
       dataZoom: [
         {
           type: 'slider',
+          ...(selection && { startValue: selection[0], endValue: selection[1] }),
           xAxisIndex: [0, 1],
           bottom: 1,
           height: 14,
@@ -203,8 +206,9 @@ onUnmounted(() => {
           required
           v-model.number="end"
           aria-label="终点秒"
-        /><button>应用</button><button type="button" @click="resetRange">清除</button>
+        /><button :disabled="!Number.isFinite(start) || !Number.isFinite(end) || start >= end">应用</button><button type="button" @click="resetRange">清除</button>
       </form>
+      <small role="status" v-if="Number.isFinite(start) && Number.isFinite(end) && start >= end">终点须晚于起点</small>
     </details>
     <div class="scope-caption">
       <span v-if="cursor != null">游标 {{ Number(cursor).toFixed(3) }} s</span

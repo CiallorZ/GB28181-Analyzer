@@ -4,17 +4,19 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { usePacketReplay } from '../utils/usePacketReplay'
 
 const props = defineProps({
-  messages: { type: Array, default: () => [] }
+  messages: { type: Array, default: () => [] },
+  contextMessages: Array
 })
 const emit = defineEmits(['select'])
 
 const svgContainer = ref(null)
 const viewport = ref(null)
-const laneWidth = ref(700)
+const viewportWidth = ref(700)
+const laneWidth = computed(() => Math.max(viewportWidth.value, 220 + (parties.value.length - 1) * 162))
 let resize
 onMounted(() => {
   resize = new ResizeObserver(([entry]) => {
-    laneWidth.value = Math.max(460, Math.floor(entry.contentRect.width))
+    viewportWidth.value = Math.max(460, Math.floor(entry.contentRect.width))
   })
   resize.observe(viewport.value)
 })
@@ -66,10 +68,11 @@ const parties = computed(() => {
     if (m.destination_ip && !seen.includes(m.destination_ip)) seen.push(m.destination_ip)
   })
   if (list.some(m => !m.source_ip || !m.destination_ip)) seen.push('')
+  const context = props.contextMessages ?? list
   return seen.map((ip) => {
-    const sentInvite = list.some(m =>
+    const sentInvite = context.some(m =>
       m.method === 'INVITE' && m.is_request && m.source_ip === ip)
-    const recvInvite = list.some(m =>
+    const recvInvite = context.some(m =>
       m.method === 'INVITE' && m.is_request && m.destination_ip === ip)
     let label = '端点', color = 'var(--text-4)'
     if (sentInvite) { label = '点播方'; color = 'var(--info)' }
@@ -103,7 +106,7 @@ function styleOf(m) {
   }
   const code = String(m.status_code || '')
   if (code.startsWith('2')) return { color: 'var(--ok)', label: code + (code === '200' ? ' OK' : ''), marker: 'arwOk' }
-  if (code.startsWith('1')) return { color: 'var(--text-4)', label: code, marker: 'arwProv' }
+  if (code.startsWith('1')) return { color: 'var(--text-4)', label: ({ 100: '100 Trying', 180: '180 Ringing' })[code] || code, marker: 'arwProv' }
   return { color: 'var(--critical)', label: code || 'ERR', marker: 'arwErr' }
 }
 
@@ -137,13 +140,13 @@ const svgHtml = computed(() => {
     const x = laneX(p.ip, list)
     out.push(`<line x1="${x}" y1="49" x2="${x}" y2="${H - 20}"
       stroke="var(--line-2)" stroke-width="1" stroke-dasharray="4 4" opacity=".9"/>`)
-    out.push(`<rect x="${x - 62}" y="8" width="124" height="38" rx="8"
+    out.push(`<rect x="${x - 76}" y="8" width="152" height="38" rx="8"
       fill="var(--surface-2)" stroke="var(--line-2)" stroke-width="1"/>`)
-    out.push(`<circle cx="${x - 46}" cy="27" r="4" fill="${p.color}"/>`)
+    out.push(`<circle cx="${x - 53}" cy="21" r="3" fill="${p.color}"/>`)
     out.push(`<text x="${x + 4}" y="24" text-anchor="middle"
       fill="var(--text)" font-size="13" font-weight="600">${esc(p.label)}</text>`)
-    out.push(`<text x="${x + 4}" y="37" text-anchor="middle"
-      fill="var(--text-3)" font-size="11.5" font-family="monospace">${esc(p.address || '地址缺失')}</text>`)
+    out.push(`<text x="${x}" y="38" text-anchor="middle"
+      fill="var(--text-3)" font-size="11.5" font-family="monospace"><title>${esc(p.address || '地址缺失')}</title>${esc(p.address.length > 20 ? p.address.slice(0, 9) + '…' + p.address.slice(-10) : p.address || '地址缺失')}</text>`)
   })
 
   // 消息行
@@ -170,9 +173,10 @@ const svgHtml = computed(() => {
 
     // 方法标签（贴源端）
     const leftSide = x1 <= x2
-    const lx = leftSide ? x1 + 7 : x1 - 67
-    const tx = leftSide ? x1 + 37 : x1 - 37
-    out.push(`<rect x="${lx}" y="${y - 22}" width="60" height="17" rx="4"
+    const labelWidth = Math.max(60, Math.min(132, st.label.length * 7.3 + 12))
+    const lx = leftSide ? x1 + 7 : x1 - labelWidth - 7
+    const tx = lx + labelWidth / 2
+    out.push(`<rect x="${lx}" y="${y - 22}" width="${labelWidth}" height="17" rx="4"
       fill="${st.color}" opacity="${key ? .16 : .09}"/>`)
     out.push(`<text x="${tx}" y="${y - 10}" text-anchor="middle"
       fill="${st.color}" font-size="12" font-family="monospace"

@@ -7,6 +7,7 @@ import binascii
 import os
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import FiniteFloat
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -74,7 +75,7 @@ def list_packets(task_id: int, page: int = 1, page_size: int = 100,
                  session_id: int | None = None,
                  number_from: int | None = None,
                  number_to: int | None = None,
-                 time_from: float | None = None, time_to: float | None = None,
+                 time_from: FiniteFloat | None = None, time_to: FiniteFloat | None = None,
                  descending: bool = False,
                  db: Session = Depends(get_db)):
     page = max(1, page)
@@ -98,6 +99,8 @@ def list_packets(task_id: int, page: int = 1, page_size: int = 100,
     if number_to is not None:
         stmt = stmt.where(PacketIndex.packet_number <= number_to)
 
+    if time_from is not None and time_to is not None and time_from > time_to:
+        raise HTTPException(422, '起始时间不能晚于结束时间')
     if time_from is not None:
         stmt = stmt.where(PacketIndex.timestamp >= time_from)
     if time_to is not None:

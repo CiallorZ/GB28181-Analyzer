@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '../api/client'
 import { useTaskStore } from '../stores/task'
 import SipLadder from './SipLadder.vue'
@@ -22,7 +22,19 @@ const p = defineProps({
 })
 defineEmits(['expand'])
 const store = useTaskStore()
-const rail = ref(window.innerWidth > 1400)
+const wideScreen = window.matchMedia('(min-width: 1401px)')
+const rail = ref(wideScreen.matches)
+const railToggle = ref(null)
+function fitSidebar(e) {
+  rail.value = e.matches
+}
+onMounted(() => wideScreen.addEventListener('change', fitSidebar))
+onUnmounted(() => wideScreen.removeEventListener('change', fitSidebar))
+async function collapseSidebar() {
+  rail.value = false
+  await nextTick()
+  railToggle.value?.focus()
+}
 const sessionId = ref(p.sessions[0]?.id),
   streamId = ref(p.streams.find((s) => s.rebuilt_path)?.id ?? p.streams[0]?.id)
 const mediaId = ref(''),
@@ -145,6 +157,9 @@ const mediaSelection = () => {
 }
 const kind = (m) => (m.is_request ? m.method : String(m.status_code))
 const messages = computed(() => sip.value.filter((m) => !method.value || kind(m) === method.value))
+watch(messages, (items) => {
+  if (selected.value && !items.some((m) => m.id === selected.value.id)) selected.value = null
+})
 const filtered = computed(() =>
   p.events.filter(
     (d) =>
@@ -155,10 +170,23 @@ const filtered = computed(() =>
   )
 )
 const pkt = (n) => ({ name: 'packets', query: { task: p.task.id, number: n } })
-const evidenceOf = (d) => {
+const evidencePanel = ref(null)
+let evidenceTrigger
+async function evidenceOf(d, trigger) {
+  evidenceTrigger = trigger
   event.value = d
-  document.getElementById('station-events')?.scrollIntoView({ block: 'nearest' })
+  await nextTick()
+  evidencePanel.value?.focus({ preventScroll: true })
+  evidencePanel.value?.scrollIntoView({ block: 'nearest' })
 }
+async function closeEvidence() {
+  event.value = null
+  await nextTick()
+  if (evidenceTrigger?.isConnected) evidenceTrigger.focus()
+}
+watch(filtered, (items) => {
+  if (event.value && !items.some((d) => d.id === event.value.id)) event.value = null
+})
 </script>
 <template>
   <div class="station">
@@ -171,7 +199,7 @@ const evidenceOf = (d) => {
       ><span>{{ fmt(task.file?.duration, 3) }} s</span><span>{{ proto }}</span>
       <router-link to="/tasks">任务 #{{ task.id }}</router-link
       ><span class="done">已完成 · {{ task.progress }}%</span>
-      <button @click="rail = !rail" :aria-expanded="rail">{{ rail ? '收起助手' : '展开助手' }}</button>
+      <button ref="railToggle" @click="rail = !rail" :aria-expanded="rail">{{ rail ? '收起助手' : '展开助手' }}</button>
     </header>
     <div class="station-layout" :class="{ withRail: rail }">
       <div class="instrument-grid">
@@ -192,14 +220,14 @@ const evidenceOf = (d) => {
             </article>
           </div>
           <div class="finding" :class="first?.severity">
-            <AppIcon :name="first ? 'warning' : 'check'" /><b>关键诊断</b>
+            <AppIcon :name="!first ? 'check' : ['critical', 'warning'].includes(first.severity) ? 'warning' : 'info'" /><b>关键诊断</b>
             <div>
               <strong>{{ first?.title || '未发现规则命中异常' }}</strong
               ><small v-if="first"
                 >{{ first.rule_id }} · {{ names[first.evidence_level] }} · {{ first.description }}</small
               >
             </div>
-            <button v-if="first" @click="evidenceOf(first)">查看证据 ›</button>
+            <button v-if="first" @click="evidenceOf(first, $event.currentTarget)">查看证据 ›</button>
           </div>
         </section>
         <section class="instrument">
@@ -213,16 +241,16 @@ const evidenceOf = (d) => {
             ><router-link :to="sessionId ? '/sessions/' + sessionId : '/sip'">详情 ↗</router-link>
           </header>
           <div v-if="busy || sipError" class="vacant">{{ sipError || '正在读取信令…' }}</div>
-          <SipLadder v-else-if="messages.length" :messages="messages" @select="selected = $event" />
+          <SipLadder v-else-if="messages.length" :messages="messages" :context-messages="sip" @select="selected = $event" />
           <div v-else class="vacant">当前会话范围内没有匹配的信令</div>
           <div v-if="selected" class="inspect">
             <b>{{ kind(selected) }} · CSeq {{ selected.cseq ?? '—' }}</b
             ><span class="mono">Call-ID {{ selected.call_id || '—' }}</span
-            ><span>From {{ selected.from_tag || '—' }} → To {{ selected.to_tag || '—' }}</span
+            ><span>From tag {{ selected.from_tag || '—' }} → To tag {{ selected.to_tag || '—' }}</span
             ><span v-if="selected.sdp"
               >SDP {{ selected.sdp.connection_address }}
               {{ selected.sdp.media?.map((m) => m.port + '/' + m.protocol).join(' · ') }} · SSRC
-              {{ selected.sdp.y_ssrc || '—' }}</span
+              {{ selected.sdp.y_ssrc ?? '—' }}</span
             >
             <details v-if="selected.headers">
               <summary>原始 SIP 头域</summary>
@@ -239,7 +267,7 @@ const evidenceOf = (d) => {
             <select v-model="mediaId" aria-label="趋势媒体流" @change="mediaSelection">
               <option value="">{{ streams.length > 12 ? '对比前 12 条流' : '全部趋势流' }}</option>
               <option v-for="s in streams" :value="s.id" :key="s.id">
-                #{{ s.id }} · {{ s.ssrc }}
+                #{{ s.id }} · {{ s.ssrc ?? '未知 SSRC' }}
               </option></select
             ><router-link to="/media">详情 ↗</router-link>
           </header>
@@ -309,8 +337,8 @@ const evidenceOf = (d) => {
               </option></select
             ><router-link to="/diagnostics">全部 ↗</router-link>
           </header>
-          <div v-if="event" class="inspect">
-            <button @click="event = null">关闭证据</button><b>{{ event.rule_id }} · {{ event.title }}</b
+          <div v-if="event" ref="evidencePanel" class="inspect" role="region" aria-label="诊断证据" tabindex="-1" @keydown.esc.stop="closeEvidence">
+            <button @click="closeEvidence">关闭证据</button><b>{{ event.rule_id }} · {{ event.title }}</b
             ><span>{{ event.description }}</span>
             <pre>{{ JSON.stringify(event.evidence, null, 2) }}</pre>
             <span v-for="c in event.possible_causes" :key="c">待验证 · {{ c }}</span
@@ -339,7 +367,7 @@ const evidenceOf = (d) => {
                     <span class="badge" :class="d.severity">{{ names[d.severity] }}</span>
                   </td>
                   <td>
-                    <button @click="evidenceOf(d)">
+                    <button @click="evidenceOf(d, $event.currentTarget)">
                       <small>{{ d.rule_id }}</small
                       >{{ d.title }}
                     </button>
@@ -364,7 +392,7 @@ const evidenceOf = (d) => {
         <header>
           <img src="/brand/deepseek.svg" alt="" />
           <h2>AI 智能分析</h2>
-          <button @click="rail = false" aria-label="折叠 AI 助手">收起</button>
+          <button @click="collapseSidebar" aria-label="折叠 AI 助手">收起</button>
         </header>
         <section>
           <h3>规则结论</h3>
@@ -386,7 +414,7 @@ const evidenceOf = (d) => {
             条关联会话
           </p>
           <p>重建 · {{ streams.filter((s) => s.rebuilt_path).length }} 份视频预览</p>
-          <button v-if="first" @click="evidenceOf(first)">查看规则依据 ↗</button>
+          <button v-if="first" @click="evidenceOf(first, $event.currentTarget)">查看规则依据 ↗</button>
         </section>
         <section>
           <h3>下一步建议</h3>
