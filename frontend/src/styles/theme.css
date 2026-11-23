@@ -779,3 +779,23 @@ select.inp { cursor: pointer; }
     scroll-behavior: auto !important;
   }
 }
+
+/* Translucent navigation and reading surfaces share the active system palette. */
+.app {
+  background: radial-gradient(ellipse at 6% 7%, color-mix(in srgb,var(--brand) 6%,transparent), transparent 38rem),
+              radial-gradient(ellipse at 97% 19%, color-mix(in srgb,var(--info) 7%,transparent), transparent 46rem),var(--bg);
+}
+.glass-panel.glass-panel {
+  background-color:var(--surface);
+  background-image:linear-gradient(125deg,color-mix(in srgb,var(--text) 3%,transparent),transparent 42%);
+  border-color:var(--line-2);
+}
+@supports (backdrop-filter:blur(1px)) {
+  .glass-panel.glass-panel {
+    background-color:color-mix(in srgb,var(--surface) 78%,transparent);
+    backdrop-filter:blur(18px) saturate(125%);
+  }
+}
+@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+  .glass-panel.glass-panel { background:var(--surface); backdrop-filter:none; }
+}

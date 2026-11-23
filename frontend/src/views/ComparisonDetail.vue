@@ -1,4 +1,5 @@
 <script setup>
+import PageNav from '../components/PageNav.vue'
 import { computed, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api/client'
@@ -67,14 +68,15 @@ function identifiers(values) {
 
 <template>
   <main class="page comparison">
-    <router-link to="/compare">‹ 返回双抓包对比</router-link>
-    <header class="row-between wrapx">
-      <h1>对比快照 #{{ route.params.id }}</h1>
+    <PageNav :title="'对比快照 #' + route.params.id" back-to="/compare"
+             :crumbs="[{ label:'工作台', to:'/' }, { label:'双抓包对比', to:'/compare' }, { label:'快照 #' + route.params.id }]">
+      <template #actions>
       <div v-if="data" class="row wrapx">
         <a v-for="fmt in ['md','json']" :key="fmt" class="btn" download
            :href="'/api/v1/comparisons/'+data.id+'/report?format='+fmt">导出 .{{ fmt }}</a>
       </div>
-    </header>
+      </template>
+    </PageNav>
     <p v-if="loading" role="status">正在读取快照…</p>
     <p v-if="error" class="err-box" role="alert">{{ error }}</p>
     <template v-if="data">

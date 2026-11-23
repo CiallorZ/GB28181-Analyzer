@@ -19,10 +19,10 @@ const {index, playing, play, pause, select} = usePacketReplay(() => phases.lengt
     <header><h2>点播交互示意</h2><button class="btn xs" @click="playing ? pause() : play()">{{playing?'暂停演示':'播放演示'}}</button></header>
     <svg viewBox="0 0 480 166" role="img" :aria-label="phases[index][0] + (index % 2 ? '，设备到平台' : '，平台到设备')">
       <g class="node" transform="translate(30 47)">
-        <rect width="68" height="60" rx="13"/><g class="icon"><path d="M15 15h38v12H15z M15 33h38v12H15z M20 21h3m-3 18h3m11-18h13m-13 18h13"/></g>
+        <rect width="68" height="60" rx="13"/><g class="icon"><path d="M16 14h36q2 0 2 2v9q0 2-2 2H16q-2 0-2-2v-9q0-2 2-2z M16 33h36q2 0 2 2v9q0 2-2 2H16q-2 0-2-2v-9q0-2 2-2z M20 20h3m3 0h2m10 0h10M20 39h3m3 0h2m10 0h10 M19 28v4m30-4v4"/></g>
       </g>
       <g class="node" transform="translate(382 47)">
-        <rect width="68" height="60" rx="13"/><g class="icon"><path d="m13 19 6-7 36 13-6 11-37-13z M22 28l-3 9 10 4 4-9m-4 9v6h16v-7"/></g>
+        <rect width="68" height="60" rx="13"/><g class="icon"><path d="m11 17 7-6 38 12-6 9-39-12z M17 23l-2 6 29 9 3-7 M48 32l3 1-2 6-4-1 M24 33l-3 9 12 4h10m0-6v12h5V40z"/></g>
       </g>
       <g v-for="(phase,i) in phases" :key="phase[0]" :class="['route',{active:i===index}]">
         <path :d="routePath(i)" pathLength="100"/>

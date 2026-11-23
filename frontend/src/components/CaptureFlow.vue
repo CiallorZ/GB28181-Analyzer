@@ -4,20 +4,20 @@ const emit = defineEmits(['navigate'])
 </script>
 
 <template>
-  <section class="flow-map" aria-labelledby="flow-title">
+  <section class="flow-map glass-panel" aria-labelledby="flow-title">
     <header class="flow-head">
       <div class="flow-identity">
         <span class="source"><img src="/brand/analyzer.svg" alt="" width="22" height="22">抓包证据链</span>
         <h2 id="flow-title">{{ filename }}</h2>
       </div>
-      <router-link v-if="hasSessions" class="signal-link" to="/sip">查看信令交互 <span aria-hidden="true">↗</span></router-link>
+      <router-link v-if="hasSessions" class="signal-link" to="/sip">查看信令交互 <span aria-hidden="true"><AppIcon name="open" /></span></router-link>
     </header>
     <ol class="flow-stages">
       <li v-for="(stage, index) in stages" :key="stage.key" :class="stage.tone">
         <button type="button" :disabled="!stage.available" @click="emit('navigate', stage.key)">
           <span class="stage-top"><span class="stage-index">{{ index + 1 }}</span><span class="rail" aria-hidden="true"></span></span>
           <span class="stage-label">{{ stage.label }}</span><strong>{{ stage.value }}</strong><span class="stage-detail">{{ stage.detail }}</span>
-          <span v-if="stage.available" class="stage-action">查看{{ stage.label }}详情 <span aria-hidden="true">↗</span></span>
+          <span v-if="stage.available" class="stage-action">查看{{ stage.label }}详情 <span aria-hidden="true"><AppIcon name="open" /></span></span>
         </button>
       </li>
     </ol>

@@ -247,9 +247,9 @@ function onWheel(e) {
       <button v-if="failures.length" class="btn xs" @click="nextFailure">定位失败响应 · {{ failures.length }}</button>
       <span class="lt-hint">Ctrl + 滚轮缩放</span>
       <span class="spacer"></span>
-      <button class="btn icon xs" aria-label="缩小时序图" @click="zoom = Math.max(0.6, +(zoom - 0.1).toFixed(1))">−</button>
+      <button class="btn icon xs" aria-label="缩小时序图" @click="zoom = Math.max(0.6, +(zoom - 0.1).toFixed(1))"><AppIcon name="minus" /></button>
       <span class="lt-zoom mono">{{ Math.round(zoom * 100) }}%</span>
-      <button class="btn icon xs" aria-label="放大时序图" @click="zoom = Math.min(2, +(zoom + 0.1).toFixed(1))">+</button>
+      <button class="btn icon xs" aria-label="放大时序图" @click="zoom = Math.min(2, +(zoom + 0.1).toFixed(1))"><AppIcon name="plus" /></button>
       <button class="btn xs" @click="zoom = 1">重置</button>
     </div>
 

@@ -263,7 +263,7 @@ onUnmounted(() => {
           </div>
           <div v-if="session.subject_ssrc && session.sdp_ssrc && session.subject_ssrc.replace(/^0+/,'') !== session.sdp_ssrc.replace(/^0+/,'')"
                class="ssrc-warn">
-            ⚠ SSRC 不一致：Subject 为 {{ session.subject_ssrc }}，SDP y= 为 {{ session.sdp_ssrc }}
+            <AppIcon name="warning" /> SSRC 不一致：Subject 为 {{ session.subject_ssrc }}，SDP y= 为 {{ session.sdp_ssrc }}
           </div>
         </div>
       </div>

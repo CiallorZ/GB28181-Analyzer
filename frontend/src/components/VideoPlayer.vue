@@ -83,13 +83,11 @@ watch(() => props.stream.id, () => {
                controls playsinline
                @loadeddata="onLoaded" @error="onError"></video>
 
-        <div v-else class="vp-cover" @click="play">
+        <div v-else class="vp-cover" role="button" tabindex="0" aria-label="播放重建视频" @click="play" @keydown.enter.prevent="play" @keydown.space.prevent="play">
           <img :src="posterUrl" alt="" class="vp-poster"
                @error="(e) => e.target.style.display = 'none'" />
           <div class="vp-play">
-            <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="M8 5v14l11-7z"/>
-            </svg>
+            <AppIcon name="play" />
           </div>
           <div class="vp-badge">
             {{ info.width }}×{{ info.height }}
@@ -106,12 +104,7 @@ watch(() => props.stream.id, () => {
 
       <div v-else class="vp-none">
         <div class="vn-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-            <rect x="2" y="4" width="20" height="14" rx="2"/>
-            <line x1="2" y1="20" x2="22" y2="20"/>
-            <line x1="7" y1="9" x2="10" y2="12"/>
-            <line x1="10" y1="9" x2="7" y2="12"/>
-          </svg>
+          <AppIcon name="monitor" />
         </div>
         <div class="vn-title">未解出画面</div>
         <div class="vn-reason">{{ info.error || '该流没有可解码的视频载荷' }}</div>

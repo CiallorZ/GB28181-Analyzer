@@ -278,7 +278,7 @@ watch([activeMetric, streams, loading], async () => {
               </thead>
               <tbody>
                 <tr v-for="st in streams" :key="st.id">
-                  <td class="stream-cell"><strong>{{ st.ssrc == null ? '未知 SSRC' : '0x' + st.ssrc.toString(16) }}</strong><router-link v-if="st.session_id" :to="'/sessions/'+st.session_id">会话 #{{st.session_id}} ↗</router-link><small v-else>未关联会话</small></td>
+                  <td class="stream-cell"><strong>{{ st.ssrc == null ? '未知 SSRC' : '0x' + st.ssrc.toString(16) }}</strong><router-link v-if="st.session_id" :to="'/sessions/'+st.session_id">会话 #{{st.session_id}} <AppIcon name="open" /></router-link><small v-else>未关联会话</small></td>
                   <td><span class="proto">{{ st.transport }}</span></td>
                   <td class="num">{{ st.packet_count }}</td>
                   <td class="num">{{ st.avg_bitrate != null ? fmt(st.avg_bitrate, 0) : '—' }}</td>

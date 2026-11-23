@@ -1,4 +1,5 @@
 <script setup>
+import PageNav from '../components/PageNav.vue'
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api/client'
@@ -31,7 +32,7 @@ function create() {
   })
 }
 </script>
-<template><main class="page"><h1>双抓包对比</h1><p>选择同一路视频的两个已完成任务，核对两侧观察到的信令和媒体结果。</p>
+<template><main class="page"><PageNav title="双抓包对比" sub="选择同一路视频的两个已完成任务，核对两侧观察到的信令和媒体结果。" />
 <form class="card card-body" @submit.prevent="create"><div class="g2">
 <fieldset v-for="side in ['a','b']" :key="side"><legend>{{side.toUpperCase()}} 侧抓包</legend>
 <label>已完成任务<select v-model="form['task_'+side+'_id']" required><option disabled :value="null">选择任务</option><option v-for="t in tasks" :key="t.id" :value="t.id" :disabled="form[side==='a'?'task_b_id':'task_a_id']===t.id">#{{t.id}} {{t.name}}</option></select></label>

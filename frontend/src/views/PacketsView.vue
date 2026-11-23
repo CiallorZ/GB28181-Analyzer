@@ -147,9 +147,9 @@ watch([() => route.query.task, () => route.query.number], async ([task, number])
         <div class="pane-head">
           报文列表
           <span class="spacer"></span>
-          <button class="mini" aria-label="上一页" :disabled="page <= 1" @click="page--; load()">‹</button>
+          <button class="mini" aria-label="上一页" :disabled="page <= 1" @click="page--; load()"><AppIcon name="prev" /></button>
           <span class="mono-sm">{{ page }}</span>
-          <button class="mini" aria-label="下一页" :disabled="page * pageSize >= total" @click="page++; load()">›</button>
+          <button class="mini" aria-label="下一页" :disabled="page * pageSize >= total" @click="page++; load()"><AppIcon name="next" /></button>
         </div>
         <div class="pane-body">
           <table class="pkt-tbl">

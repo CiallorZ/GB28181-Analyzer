@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from './api/client'
 import { useTaskStore } from './stores/task'
@@ -48,13 +48,19 @@ async function loadHealth() {
   } catch { healthError.value = true }
 }
 
+watch(() => [route.name, store.currentTaskId], ([name, id]) => {
+  if (name && id && !store.task && name !== 'task' && name !== 'session-detail') {
+    store.loadTask(id).catch(() => {})
+  }
+}, { immediate: true })
+
 let healthTimer = null
 
 onMounted(() => {
   systemTheme.addEventListener('change', applyTheme)
   applyTheme()
   loadHealth()
-  if (store.currentTaskId && !['workbench', 'task'].includes(route.name)) store.loadTask().catch(() => {})
+
   healthTimer = setInterval(loadHealth, 30000)
 })
 
@@ -68,7 +74,7 @@ onUnmounted(() => {
 <template>
   <div class="app">
     <!-- 顶栏 -->
-    <header class="bar">
+    <header class="bar glass-panel">
       <div class="bar-in">
         <router-link to="/" class="brand" title="返回工作台">
           <img src="/brand/analyzer.svg" alt="中国铁塔" class="brand-logo" />
@@ -79,13 +85,13 @@ onUnmounted(() => {
         </router-link>
 
         <nav class="bar-nav" aria-label="主导航">
-          <router-link to="/" :class="{ current: route.name === 'task' }">工作台</router-link>
-          <router-link to="/tasks">历史任务</router-link>
-          <router-link to="/compare">双包对比</router-link>
-          <router-link to="/settings">设置</router-link>
+          <router-link to="/"><AppIcon name="home" />工作台</router-link>
+          <router-link to="/tasks"><AppIcon name="history" />历史任务</router-link>
+          <router-link to="/compare" :class="{current: route.path.startsWith('/compare/')}"><AppIcon name="compare" />双包对比</router-link>
+          <router-link to="/settings"><AppIcon name="settings" />设置</router-link>
         </nav>
 
-        <div class="bar-task" v-if="task">
+        <router-link class="bar-task" v-if="task" :to="{name: 'task', params: {id: task.id}}" title="打开当前任务">
           <span class="bt-id mono">#{{ task.id }}</span>
           <span class="badge" :class="{
             ok: task.status === 'completed',
@@ -97,7 +103,7 @@ onUnmounted(() => {
                 failed:'失败', cancelled:'已取消' }[task.status] }}
           </span>
           <span class="bt-name truncate">{{ task.file?.filename || task.name }}</span>
-        </div>
+        </router-link>
 
         <div class="spacer"></div>
 
@@ -122,7 +128,7 @@ onUnmounted(() => {
     <main class="main">
       <router-view v-slot="{ Component }">
         <transition name="fade" mode="out-in">
-          <component :is="Component" :key="route.name === 'session-detail' ? route.path : undefined" />
+          <component :is="Component" :key="route.name === 'session-detail' ? route.path : route.query.task" />
         </transition>
       </router-view>
     </main>
@@ -149,7 +155,7 @@ onUnmounted(() => {
   display: flex; align-items: center; gap: 26px;
 }
 .bar-nav { display: flex; align-items: stretch; align-self: stretch; gap: 8px; white-space: nowrap; }
-.bar-nav a { position: relative; display:flex; align-items:center; padding: 0 12px; color: var(--text-2); font-size: 13px; font-weight: 600; }
+.bar-nav a { gap:6px; position: relative; display:flex; align-items:center; padding: 0 12px; color: var(--text-2); font-size: 13px; font-weight: 600; }
 .bar-nav a:hover, .bar-nav .router-link-exact-active, .bar-nav .current {
   color: var(--brand-lt); text-decoration: none;
 }
@@ -255,7 +261,8 @@ onUnmounted(() => {
   .bar-in { padding: 0 12px; gap: 8px; }
   .bar-in { flex-wrap: wrap; padding-top: 8px; }
   .bar-nav { order: 2; flex-basis: 100%; height: 35px; gap: 6px; }
-  .bar-nav a { padding: 0 10px; }
+  .bar-nav { justify-content:space-between; min-width:0; }
+  .bar-nav a { padding:0 3px; gap:4px; }
   .brand { border-right: 0; padding-right: 4px; }
   .brand-desc { display: none; }
   .brand-name { font-size: 13px; }

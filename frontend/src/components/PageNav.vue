@@ -5,6 +5,7 @@
  * 全站统一：返回按钮 + 面包屑 + 右侧操作区。
  * 返回逻辑优先用浏览器历史，无历史时回落到首页。
  */
+import BackButton from './BackButton.vue'
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -13,31 +14,26 @@ const props = defineProps({
   sub: { type: String, default: '' },
   // [{ label, to }]  最后一项为当前页
   crumbs: { type: Array, default: () => [] },
-  backTo: { type: String, default: '/' }
+  backTo: { type: String, default: '' }
 })
 
 const router = useRouter()
 
-function goBack() {
-  // 有历史就后退，否则回落到 backTo
-  if (window.history.length > 2) router.back()
-  else router.push(props.backTo)
-}
-
 const items = computed(() => {
-  if (props.crumbs.length) return props.crumbs
+  if (props.crumbs.length) {
+    const taskId = router.currentRoute.value.query.task
+    if (taskId && props.crumbs.length === 2) {
+      return [props.crumbs[0], { label: '任务 #' + taskId, to: '/tasks/' + taskId }, props.crumbs[1]]
+    }
+    return props.crumbs
+  }
   return [{ label: '工作台', to: '/' }, { label: props.title }]
 })
 </script>
 
 <template>
   <div class="pnav">
-    <button class="back" @click="goBack" title="返回上一级">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-        <line x1="19" y1="12" x2="5" y2="12"/>
-        <polyline points="12 19 5 12 12 5"/>
-      </svg>
-    </button>
+    <BackButton :fallback="backTo || items.at(-2)?.to || '/'" />
 
     <div class="heading">
     <nav class="crumbs" aria-label="面包屑">
@@ -69,23 +65,6 @@ const items = computed(() => {
   padding: 14px 0 22px;
   flex-wrap: wrap;
 }
-.back {
-  width: 32px; height: 32px; flex: none;
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  color: var(--text-2);
-  cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: all var(--dur) var(--ease);
-}
-.back:hover {
-  border-color: var(--line-strong);
-  color: var(--text);
-  background: var(--surface-2);
-}
-.back svg { width: 15px; height: 15px; }
-
 .crumbs {
   display: flex; align-items: center; gap: 6px;
   font-size: 12px;

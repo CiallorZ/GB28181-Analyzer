@@ -51,9 +51,9 @@ function localDate(value) {
   return date.format(new Date(normalized))
 }
 const layers = [
-  { code: 'SIP / SDP', name: '信令与协商', detail: '点播时序 · 响应码 · 端口与 SSRC' },
-  { code: 'RTP / TCP', name: '媒体传输', detail: '序号缺口 · 抖动 · 码率趋势' },
-  { code: 'PS / ES', name: '封装与编码', detail: 'H.264 / H.265 · 画面重建' }
+  { icon: 'signal', code: 'SIP / SDP', name: '信令与协商', detail: '点播时序 · 响应码 · 端口与 SSRC' },
+  { icon: 'wave', code: 'RTP / TCP', name: '媒体传输', detail: '序号缺口 · 抖动 · 码率趋势' },
+  { icon: 'codec', code: 'PS / ES', name: '封装与编码', detail: 'H.264 / H.265 · 画面重建' }
 ]
 
 onMounted(async () => {
@@ -78,7 +78,7 @@ function drop(event) {
 
 <template>
   <div class="capture-home">
-    <section class="hero" aria-labelledby="hero-title">
+    <section class="hero glass-panel" aria-labelledby="hero-title">
       <div class="hero-copy" :class="{ dragging }" @dragover.prevent="dragging = true" @dragleave.prevent="dragging = false" @drop.prevent="drop">
         <div class="hero-meta"><img src="/brand/analyzer.svg" width="30" height="30" alt="">中国铁塔 · 视联网</div>
         <h1 id="hero-title">抓包分析工作台</h1>
@@ -86,10 +86,10 @@ function drop(event) {
         <div class="drop-surface"><strong>导入抓包</strong><div class="hero-actions">
           <input ref="picker" type="file" accept=".pcap,.pcapng,.cap" hidden @change="pick" />
           <button class="upload-button" type="button" :disabled="busy" @click="picker.click()">
-            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 16V3m-5 5 5-5 5 5M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <AppIcon name="upload" />
             {{ busy ? `正在导入 ${progress}%` : dragging ? '松开以导入' : '选择抓包文件' }}
           </button>
-          <button type="button" class="sample-button" :disabled="busy" @click="emit('sample')">试用示例抓包 <span aria-hidden="true">↗</span></button>
+          <button type="button" class="sample-button" :disabled="busy" @click="emit('sample')">试用示例抓包 <span aria-hidden="true"><AppIcon name="open" /></span></button>
         </div>
         </div>
         <details class="live"><summary>从本机网卡采集</summary><button class="btn" @click="loadAdapters" :disabled="recording">读取网卡</button>
@@ -103,12 +103,12 @@ function drop(event) {
     </section>
     <section class="workspace" aria-label="分析路径与历史任务">
       <div class="workspace-body">
-        <section class="layers" aria-labelledby="layers-title"><div class="section-head"><div><h2 id="layers-title">协议分析路径</h2></div><router-link to="/compare" class="all-link">双包对比 ↗</router-link></div>
-          <ol class="layer-list"><li v-for="(layer, i) in layers" :key="layer.code"><span class="layer-index">0{{ i + 1 }}</span><div><strong>{{ layer.name }}</strong><p>{{ layer.detail }}</p></div><span class="layer-code">{{ layer.code }}</span></li></ol>
+        <section class="layers" aria-labelledby="layers-title"><div class="section-head"><div><h2 id="layers-title">协议分析路径</h2></div><router-link to="/compare" class="all-link">双包对比 <AppIcon name="open" /></router-link></div>
+          <ol class="layer-list"><li v-for="layer in layers" :key="layer.code"><span class="layer-icon"><AppIcon :name="layer.icon" /></span><div><strong>{{ layer.name }}</strong><p>{{ layer.detail }}</p></div><span class="layer-code">{{ layer.code }}</span></li></ol>
         </section>
-        <section class="recent" aria-labelledby="recent-title"><div class="section-head"><div><h2 id="recent-title">最近分析</h2></div><router-link to="/tasks" class="all-link">全部任务 <span aria-hidden="true">→</span></router-link></div>
+        <section class="recent" aria-labelledby="recent-title"><div class="section-head"><div><h2 id="recent-title">最近分析</h2></div><router-link to="/tasks" class="all-link">全部任务 <span aria-hidden="true"><AppIcon name="forward" /></span></router-link></div>
           <p v-if="historyError" class="history-empty">历史记录暂时无法读取。</p><p v-else-if="history === null" class="history-empty" role="status">正在读取历史记录…</p><p v-else-if="!history.length" class="history-empty">导入首份抓包后，任务会出现在这里。</p>
-          <ul v-else class="history-list"><li v-for="item in history" :key="item.id"><router-link :to="{ name: 'task', params: { id: item.id } }"><span class="file-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M6 3h8l4 4v14H6zM14 3v5h4M9 12h6M9 16h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="file-info"><strong class="truncate" :title="item.name">{{ item.name }}</strong><time :datetime="item.created_at">{{ localDate(item.created_at) }}</time></span><span class="badge" :class="status[item.status]?.[1]">{{ status[item.status]?.[0] || item.status }}</span><span class="row-arrow" aria-hidden="true">↗</span></router-link></li></ul>
+          <ul v-else class="history-list"><li v-for="item in history" :key="item.id"><router-link :to="{ name: 'task', params: { id: item.id } }"><span class="file-icon" aria-hidden="true"><AppIcon name="file" /></span><span class="file-info"><strong class="truncate" :title="item.name">{{ item.name }}</strong><time :datetime="item.created_at">{{ localDate(item.created_at) }}</time></span><span class="badge" :class="status[item.status]?.[1]">{{ status[item.status]?.[0] || item.status }}</span><span class="row-arrow" aria-hidden="true"><AppIcon name="open" /></span></router-link></li></ul>
         </section>
       </div>
     </section>
@@ -135,7 +135,7 @@ function drop(event) {
 .drop-surface { margin-top:22px; padding:16px 18px; border:1px dashed var(--line-strong); border-radius:10px; background:var(--surface-2); }
 .drop-surface strong {font-size:13px;color:var(--text-2)}.drop-surface .hero-actions{margin-top:9px}
 .workspace-body { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:28px; margin-top:29px; }.layers,.recent { min-width:0; border-top:2px solid var(--line-strong); padding-top:16px; }.section-head { display:flex; justify-content:space-between; align-items:end; gap:12px; padding-bottom:15px; border-bottom:1px solid var(--line-2); }.section-label { display:block; color:var(--brand-lt); font-size:11px; font-weight:650; margin-bottom:5px; }.section-head h2 { font-size:19px; letter-spacing:-.02em; }.section-hint,.all-link { font-size:12px; color:var(--text-3); }.all-link { color:var(--brand-lt); font-weight:650; text-decoration:none; }.all-link:hover { text-decoration:underline; }
-.layer-list,.history-list { list-style:none; }.layer-list li { display:grid; grid-template-columns:38px minmax(0,1fr) auto; gap:10px; align-items:center; padding:15px 0; border-bottom:1px solid var(--line); }.layer-index { color:var(--brand-lt); font:12px var(--font-mono); }.layer-list strong { font-size:13px; }.layer-list p { color:var(--text-3); font-size:11.5px; margin-top:2px; }.layer-code { font:11px var(--font-mono); color:var(--text-3); }
+.layer-list,.history-list { list-style:none; }.layer-list li { display:grid; grid-template-columns:38px minmax(0,1fr) auto; gap:10px; align-items:center; padding:15px 0; border-bottom:1px solid var(--line); }.layer-icon { display:grid; place-items:center; width:32px; height:32px; font-size:17px; color:var(--brand-lt); background:var(--surface); border:1px solid var(--line-2); border-radius:8px; }.layer-list strong { font-size:13px; }.layer-list p { color:var(--text-3); font-size:11.5px; margin-top:2px; }.layer-code { font:11px var(--font-mono); color:var(--text-3); }
 .history-list a { display:flex; align-items:center; gap:12px; min-height:64px; border-bottom:1px solid var(--line); color:var(--text); text-decoration:none; }.history-list a:hover { background:var(--surface-2); }.file-icon { width:34px; height:34px; display:grid; place-items:center; flex:none; color:var(--brand-lt); background:var(--brand-soft); border-radius:7px; }.file-icon svg { width:20px; height:20px; }.file-info { display:grid; gap:3px; min-width:0; flex:1; }.file-info strong { font-size:12.5px; }.file-info time,.history-empty { font-size:11px; color:var(--text-3); }.history-empty { padding:24px 0; }.row-arrow { color:var(--text-4); }
 @media (max-width:850px) { .capture-home { padding:20px 16px 48px; }.hero { grid-template-columns:1fr; }.hero-copy { padding:36px 28px; }.exchange { border-inline-start:0; border-top:1px solid var(--line); }.workspace-body { grid-template-columns:1fr; gap:30px; } }
 @media (max-width:480px) { .hero-copy { padding:32px 22px; }.hero h1 { font-size:clamp(26px,7.5vw,34px); text-wrap:balance; }.layer-code { font-size:10px; } }

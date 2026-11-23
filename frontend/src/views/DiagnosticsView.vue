@@ -120,7 +120,7 @@ onMounted(load)
             <span class="badge" :class="EV_CLS[d.evidence_level] || 'unknown'">
               {{ EV_LABEL[d.evidence_level] || d.evidence_level }}
             </span>
-            <span class="toggle">{{ expanded[d.id] ? '▾' : '▸' }}</span>
+            <span class="toggle"><AppIcon :name="expanded[d.id] ? 'down' : 'next'" /></span>
           </button>
 
           <div class="diag-body">
@@ -134,7 +134,7 @@ onMounted(load)
                 时间 <b class="mono">{{ d.timestamp.toFixed(3) }}s</b>
               </span>
               <button v-if="d.session_id" class="meta-item link" type="button" @click="goSession(d.session_id)">
-                会话 #{{ d.session_id }} →
+                会话 #{{ d.session_id }} <AppIcon name="forward" />
               </button>
             </div>
 

@@ -1,11 +1,12 @@
 <script setup>
-import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api/client'
 import PageNav from '../components/PageNav.vue'
 import { useTaskStore } from '../stores/task'
 
 const router = useRouter()
+const route = useRoute()
 const store = useTaskStore()
 const list = ref([])
 const total = ref(0)
@@ -57,7 +58,10 @@ const STATUS_LABEL = {
   failed: '失败', cancelled: '已取消'
 }
 
+let request = 0
 async function load() {
+  const seq = ++request
+  err.value = ''
   loading.value = true
   try {
     const r = await api.tasks({
@@ -65,14 +69,14 @@ async function load() {
       status: statusFilter.value || undefined,
       keyword: keyword.value || undefined
     })
+    if (seq !== request) return
     list.value = r.items
     total.value = r.total
-  } catch (e) { err.value = e.message }
-  finally { loading.value = false }
+  } catch (e) { if (seq === request) err.value = e.message }
+  finally { if (seq === request) loading.value = false }
 }
 
 async function openTask(t) {
-  store.setCurrent(t.id)
   router.push(`/tasks/${t.id}`)
 }
 
@@ -99,7 +103,21 @@ function fmtSize(b) {
   return (i ? n.toFixed(1) : n) + ' ' + u[i]
 }
 
-onMounted(() => { load(); loadStorage() })
+async function filter(nextPage) {
+  const query = { ...route.query, keyword: keyword.value || undefined,
+    status: statusFilter.value || undefined, page: nextPage > 1 ? nextPage : undefined }
+  if (router.resolve({ query }).fullPath === route.fullPath) await load()
+  else await router.replace({ query })
+}
+watch(() => route.fullPath, () => {
+  if (route.name !== 'tasks') return
+  keyword.value = String(route.query.keyword || '')
+  statusFilter.value = String(route.query.status || '')
+  const n = Number(route.query.page)
+  page.value = Number.isSafeInteger(n) && n > 0 ? n : 1
+  load()
+}, { immediate: true })
+onMounted(loadStorage)
 </script>
 
 <template>
@@ -109,28 +127,24 @@ onMounted(() => { load(); loadStorage() })
       :sub="`共 ${total} 个任务`"
       :crumbs="[{label:'工作台', to:'/'}, {label:'分析任务'}]">
       <template #actions>
-        <input v-model="keyword" class="inp sm" placeholder="搜索文件名" @keyup.enter="page=1; load()" />
-        <select v-model="statusFilter" class="inp sm" @change="page=1; load()">
+        <input v-model="keyword" class="inp sm" placeholder="搜索文件名" @keyup.enter="filter(1)" />
+        <select v-model="statusFilter" class="inp sm" @change="filter(1)">
           <option value="">全部状态</option>
           <option value="completed">已完成</option>
           <option value="analyzing">分析中</option>
           <option value="failed">失败</option>
         </select>
-        <button class="btn sm" @click="page=1; load()">刷新</button>
+        <button class="btn sm" @click="filter(1)">刷新</button>
       </template>
     </PageNav>
 
     <div v-if="err" class="err-box">{{ err }}</div>
 
     <!-- 存储管理 -->
-    <div v-if="storage" class="storage-card">
+    <div v-if="storage" class="storage-card glass-panel">
       <div class="sc-left">
         <div class="sc-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-            <ellipse cx="12" cy="5" rx="9" ry="3"/>
-            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
-            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
-          </svg>
+          <AppIcon name="storage" />
         </div>
         <div class="sc-info">
           <div class="sc-title">
@@ -208,9 +222,9 @@ onMounted(() => { load(); loadStorage() })
     </div>
 
     <div class="row mt-16" style="justify-content:flex-end">
-      <button class="btn" :disabled="page <= 1" @click="page--; load()">上一页</button>
+      <button class="btn" :disabled="page <= 1" @click="filter(page - 1)">上一页</button>
       <span class="mono-sm">{{ page }} / {{ Math.max(1, Math.ceil(total / pageSize)) }}</span>
-      <button class="btn" :disabled="page >= Math.ceil(total / pageSize)" @click="page++; load()">下一页</button>
+      <button class="btn" :disabled="page >= Math.ceil(total / pageSize)" @click="filter(page + 1)">下一页</button>
     </div>
   </div>
 </template>

@@ -349,7 +349,7 @@ watch(() => props.open, async (v) => {
   <Teleport to="body">
     <Transition name="slide">
       <div v-if="open" class="mask" @click.self="close">
-        <aside ref="drawerRef" class="drawer" role="dialog" aria-modal="true" aria-label="DeepSeek 智能分析" tabindex="-1" @keydown="onDrawerKeydown">
+        <aside ref="drawerRef" class="drawer glass-panel" role="dialog" aria-modal="true" aria-label="DeepSeek 智能分析" tabindex="-1" @keydown="onDrawerKeydown">
           <!-- 双品牌头部 -->
           <div class="head">
             <div class="head-in">
@@ -367,16 +367,10 @@ watch(() => props.open, async (v) => {
               <div class="spacer"></div>
               <button class="hbtn" @click="tab = tab === 'config' ? 'report' : 'config'"
                       :title="tab === 'config' ? '返回' : '设置'">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
-                  <circle cx="12" cy="12" r="3"/>
-                  <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 008.6 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 8.6a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/>
-                </svg>
+                <AppIcon :name="tab === 'config' ? 'back' : 'settings'" />
               </button>
               <button class="hbtn" @click="close" title="关闭">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-                  <line x1="18" y1="6" x2="6" y2="18"/>
-                  <line x1="6" y1="6" x2="18" y2="18"/>
-                </svg>
+                <AppIcon name="close" />
               </button>
             </div>
           </div>
@@ -463,7 +457,7 @@ watch(() => props.open, async (v) => {
                   <span v-if="!thinkDone" class="t-dots"><i></i><i></i><i></i></span>
                   <span class="spacer"></span>
                   <span class="t-time mono">{{ elapsed }}s</span>
-                  <span class="t-arrow" :class="{ open: thinkOpen }">›</span>
+                  <span class="t-arrow" :class="{ open: thinkOpen }"><AppIcon name="next" /></span>
                 </button>
                 <div v-show="thinkOpen" class="t-steps">
                   <div v-for="(s, i) in steps" :key="i" class="tstep" :class="s.state">
@@ -505,7 +499,7 @@ watch(() => props.open, async (v) => {
                 <div class="chat-prompts" v-if="!chatBusy && reportContextHash && !running">
                   <span>继续探索</span>
                   <div class="prompt-list">
-                    <button v-for="prompt in suggestedQuestions" :key="prompt" @click="useSuggestion(prompt)">{{ prompt }} <span aria-hidden="true">↗</span></button>
+                    <button v-for="prompt in suggestedQuestions" :key="prompt" @click="useSuggestion(prompt)">{{ prompt }} <span aria-hidden="true"><AppIcon name="open" /></span></button>
                   </div>
                 </div>
                 <div class="chat-in">
@@ -515,10 +509,7 @@ watch(() => props.open, async (v) => {
                             @keydown.enter.exact.prevent="sendQuestion"></textarea>
                   <button class="send" @click="sendQuestion" aria-label="发送追问"
                           :disabled="chatBusy || running || !reportContextHash || !question.trim()">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-                      <line x1="22" y1="2" x2="11" y2="13"/>
-                      <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-                    </svg>
+                    <AppIcon name="send" />
                   </button>
                 </div>
                 <div class="chat-hint">Enter 发送 · Shift + Enter 换行 · 请勿输入敏感信息</div>

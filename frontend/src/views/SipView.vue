@@ -182,7 +182,7 @@ onMounted(loadSessions)
         <!-- 阶段条 -->
         <div class="sec" v-if="phases.length">
           <div class="sec-head">
-            <span class="sec-num">⚡</span>
+            <span class="sec-num"><AppIcon name="wave" /></span>
             <span class="sec-title">信令关键阶段</span>
             <span class="spacer"></span>
             <span v-if="latency != null" class="lat-chip">
@@ -207,7 +207,7 @@ onMounted(loadSessions)
         <!-- 梯形图 -->
         <div class="sec">
           <div class="sec-head">
-            <span class="sec-num">⇄</span>
+            <span class="sec-num"><AppIcon name="signal" /></span>
             <span class="sec-title">信令交互时序</span>
             <span class="sec-sub">{{ filtered.length }} 条</span>
             <span class="spacer"></span>
@@ -227,12 +227,12 @@ onMounted(loadSessions)
         <!-- 消息详情 -->
         <div class="sec" v-if="selectedMsg">
           <div class="sec-head">
-            <span class="sec-num">◉</span>
+            <span class="sec-num"><AppIcon name="file" /></span>
             <span class="sec-title">消息详情</span>
             <span class="sec-sub">#{{ selectedMsg.packet_id }}</span>
             <span class="spacer"></span>
             <button class="btn-mini" @click="goPacket(selectedMsg.packet_id)">
-              查看原始报文 →
+              查看原始报文 <AppIcon name="forward" />
             </button>
             <button class="btn-mini" @click="selectedMsg = null">关闭</button>
           </div>

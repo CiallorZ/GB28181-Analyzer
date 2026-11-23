@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { resolveTaskContext } from './taskNavigation'
 import { useTaskStore } from '../stores/task'
 // 工作台是落地页，每次都会加载：静态引入让构建期就能算准首屏预算，
 // 其余页面仍按路由懒加载。
@@ -34,10 +35,6 @@ const router = createRouter({
   }
 })
 
-router.beforeEach((to) => {
-  if (to.name === 'task') {
-    useTaskStore().setCurrent(Number(to.params.id))
-  }
-})
+router.beforeEach(to => resolveTaskContext(to, useTaskStore()))
 
 export default router
