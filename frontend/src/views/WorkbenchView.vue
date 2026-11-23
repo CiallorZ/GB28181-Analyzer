@@ -16,6 +16,7 @@ import { useTaskStore } from '../stores/task'
 import VideoPlayer from '../components/VideoPlayer.vue'
 import AiSummarySection from '../components/AiSummarySection.vue'
 import CaptureIntake from '../components/CaptureIntake.vue'
+import CaptureEvidence from '../components/CaptureEvidence.vue'
 import CaptureFlow from '../components/CaptureFlow.vue'
 
 const router = useRouter()
@@ -665,7 +666,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
   <div class="page">
     <div v-if="!task && loadingResults" class="fail-wrap" role="status">正在读取任务…</div>
     <CaptureIntake v-else-if="!task" :busy="uploading || loadingSample" :progress="uploadPct" :error="err"
-                   @file="handleFile" @sample="loadSample" />
+                   @recorded="id => router.push({name: 'task', params:{id}})" @file="handleFile" @sample="loadSample" />
 
     <div v-else-if="task.status === 'pending' && task.stage !== '排队中'" class="fail-wrap">
       <div class="info-box">
@@ -757,6 +758,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
             <summary class="btn-mini">导出报告</summary>
             <div class="exp-menu">
               <a :href="reportUrl('md')" download>Markdown（.md）</a>
+              <a :href="reportUrl('html')" download>离线 HTML</a><a :href="reportUrl('csv')" download>诊断 CSV</a>
               <a :href="reportUrl('json')" download>JSON（.json）</a>
             </div>
           </details>
@@ -768,6 +770,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
         </div>
       </nav>
 
+      <CaptureEvidence v-if="overview && !loadingResults" :key="task.id" :task-id="task.id" :streams="streams" />
       <CaptureFlow v-if="overview && !loadingResults" :stages="flowStages" @navigate="scrollTo" />
       <section v-if="priorityFindings.length" class="sec mb-20 findings" aria-labelledby="findings-title">
         <div class="sec-head">
@@ -1300,7 +1303,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
 
       <!-- ===== AI 分析概览 ===== -->
       <section id="sec-ai" class="rise mt-14 mb-20">
-        <AiSummarySection :key="store.currentTaskId" :num="secNums.ai" />
+        <AiSummarySection :key="store.currentTaskId" />
       </section>
 
       <!-- 底部局限声明 -->

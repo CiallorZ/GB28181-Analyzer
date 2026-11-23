@@ -24,7 +24,7 @@ def test_preview_and_analysis_use_same_context(client, make_task, monkeypatch):
     data = preview.json()
     seen = {}
 
-    def fake_analyze(db, task_id, on_delta=None, context=None):
+    def fake_analyze(db, task_id, on_delta=None, context=None, expert='general'):
         seen['context'] = context
         return '报告'
 

@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import __version__
-from .api import ai, diagnostics, sessions, tasks
+from .api import ai, diagnostics, evidence, intake, sessions, tasks
 from .core.config import settings
 from .core.db import init_db
 from .core.security import origin_allowed
@@ -79,6 +79,8 @@ API = '/api/v1'
 app.include_router(tasks.router, prefix=API)
 app.include_router(sessions.router, prefix=API)
 app.include_router(diagnostics.router, prefix=API)
+app.include_router(evidence.router, prefix=API)
+app.include_router(intake.router, prefix=API)
 app.include_router(ai.router, prefix=API)
 
 

@@ -2,7 +2,7 @@
 
 适用于 Windows x64。ZIP 内含分析服务与前端，运行时无需安装 Python 或 Node.js。
 
-1. 安装 [Wireshark x64](https://www.wireshark.org/download.html)，在安装选项里勾选 **TShark**。读取已有抓包可以跳过 Npcap。
+1. 安装 [Wireshark x64](https://www.wireshark.org/download.html)，在安装选项里勾选 **TShark**。读取已有抓包可以跳过 Npcap；需要现场实时采集时请安装 Npcap。
 2. 如需重建和播放画面，请安装 [FFmpeg 的 Windows 构建](https://ffmpeg.org/download.html#build-windows)，将包含 `ffmpeg.exe` 和 `ffprobe.exe` 的目录加入 `PATH`。
 3. 完整解压 ZIP，双击 `GB28181-Analyzer.exe`。程序通过 Microsoft Edge WebView2 Runtime 显示独立工作台。请先安装该运行时，离线设备可使用微软的 Evergreen Standalone Installer。关闭主窗口即可退出。
 4. 在工作台选择抓包或点击「试用示例抓包」。打开「设置」可检查外部工具是否已被识别。安装依赖后请重新启动应用。

@@ -66,10 +66,10 @@ onUnmounted(() => {
     <header class="bar">
       <div class="bar-in">
         <router-link to="/" class="brand" title="返回工作台">
-          <img :src="theme === 'dark' ? '/brand/logo-color-dark.png' : '/brand/logo-color-light.png'" alt="中国铁塔" class="brand-logo" />
+          <img src="/brand/analyzer.svg" alt="中国铁塔" class="brand-logo" />
           <div class="brand-txt">
             <div class="brand-name">GB28181 Analyzer</div>
-            <div class="brand-desc">视联网协议分析与流媒体质量诊断</div>
+            <div class="brand-desc">中国铁塔 · 视联网协议分析</div>
           </div>
         </router-link>
 

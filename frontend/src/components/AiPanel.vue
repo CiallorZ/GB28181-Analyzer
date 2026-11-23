@@ -41,7 +41,14 @@ const question = ref('')
 const chatBusy = ref(false)
 const chatBox = ref(null)
 const questionInput = ref(null)
-const suggestedQuestions = ['信令在哪一步出现异常？', '优先检查哪些配置？', '如何验证媒体流是否正常？']
+const expert = ref('general')
+const profiles = {
+  general: ['综合研判', '串联信令与媒体证据', ['第一处异常出现在哪里？', '哪些结论仍需补抓验证？']],
+  sip: ['信令事务', '追踪请求、响应与重传', ['哪个事务缺少最终响应？', '重传与明确拒绝如何区分？']],
+  media: ['媒体链路', '核对 SSRC、丢包与画面', ['协商和实际 SSRC 是否一致？', '画面重建失败有哪些可验证原因？']],
+  field: ['现场排障', '制定两端复核步骤', ['平台侧先检查什么？', '下一次应在哪一端抓包？']]
+}
+const suggestedQuestions = computed(() => profiles[expert.value][2])
 
 function useSuggestion(text) {
   question.value = text
@@ -181,7 +188,7 @@ async function runAnalyze(contextHash) {
       method: 'POST',
       signal: reportController.signal,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ context_hash: contextHash })
+      body: JSON.stringify({ expert: expert.value, context_hash: contextHash })
     })
     if (!res.ok || !res.body) {
       let m = 'HTTP ' + res.status
@@ -247,6 +254,7 @@ async function sendQuestion() {
   const history = chat.value.slice(0, -1).filter(m => !m.failed).map(m => ({
     role: m.role, content: m.content
   }))
+  history.unshift({ role: 'assistant', content: report.value })
   const slot = reactive({ role: 'assistant', content: '', streaming: true })
   chat.value.push(slot)
   chatBusy.value = true
@@ -259,7 +267,7 @@ async function sendQuestion() {
       method: 'POST',
       signal: chatController.signal,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question: q, history, context_hash: reportContextHash.value })
+      body: JSON.stringify({ question: q, history, expert: expert.value, context_hash: reportContextHash.value })
     })
     if (!res.ok || !res.body) {
       let m = 'HTTP ' + res.status
@@ -348,7 +356,7 @@ watch(() => props.open, async (v) => {
                 <img src="/brand/deepseek.svg" alt="" class="lg-ds" />
               </div>
               <div class="head-txt">
-                <div class="head-name">DeepSeek 智能分析</div>
+                <div class="head-name">DeepSeek 专家会诊</div>
                 <div class="head-sub">
                   <span class="dot-brand"></span>
                   结合本次抓包分析结果
@@ -391,8 +399,7 @@ watch(() => props.open, async (v) => {
               <input v-model="modelInput" type="text" class="inp full"
                      placeholder="deepseek-flash" />
               <div class="hint">
-                deepseek-flash 默认开启 thinking 模式会返回空内容，
-                后端已显式关闭该模式
+                使用当前服务账户已开通的模型 ID。设置完成后可测试连接。
               </div>
             </div>
             <div class="field">
@@ -437,14 +444,8 @@ watch(() => props.open, async (v) => {
 
               <!-- 起始 -->
               <div v-if="!report && !running" class="start">
-                <div class="start-icon">
-                  <img src="/brand/deepseek.svg" alt="" />
-                </div>
-                <div class="start-title">让 DeepSeek 定位故障卡点</div>
-                <div class="start-desc">
-                  AI 将基于上述事实，分析信令与媒体的关联关系，
-                  指出最可能的问题位置并给出可验证的排查步骤
-                </div>
+                <h3>选择会诊专家</h3>
+                <div class="experts"><button v-for="(profile,key) in profiles" :key="key" :aria-pressed="expert === key" @click="expert = key"><strong>{{ profile[0] }}</strong><small>{{ profile[1] }}</small></button></div>
                 <button class="btn primary lg" @click="previewOpen = true"
                         :disabled="running || !cfg.has_key">
                   <img src="/brand/deepseek-white.svg" alt="" class="btn-ico" />
@@ -474,7 +475,8 @@ watch(() => props.open, async (v) => {
 
               <!-- 报告 -->
               <div v-if="report" class="report">
-                <div class="r-tools">
+                <div class="r-tools"><strong class="signature">{{ profiles[expert][0] }} · 研判报告</strong>
+                  <button class="btn-mini" :disabled="running || chatBusy" @click="report = ''; chat = []; steps = []; question = ''; reportContextHash = ''">新会诊</button>
                   <button class="btn-mini" @click="copyReport">复制</button>
                   <button class="btn-mini" @click="previewOpen = true" :disabled="running">
                     重新分析
@@ -499,7 +501,7 @@ watch(() => props.open, async (v) => {
                     </div>
                   </div>
                 </div>
-                <div class="chat-prompts" v-if="!chat.length && reportContextHash && !running">
+                <div class="chat-prompts" v-if="!chatBusy && reportContextHash && !running">
                   <span>继续探索</span>
                   <div class="prompt-list">
                     <button v-for="prompt in suggestedQuestions" :key="prompt" @click="useSuggestion(prompt)">{{ prompt }} <span aria-hidden="true">↗</span></button>
@@ -749,7 +751,8 @@ watch(() => props.open, async (v) => {
 .stime { font-size: 9.5px; color: var(--text-4); }
 
 /* 报告 */
-.report { padding: 14px 16px 8px; }
+.report { margin:16px 12px 8px; padding:16px; border-radius:12px; background:var(--surface);border:1px solid var(--ds-line);border-top:2px solid var(--ds); }
+.report :deep(h2) {border-left:3px solid var(--brand);padding-left:9px;}
 .r-tools {
   display: flex; gap: 6px; justify-content: flex-end;
   margin-bottom: 12px;
@@ -894,4 +897,8 @@ watch(() => props.open, async (v) => {
 .send:hover:not(:disabled) { background: var(--ds-dk); }
 .send:disabled { opacity: .4; cursor: not-allowed; }
 .send svg { width: 14px; height: 14px; }
+.experts {display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:16px auto;max-width:480px}
+.experts button {padding:12px;text-align:left;background:var(--surface);color:var(--text);border:1px solid var(--line-2);border-radius:9px;cursor:pointer}
+.experts button[aria-pressed="true"] {background:var(--ds-soft);border-color:var(--ds);box-shadow:inset 3px 0 var(--brand)}
+.experts small {display:block;color:var(--text-2);margin-top:4px}.signature {margin-right:auto;color:var(--ds-lt)}
 </style>

@@ -3,6 +3,8 @@
 """M01 任务管理与文件上传"""
 from __future__ import annotations
 
+from pathlib import Path
+
 import hashlib
 import json
 import os
@@ -83,6 +85,11 @@ async def upload_file(file: UploadFile = File(...),
         dest.unlink(missing_ok=True)
         raise HTTPException(400, '上传的文件为空')
 
+    return register_capture(db, name, dest, size, sha.hexdigest())
+
+
+def register_capture(db, name, dest, size, checksum):
+    ext = Path(name).suffix.lower()
     try:
         task = AnalysisTask(
             name=name,
@@ -95,7 +102,7 @@ async def upload_file(file: UploadFile = File(...),
         cf = CaptureFile(
             task_id=task.id, filename=name,
             stored_path=str(dest), file_size=size,
-            file_format=ext.lstrip('.'), checksum=sha.hexdigest(),
+            file_format=ext.lstrip('.'), checksum=checksum,
         )
         db.add(cf)
         db.commit()
@@ -224,6 +231,38 @@ def task_report(task_id: int, format: str = 'md',
             headers={'Content-Disposition':
                      'attachment; filename="gb28181-report-%d.json"' % task_id})
 
+    if format == 'csv':
+        import csv
+        import io
+        out = io.StringIO(newline='')
+        writer = csv.writer(out)
+        writer.writerow(['规则', '严重度', '诊断', '建议'])
+        for item in diagnostics:
+            cells = [item.rule_id, item.severity.value, item.title, '；'.join(map(str, item.recommendations or []))]
+            writer.writerow([("'" + str(v)) if str(v).lstrip().startswith(('=', '+', '-', '@')) else v for v in cells])
+        return Response(out.getvalue().encode('utf-8-sig'), media_type='text/csv',
+                        headers={'Content-Disposition': f'attachment; filename="diagnostics-{task_id}.csv"'})
+    if format == 'html':
+        from html import escape
+        def table(headers, rows):
+            head = ''.join('<th>' + escape(h) + '</th>' for h in headers)
+            body = ''.join('<tr>' + ''.join('<td>' + escape(str(v if v is not None else '—')) +
+                           '</td>' for v in row) + '</tr>' for row in rows)
+            return '<table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table>'
+        html = ('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>抓包分析报告</title>'
+                '<style>body{max-width:1000px;margin:3em auto;padding:1em;font:16px system-ui;color:#203044}'
+                'h1{border-bottom:3px solid #d70c1a}table{border-collapse:collapse;width:100%}'
+                'td,th{padding:8px;text-align:left;border-bottom:1px solid #ddd}</style>'
+                '<h1>GB28181 抓包分析报告</h1><p>' + escape(file.filename if file else task.name) +
+                '</p><h2>会话</h2>' + table(['会话', '设备', '类型', '信令', '媒体'],
+                    ((v.id, v.device_id, v.session_type, v.signal_status.value, v.media_status.value) for v in sessions)) +
+                '<h2>媒体流</h2>' + table(['SSRC', '传输', '源端', '接收端', 'RTP 包数', '编码'],
+                    ((v.ssrc, v.transport, v.source_ip, v.destination_ip, v.packet_count, v.codec) for v in streams)) +
+                '<h2>诊断与处置</h2>' + table(['规则', '严重度', '结论', '依据', '建议'],
+                    ((v.rule_id, v.severity.value, v.title, v.description, '；'.join(map(str, v.recommendations or [])))
+                     for v in diagnostics)) + '</html>')
+        return Response(html, media_type='text/html',
+                        headers={'Content-Disposition': f'attachment; filename="report-{task_id}.html"'})
     if format != 'md':
         raise HTTPException(400, '不支持的格式，可选 md / json')
 

@@ -352,7 +352,15 @@ def _post(body: dict, on_delta=None) -> str:
     return text
 
 
-def analyze(db, task_id: int, on_delta=None, context=None) -> str:
+EXPERTS = {
+    'general': '综合研判：先给结论，再列信令与媒体的交叉证据和最短验证路径。',
+    'sip': '信令专家：按事务与方向核对 INVITE、最终响应、ACK 和 BYE。区分重传、超时与明确拒绝。',
+    'media': '媒体专家：核对 SDP 和 RTP 的地址、端口、SSRC 与方向，再对照序号缺口、编码和重建结果。',
+    'field': '现场排障专家：给出按优先级排列的检查步骤，每步注明检查端、预期观测和下一步分支。'
+}
+
+
+def analyze(db, task_id: int, on_delta=None, context=None, expert='general') -> str:
     cfg = load_config()
     ctx = context if context is not None else build_context(db, task_id)
     if not ctx.strip():
@@ -361,7 +369,7 @@ def analyze(db, task_id: int, on_delta=None, context=None) -> str:
     body = {
         'model': cfg.get('model') or DEFAULT_MODEL,
         'messages': [
-            {'role': 'system', 'content': SYSTEM_PROMPT},
+            {'role': 'system', 'content': SYSTEM_PROMPT + '\n' + EXPERTS[expert]},
             {'role': 'user',
              'content': '以下是抓包分析摘要，请给出排查报告：\n\n' + ctx},
         ],
@@ -375,7 +383,7 @@ def analyze(db, task_id: int, on_delta=None, context=None) -> str:
     return _post(body, on_delta)
 
 
-def chat(db, task_id: int, history: list, question: str, on_delta=None, context=None) -> str:
+def chat(db, task_id: int, history: list, question: str, on_delta=None, context=None, expert='general') -> str:
     if not (question or '').strip():
         raise RuntimeError('问题不能为空')
 
@@ -383,7 +391,7 @@ def chat(db, task_id: int, history: list, question: str, on_delta=None, context=
     ctx = context if context is not None else build_context(db, task_id)
 
     msgs = [
-        {'role': 'system', 'content': SYSTEM_PROMPT + CHAT_SUFFIX},
+        {'role': 'system', 'content': SYSTEM_PROMPT + '\n' + EXPERTS[expert] + CHAT_SUFFIX},
         {'role': 'user', 'content': '以下是抓包分析摘要：\n\n' + ctx},
         {'role': 'assistant',
          'content': '好的，我已了解这份抓包的分析结果，可以回答后续问题。'},

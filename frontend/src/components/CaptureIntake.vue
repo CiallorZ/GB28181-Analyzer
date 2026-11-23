@@ -7,7 +7,34 @@ const props = defineProps({
   progress: { type: Number, default: 0 },
   error: { type: String, default: '' }
 })
-const emit = defineEmits(['file', 'sample'])
+const emit = defineEmits(['file', 'sample', 'recorded'])
+const adapters = ref([])
+const selectedAdapter = ref(null)
+const seconds = ref(15)
+const recording = ref(false)
+const recordMsg = ref('')
+async function loadAdapters() {
+  try {
+    const res = await fetch('/api/v1/intake/interfaces')
+    const data = await res.json()
+    if (!res.ok) throw Error(data.detail || '无法读取网卡')
+    adapters.value = data
+    selectedAdapter.value = data[0]?.id
+    recordMsg.value = data.length ? '' : '未发现可采集网卡'
+  } catch(e) { recordMsg.value = e.message }
+}
+async function record() {
+  recording.value = true
+  recordMsg.value = '正在采集，达到时长或 64 MiB 后自动结束。'
+  try {
+    const res = await fetch('/api/v1/intake/record', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({interface:selectedAdapter.value,seconds:seconds.value})})
+    const data = await res.json()
+    if(!res.ok) throw Error(data.detail || '采集失败')
+    await api.analyze(data.task_id)
+    emit('recorded', data.task_id)
+  } catch(e) { recordMsg.value = e.message }
+  finally {recording.value = false}
+}
 const picker = ref(null)
 const dragging = ref(false)
 const history = ref(null)
@@ -70,6 +97,9 @@ function drop(event) {
           </button>
           <button type="button" class="sample-button" :disabled="busy" @click="emit('sample')">试用示例抓包 <span aria-hidden="true">↗</span></button>
         </div>
+        <details class="live"><summary>从本机网卡采集</summary><button class="btn" @click="loadAdapters" :disabled="recording">读取网卡</button>
+          <template v-if="adapters.length"><select v-model="selectedAdapter" aria-label="采集网卡"><option v-for="a in adapters" :key="a.id" :value="a.id">{{a.name}}</option></select><label>时长（秒）<input type="number" v-model.number="seconds" min="1" max="120"></label><button class="btn" @click="record" :disabled="recording || busy">开始采集</button></template>
+          <p role="status">{{recordMsg}}</p></details>
         <progress v-if="busy" :value="progress" max="100" aria-label="抓包导入进度"></progress>
         <div class="hero-note">支持 PCAP / PCAPNG / CAP <span></span> 抓包由分析服务所在设备处理</div>
         <div v-if="error" class="hero-error" role="alert">{{ error }}</div>
@@ -140,4 +170,4 @@ function drop(event) {
 @media (max-width:850px) { .capture-home { padding:20px 16px 48px; }.hero { grid-template-columns:1fr; }.hero-copy { padding:36px 28px; }.exchange { border-inline-start:0; border-top:1px solid var(--line); }.workspace-body { grid-template-columns:1fr; gap:30px; } }
 @media (max-width:480px) { .hero-copy { padding:32px 22px; }.hero h1 { font-size:clamp(26px,7.5vw,34px); text-wrap:balance; }.layer-code { font-size:10px; } }
 @media (prefers-reduced-motion:reduce) { .upload-button,.sample-button { transition:none; }.upload-button:hover:not(:disabled) { transform:none; } }
-</style>
+.live{margin:14px 0;color:var(--text-2);font-size:13px}.live summary{cursor:pointer}.live select,.live input{max-width:100%;margin:6px;padding:5px}.live input{width:6em}</style>

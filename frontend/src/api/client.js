@@ -16,11 +16,34 @@ client.interceptors.response.use(
   }
 )
 
+async function resumableUpload(file, progress) {
+  const chunk = 8 * 1024 * 1024
+  const hashes = []
+  for (let offset = 0; offset < file.size; offset += chunk) {
+    const bytes = await file.slice(offset, offset + chunk).arrayBuffer()
+    const hash = await crypto.subtle.digest('SHA-256', bytes)
+    hashes.push(Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, '0')).join(''))
+  }
+  const { data } = await client.post('/intake/resume', { name: file.name, size: file.size, hashes })
+  const received = new Set(data.received)
+  for (let i = 0; i < hashes.length; i++) {
+    if (!received.has(i)) {
+      const fd = new FormData()
+      fd.append('file', file.slice(i * chunk, (i + 1) * chunk))
+      await client.put(`/intake/resume/${data.key}/${i}`, fd)
+    }
+    progress?.(Math.round((i + 1) * 99 / hashes.length))
+  }
+  return (await client.post(`/intake/resume/${data.key}/finish`, {}, {timeout:0})).data
+}
+
 export const api = {
   health: () => client.get('/health').then(r => r.data),
   rules: () => client.get('/rules').then(r => r.data),
 
   upload: (file, onProgress) => {
+    if (file.size > 16 * 1024**3) throw Error('抓包超过 16 GiB 上限')
+    if (file.size > 32 * 1024**2 && window.crypto?.subtle) return resumableUpload(file, onProgress)
     const fd = new FormData()
     fd.append('file', file)
     return client.post('/tasks/upload', fd, {

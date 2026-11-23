@@ -49,6 +49,8 @@ def main():
 
 
 def run_desktop(args, data_dir, listener):
+    if args.desktop_child:
+        os.environ['GB_DESKTOP_CAPTURE'] = '1'
     os.environ.update(
         HOST=HOST, PORT=str(args.port), DATA_DIR=str(data_dir),
         DATABASE_URL='sqlite:///' + (data_dir / 'analyzer.db').as_posix(),

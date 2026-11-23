@@ -3,6 +3,8 @@
 """DeepSeek AI 分析接口（SSE 流式）"""
 from __future__ import annotations
 
+from typing import Literal
+
 import hashlib
 import json
 
@@ -28,10 +30,12 @@ class ConfigIn(BaseModel):
 class ChatIn(BaseModel):
     question: str
     history: list = []
+    expert: Literal['general', 'sip', 'media', 'field'] = 'general'
     context_hash: str | None = None
 
 
 class AnalyzeIn(BaseModel):
+    expert: Literal['general', 'sip', 'media', 'field'] = 'general'
     context_hash: str | None = None
 
 
@@ -105,7 +109,8 @@ def analyze_stream(task_id: int, body: AnalyzeIn = AnalyzeIn(), db: Session = De
             try:
                 def on_delta(t):
                     q.put(('delta', t))
-                text = ai.analyze(db, task_id, on_delta=on_delta, context=context)
+                text = ai.analyze(db, task_id, on_delta=on_delta, context=context,
+                                  expert=body.expert)
                 result['text'] = text
                 q.put(('done', text))
             except RuntimeError as e:
@@ -153,7 +158,8 @@ def chat(task_id: int, body: ChatIn, db: Session = Depends(get_db)):
                 def on_delta(t):
                     q.put(('delta', t))
                 text = ai.chat(db, task_id, body.history, body.question,
-                               on_delta=on_delta, context=context)
+                               on_delta=on_delta, context=context,
+                                  expert=body.expert)
                 q.put(('done', text))
             except RuntimeError as e:
                 q.put(('error', str(e)))

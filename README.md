@@ -6,7 +6,7 @@
 [![GitHub Release](https://img.shields.io/github/v/release/CiallorZ/gb28181-analyzer)](https://github.com/CiallorZ/gb28181-analyzer/releases/latest)
 [![MIT License](https://img.shields.io/badge/license-MIT-3fb950)](LICENSE)
 
-**[下载 Windows x64 便携包（v0.7.0）](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v0.7.0/gb28181-analyzer-windows-x64-v0.7.0.zip)** · [所有版本](https://github.com/CiallorZ/gb28181-analyzer/releases) · [Windows 使用说明](docs/WINDOWS.md)
+**[下载 Windows x64 便携包（v0.8.0）](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v0.8.0/gb28181-analyzer-windows-x64-v0.8.0.zip)** · [所有版本](https://github.com/CiallorZ/gb28181-analyzer/releases) · [Windows 使用说明](docs/WINDOWS.md)
 
 ## Windows 快速开始
 
@@ -53,7 +53,7 @@ Windows 版默认仅监听本机，数据保存在 `%LOCALAPPDATA%\GB28181 Analy
 - SIP 响应成功、收到媒体和画面可播放是三个独立结果。判断依据来自当前抓包点及其覆盖的时间范围。
 - RTP 序号缺口反映抓包中看到的缺失区间。TCP 承载的到达时间可能是估算值，抖动与丢包结论需要结合证据等级阅读。无法计算的指标显示为「—」或「无法计算」。
 - 工作台趋势图展示报文量最高的 12 条媒体流，流列表仍保留其余流。上传使用单请求，默认单文件上限为 2048 MB。
-- 当前版本的规则目录包含规划中的规则。RTCP 质量分析和设备拓扑图尚未提供，H.265 帧统计暂未细分 B 帧。
+- 当前版本的规则目录包含规划中的规则。工作台支持按需查看 TShark 识别的 RTCP 接收报告块、目录层级和 SIP/RTP 端点关系；H.265 帧统计暂未细分 B 帧。
 
 ## Docker 部署
 
