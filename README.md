@@ -2,12 +2,12 @@
 
 适用于 Windows x64 的 GB/T 28181 离线抓包分析工作站。遇到「点播有响应，画面却没有出来」，可以沿同一会话核对信令、媒体和视频重建结果，并导出带证据的报告。
 
-**[下载 v1.1.4 便携包](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v1.1.4/gb28181-analyzer-windows-x64-v1.1.4.zip)** · [校验和与版本记录](https://github.com/CiallorZ/gb28181-analyzer/releases/tag/v1.1.4)
+**[下载 v1.1.4 Windows x64 离线单文件 EXE](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v1.1.4/GB28181-Analyzer-v1.1.4-offline-x64.exe)** · [校验和与版本记录](https://github.com/CiallorZ/gb28181-analyzer/releases/tag/v1.1.4)
 
 ## 首次打开
 
-1. 安装 Wireshark x64 并选装 TShark。读取已有抓包无需 Npcap。视频重建还需将 FFmpeg 和 FFprobe 加入 PATH。
-2. 完整解压 ZIP，运行 GB28181-Analyzer.exe。桌面窗口使用 WebView2，应用自带前后端运行环境。在「设置」检查依赖状态。
+1. 双击离线 EXE。首次启动会将内置工具解压到当前用户的本机缓存，后续打开复用缓存。整个过程无需管理员权限。
+2. 程序自带 TShark、Capinfos、FFmpeg、FFprobe 和固定版本 WebView2。分析已有抓包和重建视频无需联网或配置 PATH。实时网卡采集另需 Npcap 驱动。
 3. 拖入 PCAP、PCAPNG 或 CAP 文件，或先点击「试用示例抓包」。分析完成后从工作台的关键诊断进入证据。
 
 ## 从结论查到报文

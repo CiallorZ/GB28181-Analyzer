@@ -1,5 +1,9 @@
 # GB28181 Analyzer · Windows
 
+推荐下载发布页名称含 offline-x64 的单文件 EXE，双击即可运行。首次展开运行时需要数 GB 磁盘空间。再次启动复用缓存。窗口关闭后，可删除应用数据目录中的 runtime 子目录以释放缓存；请保留抓包和历史数据库。
+
+## 精简 ZIP 的安装方式
+
 适用于 Windows x64。ZIP 内含分析服务与前端，运行时无需安装 Python 或 Node.js。
 
 1. 安装 [Wireshark x64](https://www.wireshark.org/download.html)，在安装选项里勾选 **TShark**。读取已有抓包可以跳过 Npcap；需要现场实时采集时请安装 Npcap。
