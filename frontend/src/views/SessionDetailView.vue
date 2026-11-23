@@ -5,8 +5,10 @@ import { loadECharts } from '../utils/chartLoader'
 import { chartBase as baseOption, chartPalette } from '../utils/chartTheme'
 import { bindChartResize } from '../utils/chartResize'
 import { api } from '../api/client'
+import { useTaskStore } from '../stores/task'
 import PageNav from '../components/PageNav.vue'
 
+const store = useTaskStore()
 const route = useRoute()
 const router = useRouter()
 const sid = Number(route.params.id)
@@ -47,7 +49,11 @@ let C = chartPalette()
 async function load() {
   loading.value = true
   try {
-    session.value = await api.session(sid)
+    const [detail, source] = await Promise.all([api.session(sid), api.sessionSource(sid)])
+    if (!active) return
+    session.value = { ...detail, task_id: source.task_id }
+    store.setCurrent(source.task_id)
+    if (!store.task) store.loadTask(source.task_id).catch(() => {})
     const [sipRes, tlRes, mediaRes, metricRes, diagRes] = await Promise.all([
       api.sessionSip(sid), api.sessionTimeline(sid),
       api.sessionMedia(sid), api.sessionMetrics(sid),
@@ -59,7 +65,7 @@ async function load() {
     metrics.value = metricRes.items || []
     diagnostics.value = diagRes.items || []
     await nextTick()
-    renderCharts()
+    if (active) renderCharts()
   } catch (e) {
     err.value = e.message
   } finally {
@@ -169,6 +175,7 @@ function downloadSvg() {
 
 const fmt = (v, d = 3) => v == null ? '—' : Number(v).toFixed(d)
 
+let active = true
 let unbindResize = null
 onMounted(async () => {
   window.addEventListener('alma-theme-changed', renderCharts)
@@ -176,6 +183,7 @@ onMounted(async () => {
   await load()
 })
 onUnmounted(() => {
+  active = false
   window.removeEventListener('alma-theme-changed', renderCharts)
   unbindResize?.()
   Object.values(charts).forEach(instance => instance.dispose())
@@ -187,7 +195,7 @@ onUnmounted(() => {
     <PageNav
       :title="`会话 #${sid}`"
       :sub="session ? `${session.device_id || '未知设备'} · ${session.session_type === 'live' ? '实时点播' : '回放'} · ${session.start_time?.toFixed(2)}s 开始` : ''"
-      :crumbs="[{label:'工作台', to:'/'}, {label:'点播会话', to:'/sessions'}, {label:`会话 #${sid}`}]" />
+      :crumbs="[{label:'工作台', to:'/'}, {label:session ? '任务 #'+session.task_id : '历史任务', to:session ? '/tasks/'+session.task_id : '/tasks'}, {label:`会话 #${sid}`}]" />
 
     <div v-if="err" class="err-box">{{ err }}</div>
 

@@ -93,13 +93,19 @@ function identifiers(values) {
           结构或精确值差异 {{ data.summary.structural }} 项，超出对比容差 {{ data.summary.beyond_tolerance }} 项，无法比较 {{ data.summary.unknown }} 项。</p>
         <p class="meta">{{ data.result.methods }}</p>
         <p v-if="data.result.truncated">明细已截断。全量对齐会话 {{ data.result.totals.sessions }}、媒体流 {{ data.result.totals.streams }}、诊断规则 {{ data.result.totals.diagnostics }}。</p>
+        <ul v-if="data.result.truncated && data.result.detail_counts">
+          <li v-for="(counts,layer) in data.result.detail_counts" :key="layer">
+            {{ layer==='diagnostics'?'诊断规则':layerNames[layer] }} · 差异记录保留 {{ counts.kept_different }} / {{ counts.different }}，
+            未对齐记录保留 {{ counts.kept_unmatched }} / {{ data.result.unmatched_totals[layer] }}
+          </li>
+        </ul>
       </section>
       <div class="row-between wrapx">
         <nav class="row wrapx" aria-label="对比层面"><button v-for="([name],i) in groups" :key="name" class="btn"
           :aria-pressed="tab===i" @click="tab=i">{{ name }}</button></nav>
         <label><input type="checkbox" v-model="onlyDiff"> 只看差异（含未知）</label>
       </div>
-      <p v-if="!visible.length" class="card card-body">当前分区没有符合条件的记录。</p>
+      <p v-if="!visible.length" class="card card-body">{{ data.result.truncated ? '此快照保留的明细中没有符合条件的记录。' : '当前分区没有符合条件的记录。' }}</p>
       <article class="card" v-for="r in pageRows" :key="r.rule_id || r.a">
         <div class="card-body">
           <div class="row wrapx">

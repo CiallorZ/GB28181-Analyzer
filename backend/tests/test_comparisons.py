@@ -99,6 +99,10 @@ def test_api_contract_and_snapshot(db, client, make_task):
     assert data['label_a'] == '设备侧|A' and not data['stale']
     assert data['result']['sessions'][0]['fields']['negotiated_port'] == [5060,5060,'same']
     assert data['fingerprint']['a']['sessions'] == 1 and 'checksum' in data['fingerprint']['a']['files'][0]
+    for side in 'ab':
+        session_id = data['result']['sessions'][0][side]
+        assert client.get(f'/api/v1/sessions/{session_id}/source').json() == {'task_id': pair[f'task_{side}_id']}
+    assert client.get('/api/v1/sessions/-1/source').status_code == 404
     assert client.get(url).json() == data
     assert client.get(url+'/report?format=json').json() == data
     md = client.get(url+'/report?format=md')
@@ -229,3 +233,25 @@ def test_source_changes_and_missing_links(db, client, make_task, change):
     db.commit()
     stale = client.get(url).json()
     assert stale['stale'] and stale['fingerprint'] == data['fingerprint'] and stale['result'] == data['result']
+
+
+def test_late_difference_and_unmatched_survive_in_both_reports(client, make_task, db):
+    pair = task_pair(make_task)
+    for side in 'ab':
+        size = 202 if side == 'a' else 201
+        db.execute(insert(BusinessSession), [
+            dict(task_id=pair[f'task_{side}_id'], call_ids=[str(i)],
+                 negotiated_port=5002 if i == 200 and side == 'b' else 5000)
+            for i in range(size)])
+    db.commit()
+    data = client.post(API, json=pair).json()
+    url = f"{API}/{data['id']}/report"
+    result = data['result']
+    assert result['detail_counts']['sessions'] == {'different':1, 'kept_different':1, 'kept_unmatched':1}
+    assert result['sessions'][0]['fields']['negotiated_port'] == [5000,5002,'different']
+    assert result['unmatched'][0]['observed']['call_ids'] == ['201']
+    assert len(result['sessions']) == 199
+    assert client.get(url+'?format=json').json() == data
+    report = client.get(url).text
+    assert '差异记录保留 1 / 1，未对齐记录保留 1 / 1' in report
+    assert '| negotiated_port | 5000 | 5002 | different |' in report

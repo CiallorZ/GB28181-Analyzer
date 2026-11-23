@@ -112,6 +112,20 @@ def alignment_evidence(layer, method, a, b):
 def snapshot(sessions, streams, events):
     result = {k: [] for k in LIMITS}
     result.update(unmatched=[], limitations=LIMITATIONS, methods=METHODS, tolerances=TOLERANCES)
+    # Each bucket is bounded while scanning. Rows outside the detail budget still count.
+    buckets = {layer: defaultdict(list) for layer in LIMITS}
+    differing = Counter()
+    def retain(layer, bucket, row):
+        items = buckets[layer][bucket]
+        if len(items) < LIMITS[layer]:
+            items.append(row)
+
+    def retain_pair(layer, row):
+        statuses = {cell[2] for cell in row['fields'].values()}
+        changed = bool(statuses & {'different', 'only_a', 'only_b'})
+        differing[layer] += changed
+        retain(layer, 'changed' if changed else 'unknown' if 'unknown' in statuses else 'same', row)
+
     counts = Counter()
     unmatched_counts = Counter()
     summary = dict(aligned_sessions=0, aligned_streams=0, structural=0, beyond_tolerance=0, unknown=0)
@@ -126,11 +140,11 @@ def snapshot(sessions, streams, events):
             for side, group in [('a', aa), ('b', bb)]:
                 for row in group:
                     unmatched_counts[layer] += 1
-                    if unmatched_counts[layer] <= LIMITS[layer]:
+                    if len(buckets[layer][method]) < LIMITS[layer]:
                         identifiers = {'sessions': ('call_ids', 'device_id', 'channel_id'),
                                        'streams': ('session_id', 'ssrc', 'transport', 'payload_type'),
                                        'diagnostics': ('rule_id', 'session_id', 'stream_id')}[layer]
-                        result['unmatched'].append(dict(layer=layer, side=side, id=row['id'], method=method,
+                        retain(layer, method, dict(layer=layer, side=side, id=row['id'], method=method,
                             observed={key: row[key] for key in identifiers},
                             status='ambiguous' if method == 'ambiguous' else 'only_' + side))
             return
@@ -145,12 +159,10 @@ def snapshot(sessions, streams, events):
                 summary['beyond_tolerance' if field in TOLERANCES else 'structural'] += 1
             elif status == 'unknown':
                 summary['unknown'] += 1
-            if counts[layer] <= LIMITS[layer]:
-                cells[field] = [x, y, status]
+            cells[field] = [x, y, status]
         for side, row in enumerate((a, b)):
             eligible[side][int(layer == 'streams')].add(row['id'])
-        if counts[layer] <= LIMITS[layer]:
-            result[layer].append(dict(a=a['id'], b=b['id'], session_a=a.get('session_id', a['id']),
+        retain_pair(layer, dict(a=a['id'], b=b['id'], session_a=a.get('session_id', a['id']),
                 session_b=b.get('session_id', b['id']), method=method, evidence=alignment_evidence(layer, method, a, b),
                 confidence='low' if 'inferred' in (method, confidence) else 'high', fields=cells))
 
@@ -186,19 +198,24 @@ def snapshot(sessions, streams, events):
                 summary['structural'] += 1
             elif status == 'unknown':
                 summary['unknown'] += 1
-        if counts['diagnostics'] <= LIMITS['diagnostics']:
-            result['diagnostics'].append(dict(rule_id=key, fields=fields))
+        retain_pair('diagnostics', dict(rule_id=key, fields=fields))
     result['totals'] = {k: counts[k] for k in LIMITS}
     result['unmatched_totals'] = {k: unmatched_counts[k] for k in LIMITS}
-    # Reserve each layer's shared detail budget for aligned records first.
-    remaining = {layer: cap - len(result[layer]) for layer, cap in LIMITS.items()}
-    kept = []
-    for row in result['unmatched']:
-        layer = row['layer']
-        if remaining[layer]:
-            kept.append(row)
-            remaining[layer] -= 1
-    result['unmatched'] = kept
+    result['detail_counts'] = {}
+    for layer, cap in LIMITS.items():
+        pool = buckets[layer]
+        unpaired = pool['ambiguous'] + pool['unmatched']
+        paired = pool['changed'] + pool['unknown'] + pool['same']
+        # Keep up to a quarter for unpaired evidence; reuse every unused slot.
+        reserve = min(len(unpaired), max(1, cap // 4)) if cap > 1 else 0
+        result[layer] = paired[:cap - reserve]
+        if counts[layer] + unmatched_counts[layer] <= cap:
+            order_key = 'rule_id' if layer == 'diagnostics' else 'a'
+            result[layer].sort(key=lambda row: row[order_key])
+        kept = unpaired[:cap - len(result[layer])]
+        result['unmatched'].extend(kept)
+        result['detail_counts'][layer] = dict(different=differing[layer],
+            kept_different=min(len(pool['changed']), len(result[layer])), kept_unmatched=len(kept))
     result['truncated'] = any(counts[k] + unmatched_counts[k] > cap for k, cap in LIMITS.items())
     summary['unaligned'] = sum(unmatched_counts.values())
     return result, summary

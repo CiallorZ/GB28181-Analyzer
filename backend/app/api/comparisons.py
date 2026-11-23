@@ -138,6 +138,11 @@ def markdown(data):
                   f"已对齐 {summary['aligned_sessions']} 个会话、{summary['aligned_streams']} 条媒体流。"
                   f"结构或精确值差异 {summary['structural']} 项，超出对比容差 {summary['beyond_tolerance']} 项，"
                   f"无法比较 {summary['unknown']} 项。单列未对齐记录 {summary['unaligned']} 条。"])
+    if result['truncated']:
+        for layer, stats in result.get('detail_counts', {}).items():
+            name = {'sessions': '会话', 'streams': '媒体流', 'diagnostics': '诊断规则'}[layer]
+            lines.append(f"- {name}：差异记录保留 {stats['kept_different']} / {stats['different']}，"
+                         f"未对齐记录保留 {stats['kept_unmatched']} / {result['unmatched_totals'][layer]}")
     unknowns = 0
     sdp = {k for k in SESSION_FIELDS if k.startswith(('negotiated_', 'sdp_'))} | {'subject_ssrc'}
     encoding = {'codec', 'width', 'height', 'fps', 'keyframe_count', 'has_audio', 'rebuild'}

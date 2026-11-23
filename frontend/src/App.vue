@@ -122,7 +122,7 @@ onUnmounted(() => {
     <main class="main">
       <router-view v-slot="{ Component }">
         <transition name="fade" mode="out-in">
-          <component :is="Component" />
+          <component :is="Component" :key="route.name === 'session-detail' ? route.path : undefined" />
         </transition>
       </router-view>
     </main>

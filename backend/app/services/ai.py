@@ -171,9 +171,9 @@ def build_context(db, task_id: int) -> str:
         lines.append('## 媒体流（列出 %d / %d 条）' % (len(streams), stream_total))
         for r in streams:
             lines.append(
-                '- SSRC=0x%08x %s %s→%s 包数=%d 码率=%s kbps 抖动=%s ms '
+                '- SSRC=%s %s %s→%s 包数=%d 码率=%s kbps 抖动=%s ms '
                 '序号缺口=%d包 乱序=%d 最大静默=%ss' % (
-                    r.ssrc or 0, r.transport,
+                    ('未知' if r.ssrc is None else f'0x{r.ssrc:08x}'), r.transport,
                     r.source_port or '?', r.destination_port or '?',
                     r.packet_count,
                     r.avg_bitrate if r.avg_bitrate is not None else '未知',

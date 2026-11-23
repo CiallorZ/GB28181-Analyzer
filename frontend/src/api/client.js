@@ -67,6 +67,7 @@ export const api = {
 
   sessions: (taskId, params) => client.get(`/tasks/${taskId}/sessions`, { params }).then(r => r.data),
   session: (id) => client.get(`/sessions/${id}`).then(r => r.data),
+  sessionSource: id => client.get(`/sessions/${id}/source`).then(r => r.data),
   sessionSip: (id) => client.get(`/sessions/${id}/sip`).then(r => r.data),
   sessionTimeline: (id) => client.get(`/sessions/${id}/timeline`).then(r => r.data),
   sessionMedia: (id) => client.get(`/sessions/${id}/media`).then(r => r.data),
