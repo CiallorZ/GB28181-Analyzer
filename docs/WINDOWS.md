@@ -13,6 +13,8 @@
 
 应用默认只监听本机。数据保存在 `%LOCALAPPDATA%\GB28181 Analyzer`，可用 `--data-dir` 改位置。应用自动分配本机端口。关闭主窗口会终止仍在进行的分析，请等待导出完成。
 
+运行日志位于 `%LOCALAPPDATA%\GB28181 Analyzer\logs\analyzer.log`，单文件最多 5 MiB，保留 3 份历史。应用版本变化时会在 `backups` 目录自动备份现有 SQLite 数据库，保留最近 5 份。反馈启动或分析异常时，可一并提供日志和对应任务编号。
+
 工具安装在自定义位置时，可在同一个 PowerShell 窗口设置环境变量，再启动应用。
 
 ```powershell

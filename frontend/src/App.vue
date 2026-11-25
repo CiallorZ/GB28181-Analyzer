@@ -41,6 +41,24 @@ const engine = computed(() => {
 
 const task = computed(() => store.task)
 
+function setNativeBusy(busy) {
+  const invoke = window.__TAURI__?.core?.invoke
+  if (invoke) invoke('set_analysis_busy', { busy }).catch(() => {})
+}
+
+watch(() => store.isAnalyzing, (active) => {
+  document.title = active
+    ? '分析中 · GB28181 Analyzer'
+    : 'GB28181 Analyzer · 视联网分析工作台'
+  setNativeBusy(active)
+}, { immediate: true })
+
+function guardUnload(event) {
+  if (!store.isAnalyzing) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+
 async function loadHealth() {
   try {
     health.value = await api.health()
@@ -58,6 +76,7 @@ let healthTimer = null
 
 onMounted(() => {
   systemTheme.addEventListener('change', applyTheme)
+  window.addEventListener('beforeunload', guardUnload)
   applyTheme()
   loadHealth()
 
@@ -66,6 +85,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   systemTheme.removeEventListener('change', applyTheme)
+  window.removeEventListener('beforeunload', guardUnload)
   // 不清的话热更新会累积多个定时器，反复打健康检查
   if (healthTimer) { clearInterval(healthTimer); healthTimer = null }
 })

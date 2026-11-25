@@ -26,6 +26,8 @@ from ..core import analysis_control
 from ..parsers import capture
 
 MAX_SECONDS = 60          # 单条流转码时长上限
+PS_SAMPLE_SECONDS = 60    # 编码分析与预览只取开头的可解码窗口
+PS_SAMPLE_BYTES = 256 * 1024 * 1024
 FFMPEG_TIMEOUT = 900
 MIN_PS_BYTES = 4096       # 小于这个不值得转码
 
@@ -50,6 +52,7 @@ class RebuildResult:
     source_height: int | None = None
     error: str | None = None
     aligned: bool = False
+    sampled: bool = False
     ps_bytes: int = 0
 
 
@@ -95,6 +98,38 @@ def align_to_params(data: bytes) -> tuple[bytes, bool]:
 # ---------------------------------------------------------------
 # 从 RTP 包提取 PS
 # ---------------------------------------------------------------
+def sample_timed_payloads(pkts, max_seconds: float = PS_SAMPLE_SECONDS,
+                          max_bytes: int = PS_SAMPLE_BYTES):
+    """截取有界 RTP 载荷，并保留每个载荷的到达时间。
+
+    质量指标仍使用完整流。这里限制的是 PS/ES 解封装和预览，
+    避免一条长流在内存里再复制一份几百 MB 的字节串。
+    """
+    pairs = []
+    total = 0
+    started = None
+    payload_count = 0
+    for packet in pkts:
+        if not packet.payload:
+            continue
+        payload_count += 1
+        if started is None:
+            started = packet.arrival
+        if packet.arrival - started > max_seconds:
+            continue
+        if pairs and total + len(packet.payload) > max_bytes:
+            continue
+        pairs.append((packet.payload, packet.arrival))
+        total += len(packet.payload)
+    return pairs, len(pairs) < payload_count
+
+
+def sample_payloads(pkts, max_seconds: float = PS_SAMPLE_SECONDS,
+                    max_bytes: int = PS_SAMPLE_BYTES):
+    pairs, sampled = sample_timed_payloads(pkts, max_seconds, max_bytes)
+    return [payload for payload, _arrival in pairs], sampled
+
+
 def extract_ps_from_packets(pkts) -> bytes:
     """把 RTP 载荷按顺序拼成 PS 流
 
@@ -269,7 +304,8 @@ def rebuild_stream(pkts, out_dir: str, tag: str,
         res.error = '该流没有 RTP 包'
         return res
 
-    ps = extract_ps_from_packets(pkts)
+    payloads, res.sampled = sample_payloads(pkts)
+    ps = b''.join(payloads)
     res.ps_bytes = len(ps)
     if len(ps) < MIN_PS_BYTES:
         res.error = 'PS 数据不足（%d 字节），无法解码' % len(ps)

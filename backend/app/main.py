@@ -19,14 +19,12 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import __version__
 from .api import ai, comparisons, diagnostics, evidence, intake, sessions, tasks
 from .core.config import settings
-from .core.db import init_db
+from .core.db import backup_before_upgrade, init_db
+from .core.logging import configure_logging
 from .core.security import origin_allowed
 from .parsers import capture
 
-logging.basicConfig(
-    level=logging.INFO if not settings.DEBUG else logging.DEBUG,
-    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-)
+LOG_PATH = configure_logging(settings.LOG_DIR, settings.DEBUG)
 log = logging.getLogger('gb28181')
 
 app = FastAPI(
@@ -87,6 +85,12 @@ app.include_router(ai.router, prefix=API)
 
 @app.on_event('startup')
 def _startup():
+    try:
+        backup = backup_before_upgrade()
+        if backup:
+            log.info('数据库升级前备份：%s', backup)
+    except Exception as exc:
+        log.exception('数据库升级前备份失败：%s', exc)
     init_db()
 
     # 清理上次异常退出遗留的 analyzing 任务，否则会一直显示"分析中"
@@ -141,6 +145,8 @@ def health():
         'tshark_path': capture.TSHARK,
         'ffmpeg_path': capture.FFMPEG,
         'database': settings.DATABASE_URL.split('://')[0],
+        'log_path': str(LOG_PATH),
+        'data_dir': str(settings.DATA_DIR),
     }
 
 

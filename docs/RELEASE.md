@@ -71,6 +71,7 @@ git push origin vX.Y.Z
   修复后用新补丁版本重发，不改已发布的 tag。
 
 本地复现 Windows 构建时，在 Windows x64 使用 Python 3.12、Node.js 20 和 PowerShell 7。
+桌面壳还需要 Rust 工具链与 WebView2 构建依赖。安装 rustup 后重新打开终端，确保 cargo 位于 PATH；脚本也会检查用户目录下的 .cargo/bin/cargo.exe。
 
 ```powershell
 python -m pip install -r backend/requirements.txt pyinstaller==6.19.0

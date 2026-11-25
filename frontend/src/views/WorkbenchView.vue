@@ -536,7 +536,8 @@ const codecList = computed(() =>
     frameCount: st.frame_count,
     keyframeCount: st.keyframe_count,
     transport: st.transport,
-    ps: st.extra?.ps || null
+    ps: st.extra?.ps || null,
+    psSampled: Boolean(st.extra?.ps_sampled)
   })).filter(x => x.codec || x.ps)
 )
 
@@ -1235,6 +1236,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
                     <td class="mono-sm">
                       {{ x.ps?.video?.profile || '—' }}
                       <template v-if="x.ps?.video?.level"> / L{{ x.ps.video.level }}</template>
+                      <template v-if="x.ps?.video?.bit_depth"> · {{ x.ps.video.bit_depth }} bit</template>
                     </td>
                     <td class="mono-sm">
                       {{ x.width && x.height ? `${x.width}×${x.height}` : '—' }}
@@ -1259,6 +1261,9 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
               <strong>解析说明</strong>：分辨率与帧结构由 SPS 解析得出，不依赖 ffmpeg。
               若抓包起始于 GOP 中间，可能缺少参数集导致无法解析——
               此时显示「未识别」而非猜测值。
+              <template v-if="codecList.some(x => x.psSampled)">
+                编码结构只取样流开头 60 秒或 256 MiB，媒体质量指标仍覆盖完整流。
+              </template>
             </div>
           </template>
           <div v-else class="empty">

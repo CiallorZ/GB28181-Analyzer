@@ -54,6 +54,8 @@ def test_udp_basic_end_to_end(db, tmp_path):
 
     s = t.summary or {}
     assert s['packet_count'] == 126
+    assert t.files[0].ip_count == 2
+    assert t.files[0].udp_count > 100
     assert s['session_count'] == 1
     assert s['sessions_with_media'] == 1
 

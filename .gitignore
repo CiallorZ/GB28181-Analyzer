@@ -41,6 +41,9 @@ yarn-error.log*
 data/uploads/
 data/rebuilt/
 data/reports/
+data/logs/
+data/backups/
+data/db-version.txt
 data/*.db
 data/*.db-wal
 data/*.db-shm

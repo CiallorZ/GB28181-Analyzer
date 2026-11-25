@@ -4,6 +4,9 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+import sqlite3
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
@@ -39,6 +42,45 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False,
 def init_db():
     """建表。生产环境应改用迁移脚本（migrations/）。"""
     Base.metadata.create_all(engine)
+
+
+def backup_sqlite(path: Path, backup_dir: Path, marker: Path,
+                  version: str, keep: int = 5) -> Path | None:
+    """在应用版本变化前，用 SQLite 在线备份 API 复制现有数据库。"""
+    path = Path(path)
+    backup_dir = Path(backup_dir)
+    marker = Path(marker)
+    if not path.is_file():
+        marker.write_text(version, encoding='utf-8')
+        return None
+    if marker.is_file() and marker.read_text(encoding='utf-8').strip() == version:
+        return None
+
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f')
+    safe_version = ''.join(ch for ch in version if ch.isalnum() or ch in '.-_')
+    target = backup_dir / f'analyzer-{safe_version}-{stamp}.db'
+    with sqlite3.connect(path) as source, sqlite3.connect(target) as destination:
+        source.backup(destination)
+    marker.write_text(version, encoding='utf-8')
+    for old in sorted(backup_dir.glob('analyzer-*.db'), reverse=True)[keep:]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    return target
+
+
+def backup_before_upgrade() -> Path | None:
+    if not settings.DATABASE_URL.startswith('sqlite:///'):
+        return None
+    from .. import __version__
+    from .config import settings as current
+    db_path = Path(current.DATABASE_URL.removeprefix('sqlite:///'))
+    return backup_sqlite(
+        db_path, current.BACKUP_DIR, current.DATA_DIR / 'db-version.txt',
+        __version__,
+    )
 
 
 @contextmanager
