@@ -1,6 +1,6 @@
 {
   "productName": "GB28181 Analyzer",
-  "version": "1.1.5",
+  "version": "1.2.0",
   "identifier": "org.gb28181.analyzer",
   "app": {
     "withGlobalTauri": true,
