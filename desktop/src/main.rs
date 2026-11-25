@@ -3,9 +3,10 @@
 use std::{io::{self, BufRead, BufReader}, mem::{size_of, zeroed}, os::windows::{io::{AsRawHandle, FromRawHandle, OwnedHandle}, process::CommandExt}, process::{Command, Stdio}, ptr, sync::{atomic::{AtomicBool, Ordering}, mpsc}, thread, time::Duration};
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 use windows_sys::Win32::{
-    Foundation::IDYES,
     System::JobObjects::*,
-    UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_ICONQUESTION, MB_YESNO},
+    UI::WindowsAndMessaging::{
+        MessageBoxW, IDYES, MB_ICONERROR, MB_ICONQUESTION, MB_YESNO,
+    },
 };
 
 static ANALYSIS_BUSY: AtomicBool = AtomicBool::new(false);
