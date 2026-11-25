@@ -560,8 +560,9 @@ def _check_media(sessions: list, streams: list, by_session: dict) -> list[Diagno
                                      '确认音视频是否共用 SSRC'],
                 ))
 
-        # 仅在实际重建失败时报告；错误也可能来自工具环境或超时。
-        if st.get('rebuild_error'):
+        # 仅在实际重建失败且确实观察到视频时报告。
+        # 纯音频/RTCP/非视频载荷没有视频可重建，失败不是"视频无法解码"。
+        if st.get('rebuild_error') and st.get('has_video', True):
             out.append(Diagnostic(
                 rule_id='MED-008',
                 severity=WARNING,

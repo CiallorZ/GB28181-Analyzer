@@ -38,6 +38,15 @@ from . import diagnosis as diag_engine
 
 log = logging.getLogger('gb28181.analyzer')
 
+# 少于这个包数的流仍然入库（媒体存在性是事实），但不尝试重建预览：
+# 1-4 个包通常构不成可解码画面，失败只会制造 MED-008 噪声。
+MIN_REBUILD_PACKETS = 5
+
+
+def should_rebuild(pkts) -> bool:
+    """短流仍记录媒体存在性，但不值得启动 FFmpeg 重建。"""
+    return len(pkts) >= MIN_REBUILD_PACKETS
+
 
 def _update_active(db, task_id, **values):
     changed = db.execute(update(AnalysisTask).where(
@@ -585,8 +594,10 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
                 payload_type=payload[1] & 0x7f,
                 marker=bool((payload[1] >> 7) & 1),
                 arrival=p['ts'],
-                size=len(payload),
+                size=p.get('payload_size') or len(payload),
                 payload=payload[12:],
+                payload_size=p.get('payload_size') or len(payload),
+                payload_truncated=bool(p.get('payload_truncated')),
                 packet_number=p['frame'],
             )))
 
@@ -598,7 +609,7 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
 
         for key, items in groups.items():
             pkts = [p for _m, p in items]
-            if len(pkts) < 2:
+            if not pkts:
                 continue
             meta = items[0][0]
             st = rtp_analyzer.analyze_stream(pkts, transport='UDP')
@@ -616,17 +627,22 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
     for sid, entry in tcp_streams.items():
         segs = entry.get('segs') or {}
         meta = entry.get('meta') or {}
+        if entry.get('truncated'):
+            tcp_limits.append({
+                'code': 'tcp_payload_budget',
+                'level': 'warning',
+                'message': 'TCP 流 %s 的负载超过分析内存预算，'
+                           '仅分析了前一部分数据' % (meta.get('stream_id') or sid),
+            })
         if len(segs) < 3:
             continue
         buf = rtp_analyzer.reassemble_tcp(segs)
         if len(buf) < 100:
             continue
-        got = rtp_analyzer.parse_rfc4571_ex(buf)
+        got = rtp_analyzer.parse_rfc4571_streams(buf)
         if not got:
             continue
-        _offset, pkts, tcp_stats = got
-        if len(pkts) < 3:
-            continue
+        _offset, ssrc_groups, tcp_stats = got
         if tcp_stats.get('truncated'):
             tcp_limits.append({
                 'code': 'tcp_frame_truncated',
@@ -635,23 +651,25 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
                            '该帧未计入媒体统计' % (meta.get('stream_id') or sid),
             })
 
-        # RFC4571 里没有逐包时间，用该方向负载段的到达时间近似：
-        # 按包序号等比分配到 t0..t1 窗口内
-        t0 = meta.get('ts') or 0.0
-        first, last = entry.get('t0'), entry.get('t1')
-        if first is not None and last is not None and len(pkts) > 1 and last > first:
-            for i, p in enumerate(pkts):
-                p.arrival = first + (last - first) * i / (len(pkts) - 1)
-        else:
-            for i, p in enumerate(pkts):
-                p.arrival = t0 + i * 0.001
+        # 同一 TCP 连接可能承载多路媒体（共享端口），逐 SSRC 建流。
+        for _ssrc, pkts in ssrc_groups.items():
+            # RFC4571 里没有逐包时间，用该方向负载段的到达时间近似：
+            # 按包序号等比分配到 t0..t1 窗口内
+            t0 = meta.get('ts') or 0.0
+            first, last = entry.get('t0'), entry.get('t1')
+            if first is not None and last is not None and len(pkts) > 1 and last > first:
+                for i, p in enumerate(pkts):
+                    p.arrival = first + (last - first) * i / (len(pkts) - 1)
+            else:
+                for i, p in enumerate(pkts):
+                    p.arrival = t0 + i * 0.001
 
-        key = (pkts[0].ssrc, meta.get('src_ip'), meta.get('src_port'),
-               meta.get('dst_ip'), meta.get('dst_port'))
-        st = rtp_analyzer.analyze_stream(pkts, transport='TCP')
-        ps = _run_ps_analysis(pkts, st)
-        tag = 'tcp%d' % len(pending)
-        pending.append((tag, pkts, st, key, 'TCP', meta, ps))
+            key = (pkts[0].ssrc, meta.get('src_ip'), meta.get('src_port'),
+                   meta.get('dst_ip'), meta.get('dst_port'))
+            st = rtp_analyzer.analyze_stream(pkts, transport='TCP')
+            ps = _run_ps_analysis(pkts, st)
+            tag = 'tcp%d' % len(pending)
+            pending.append((tag, pkts, st, key, 'TCP', meta, ps))
 
     # ---- 并行重建所有流（利用多核，显著缩短总耗时）----
     if pending:
@@ -659,7 +677,8 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
             from ..services import rebuild as rb_mod
             out_dir = os.path.join(settings.DATA_DIR, 'rebuilt', str(task.id))
             rb_tasks = [(tag, pkts, st.duration)
-                        for tag, pkts, st, _k, _tr, _m, _ps in pending]
+                        for tag, pkts, st, _k, _tr, _m, _ps in pending
+                        if should_rebuild(pkts)]
             workers = settings.REBUILD_WORKERS or max(
                 1, min(4, (os.cpu_count() or 2) // 2))
             rb_map = rb_mod.rebuild_streams_parallel(rb_tasks, out_dir,
@@ -891,6 +910,7 @@ def _session_dict(s, sid) -> dict:
         'signal_status': s.signal_status,
         'final_code': s.final_code,
         'media_status': s.media_status,
+        'link_mode': s.link_mode,
         'end_reason': s.end_reason,
         'start_time': s.start_time,
         'end_time': s.end_time,
