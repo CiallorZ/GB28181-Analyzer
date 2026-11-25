@@ -687,7 +687,7 @@ def _run_ps_analysis(pkts, st):
     """
     try:
         from ..parsers import ps_parser
-        from .rebuild import sample_payloads, sample_timed_payloads
+        from .rebuild import sample_timed_payloads
         pairs, st.ps_sampled = sample_timed_payloads(pkts)
         payloads = [payload for payload, _arrival in pairs]
         if not payloads:
@@ -698,7 +698,7 @@ def _run_ps_analysis(pkts, st):
                        for p in payloads[:20])
         if not looks_ps:
             return None
-        start = pkts[0].arrival if pkts else 0
+        start = pairs[0][1]
         times = [arrival - start for _payload, arrival in pairs]
         if st.ps_sampled:
             st.notes.append('编码分析取样自流开头有界窗口（60 秒或 256 MiB）')

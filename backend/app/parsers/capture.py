@@ -165,6 +165,13 @@ def inspect_file(path: str) -> FileInfo:
             info.warnings.append('capinfos 读取失败，文件可能损坏')
 
     # IP / TCP / UDP 计数在报文索引阶段顺带计算，避免重复全量扫描。
+    # 这里再跑一次轻量协议分层检查；它只输出协议汇总，不导出每条报文，
+    # 用来在完全无法解析时尽早返回可读错误，而不是让索引阶段静默得到空表。
+    r = _run([TSHARK, '-r', path, '-q', '-z', 'io,phs'], 300, '协议分层统计')
+    if r.returncode != 0:
+        raise CaptureError('无法解析该抓包文件：%s' % ((r.stderr or '')[:300]))
+    if 'ip' not in (r.stdout or '').lower():
+        info.warnings.append('未发现 IP 层流量')
 
     # 抓包完整性判断
     if info.packet_count is not None and info.packet_count == 0:
