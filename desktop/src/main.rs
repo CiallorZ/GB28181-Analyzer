@@ -95,8 +95,16 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 if choice != IDYES {
                     api.prevent_close();
+                    return;
                 }
             }
+            // 关闭已获准。WebView2 卸载页面时偶尔会卡住，窗口消失后进程迟迟不退出。
+            // 留一个有界兜底：6 秒内正常退出就走原路径，否则强制结束。进程退出会关闭
+            // job 句柄，KILL_ON_JOB_CLOSE 随即结束引擎与分析子进程。
+            thread::spawn(|| {
+                thread::sleep(Duration::from_secs(6));
+                std::process::exit(0);
+            });
         }
     });
     app.run_return(|_, _| {});

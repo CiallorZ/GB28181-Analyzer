@@ -10,6 +10,15 @@ def test_windows_build_reports_missing_rust_toolchain():
     assert 'set_analysis_busy' in main
     assert 'pick_executable' in main
     assert 'generate_handler![set_analysis_busy, pick_executable]' in main
+
+
+def test_desktop_close_has_bounded_exit():
+    # WebView2 卸载卡住时，关窗必须仍能在有限时间内结束进程
+    main = (Path(__file__).resolve().parents[2] / 'desktop' / 'src' / 'main.rs').read_text(encoding='utf-8')
+    assert 'CloseRequested' in main
+    assert 'std::process::exit(0)' in main
+    assert 'Duration::from_secs(6)' in main
+
     assert 'CloseRequested' in main
     assert 'prevent_close' in main
 

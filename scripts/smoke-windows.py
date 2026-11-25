@@ -40,15 +40,21 @@ def desktop_smoke(root):
     user32 = ctypes.windll.user32
     callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
+    GA_ROOT = 2
+
     @callback_type
     def find_window(hwnd, _):
         pid = wintypes.DWORD()
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        if pid.value == process.pid and user32.IsWindowVisible(hwnd):
-            title = ctypes.create_unicode_buffer(160)
-            user32.GetWindowTextW(hwnd, title, len(title))
-            if '视联网分析工作台' in title.value:
-                handles.append(hwnd)
+        if pid.value != process.pid or not user32.IsWindowVisible(hwnd):
+            return True
+        # WebView2 会创建继承同一标题的子窗口，只有顶层窗口才响应关窗
+        if user32.GetAncestor(hwnd, GA_ROOT) != hwnd:
+            return True
+        title = ctypes.create_unicode_buffer(160)
+        user32.GetWindowTextW(hwnd, title, len(title))
+        if '视联网分析工作台' in title.value:
+            handles.append(hwnd)
         return True
 
     try:
@@ -73,7 +79,7 @@ def desktop_smoke(root):
                 process.wait(timeout=1)
             except subprocess.TimeoutExpired:
                 continue
-        assert process.returncode == 0, 'Desktop did not exit cleanly after WM_CLOSE'
+        assert process.returncode == 0, f'Desktop did not exit cleanly after WM_CLOSE (rc={process.returncode})'
         with socket.socket() as probe:
             probe.settimeout(1)
             assert probe.connect_ex(('127.0.0.1', port)) != 0, 'Engine still listening'
