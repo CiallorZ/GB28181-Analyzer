@@ -1,8 +1,19 @@
 #![windows_subsystem = "windows"]
 
-use std::{io::{self, BufRead, BufReader}, mem::{size_of, zeroed}, os::windows::{io::{AsRawHandle, FromRawHandle, OwnedHandle}, process::CommandExt}, process::{Command, Stdio}, ptr, sync::mpsc, thread, time::Duration};
+use std::{io::{self, BufRead, BufReader}, mem::{size_of, zeroed}, os::windows::{io::{AsRawHandle, FromRawHandle, OwnedHandle}, process::CommandExt}, process::{Command, Stdio}, ptr, sync::{atomic::{AtomicBool, Ordering}, mpsc}, thread, time::Duration};
 use tauri::{WebviewUrl, WebviewWindowBuilder};
-use windows_sys::Win32::{System::JobObjects::*, UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR}};
+use windows_sys::Win32::{
+    Foundation::IDYES,
+    System::JobObjects::*,
+    UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_ICONQUESTION, MB_YESNO},
+};
+
+static ANALYSIS_BUSY: AtomicBool = AtomicBool::new(false);
+
+#[tauri::command]
+fn set_analysis_busy(busy: bool) {
+    ANALYSIS_BUSY.store(busy, Ordering::SeqCst);
+}
 
 fn start() -> Result<(), Box<dyn std::error::Error>> {
     let engine = std::env::current_exe()?.with_file_name("engine").join("AnalyzerEngine.exe");
@@ -38,14 +49,16 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
     });
     let port = rx.recv_timeout(Duration::from_secs(45)).map_err(|_| "分析服务启动失败，请检查是否已经打开工作台，以及数据目录是否可写。")?;
     let url: tauri::Url = format!("http://127.0.0.1:{port}/").parse()?;
-    let app = tauri::Builder::default().build(tauri::generate_context!())?;
+    let app = tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![set_analysis_busy])
+        .build(tauri::generate_context!())?;
     let origin = url.origin();
     // Tauri's work area excludes the taskbar and is reported in physical pixels.
     let (width, height) = app.primary_monitor().ok().flatten().map_or((1060., 680.), |monitor| {
         let usable = monitor.work_area().size.to_logical::<f64>(monitor.scale_factor());
         ((usable.width * 0.92).min(1480.), (usable.height * 0.91).min(920.))
     });
-    WebviewWindowBuilder::new(&app, "main", WebviewUrl::External(url))
+    let window = WebviewWindowBuilder::new(&app, "main", WebviewUrl::External(url))
         .title("GB28181 Analyzer · 视联网分析工作台")
         .inner_size(width, height)
         .min_inner_size(width.min(520.), height.min(360.))
@@ -53,6 +66,22 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
         .disable_drag_drop_handler()
         .on_navigation(move |target| target.origin() == origin)
         .build()?;
+    window.on_window_event(|event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            if ANALYSIS_BUSY.load(Ordering::SeqCst) {
+                let text: Vec<u16> = "分析正在进行，关闭窗口会终止任务。仍要退出吗？\0"
+                    .encode_utf16().collect();
+                let title: Vec<u16> = "GB28181 Analyzer\0".encode_utf16().collect();
+                let choice = unsafe {
+                    MessageBoxW(ptr::null_mut(), text.as_ptr(), title.as_ptr(),
+                                MB_YESNO | MB_ICONQUESTION)
+                };
+                if choice != IDYES {
+                    api.prevent_close();
+                }
+            }
+        }
+    });
     app.run_return(|_, _| {});
     drop(child.stdin.take());
     for _ in 0..30 {

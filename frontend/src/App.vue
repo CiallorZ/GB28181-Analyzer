@@ -41,10 +41,16 @@ const engine = computed(() => {
 
 const task = computed(() => store.task)
 
+function setNativeBusy(busy) {
+  const invoke = window.__TAURI__?.core?.invoke
+  if (invoke) invoke('set_analysis_busy', { busy }).catch(() => {})
+}
+
 watch(() => store.isAnalyzing, (active) => {
   document.title = active
     ? '分析中 · GB28181 Analyzer'
     : 'GB28181 Analyzer · 视联网分析工作台'
+  setNativeBusy(active)
 }, { immediate: true })
 
 function guardUnload(event) {
