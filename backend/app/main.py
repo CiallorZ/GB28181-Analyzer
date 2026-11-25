@@ -18,9 +18,11 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import __version__
 from .api import ai, comparisons, diagnostics, evidence, intake, sessions, tasks
+from .api import settings as settings_api
 from .core.config import settings
 from .core.db import backup_before_upgrade, init_db
 from .core.logging import configure_logging
+from .core import toolchain
 from .core.security import origin_allowed
 from .parsers import capture
 
@@ -81,6 +83,7 @@ app.include_router(evidence.router, prefix=API)
 app.include_router(intake.router, prefix=API)
 app.include_router(comparisons.router, prefix=API)
 app.include_router(ai.router, prefix=API)
+app.include_router(settings_api.router, prefix=API)
 
 
 @app.on_event('startup')
@@ -134,16 +137,20 @@ def _startup():
 @app.get(API + '/health')
 def health():
     """健康检查 —— 同时反映外部依赖状态"""
+    tools = toolchain.status()['tools']
     return {
         'status': 'ok',
         'version': __version__,
         'dependencies': {
-            'tshark': bool(capture.TSHARK),
-            'ffmpeg': bool(capture.FFMPEG),
-            'ffprobe': bool(capture.FFPROBE),
+            name: bool(tools[name]['available'])
+            for name in ('tshark', 'capinfos', 'ffmpeg', 'ffprobe', 'dumpcap')
         },
-        'tshark_path': capture.TSHARK,
-        'ffmpeg_path': capture.FFMPEG,
+        'tshark_path': tools['tshark']['path'],
+        'capinfos_path': tools['capinfos']['path'],
+        'ffmpeg_path': tools['ffmpeg']['path'],
+        'ffprobe_path': tools['ffprobe']['path'],
+        'dumpcap_path': tools['dumpcap']['path'],
+        'tool_sources': {name: tools[name]['source'] for name in tools},
         'database': settings.DATABASE_URL.split('://')[0],
         'log_path': str(LOG_PATH),
         'data_dir': str(settings.DATA_DIR),

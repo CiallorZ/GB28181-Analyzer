@@ -7,10 +7,77 @@ import PageNav from '../components/PageNav.vue'
 const health = ref(null)
 const rules = ref([])
 const err = ref('')
+const tools = ref(null)
+const toolDraft = ref({ tshark: '', capinfos: '', ffmpeg: '', ffprobe: '', dumpcap: '' })
+const toolBusy = ref(false)
+const toolMsg = ref('')
+const toolErr = ref('')
+const toolItems = [
+  { key: 'tshark', label: 'TShark' },
+  { key: 'capinfos', label: 'Capinfos' },
+  { key: 'dumpcap', label: 'Dumpcap' },
+  { key: 'ffmpeg', label: 'FFmpeg' },
+  { key: 'ffprobe', label: 'FFprobe' }
+]
+
+function sourceLabel(source) {
+  return { manual: '手动', environment: '环境/内置', path: 'PATH', auto: '自动探测', missing: '缺失' }[source] || source
+}
+
+function sourceClass(source) {
+  return { manual: 'ok', environment: 'info', path: 'info', auto: 'unknown', missing: 'critical' }[source]
+}
+
+function syncDraft() {
+  for (const item of toolItems) {
+    toolDraft.value[item.key] = tools.value?.tools?.[item.key]?.configured || ''
+  }
+}
+
+async function loadTools() {
+  tools.value = await api.tools()
+  syncDraft()
+}
+
+async function refreshHealth() {
+  health.value = await api.health()
+}
+
+async function saveTools() {
+  toolBusy.value = true
+  toolErr.value = ''
+  toolMsg.value = ''
+  try {
+    tools.value = await api.saveTools(toolDraft.value)
+    syncDraft()
+    await refreshHealth()
+    toolMsg.value = '工具路径已保存，新分析立即使用'
+  } catch (e) {
+    toolErr.value = e.message
+  } finally {
+    toolBusy.value = false
+  }
+}
+
+async function resetTools() {
+  toolBusy.value = true
+  toolErr.value = ''
+  toolMsg.value = ''
+  try {
+    tools.value = await api.resetTools()
+    syncDraft()
+    await refreshHealth()
+    toolMsg.value = '已恢复自动探测'
+  } catch (e) {
+    toolErr.value = e.message
+  } finally {
+    toolBusy.value = false
+  }
+}
 
 onMounted(async () => {
   try {
-    health.value = await api.health()
+    await Promise.all([refreshHealth(), loadTools()])
     const r = await api.rules()
     rules.value = r.rules || []
   } catch (e) { err.value = e.message }
@@ -52,9 +119,66 @@ onMounted(async () => {
               {{ health.dependencies?.ffprobe ? '可用' : '缺失' }}
             </b>
           </div>
+          <div>
+            <span>capinfos</span>
+            <b :class="health.dependencies?.capinfos ? 'text-ok' : 'text-critical'">
+              {{ health.dependencies?.capinfos ? '可用' : '缺失' }}
+            </b>
+          </div>
+          <div>
+            <span>dumpcap</span>
+            <b :class="health.dependencies?.dumpcap ? 'text-ok' : 'text-critical'">
+              {{ health.dependencies?.dumpcap ? '可用' : '缺失' }}
+            </b>
+          </div>
           <div class="full"><span>tshark 路径</span><b class="mono-sm">{{ health.tshark_path || '—' }}</b></div>
           <div class="full"><span>ffmpeg 路径</span><b class="mono-sm">{{ health.ffmpeg_path || '—' }}</b></div>
           <div class="full"><span>运行日志</span><b class="mono-sm">{{ health.log_path || '—' }}</b></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card mb-16">
+      <div class="card-head">
+        外部工具路径
+        <span class="count-badge">修改后立即生效</span>
+      </div>
+      <div class="card-body">
+        <p class="tool-help">
+          优先级：手动配置 &gt; 环境变量 &gt; PATH / 打包内置。留空表示继续使用自动探测。
+          离线包已内置工具，手动路径可用于替换成本机指定版本。
+        </p>
+        <div class="tool-grid" v-if="tools">
+          <label v-for="item in toolItems" :key="item.key" class="tool-field">
+            <span>{{ item.label }}</span>
+            <div class="tool-line">
+              <input
+                v-model="toolDraft[item.key]"
+                class="inp mono"
+                :placeholder="tools.tools[item.key]?.path || '未检测到'"
+                spellcheck="false"
+              />
+              <span class="badge" :class="sourceClass(tools.tools[item.key]?.source)">
+                {{ sourceLabel(tools.tools[item.key]?.source) }}
+              </span>
+            </div>
+            <small v-if="tools.tools[item.key]?.path" class="mono-sm">
+              {{ tools.tools[item.key].path }}
+            </small>
+            <small v-if="tools.tools[item.key]?.configured_missing" class="tool-warn">
+              手动路径不可用，当前已回退到自动探测。请修正或清空。
+            </small>
+          </label>
+        </div>
+        <p v-if="toolErr" class="tool-error">{{ toolErr }}</p>
+        <p v-if="toolMsg" class="tool-ok">{{ toolMsg }}</p>
+        <div class="tool-actions">
+          <button class="btn sm" :disabled="toolBusy" @click="saveTools">
+            {{ toolBusy ? '保存中…' : '保存路径' }}
+          </button>
+          <button class="btn sm secondary" :disabled="toolBusy" @click="resetTools">
+            恢复自动探测
+          </button>
         </div>
       </div>
     </div>
@@ -137,6 +261,21 @@ onMounted(async () => {
 .kv-grid b { color: var(--text); font-weight: 500; font-size: 13px; font-family: var(--font-mono); word-break: break-all; }
 @media (max-width: 860px) { .kv-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 520px) { .kv-grid { grid-template-columns: 1fr; } }
+.tool-help {
+  font-size: 12.5px; color: var(--text-3); line-height: 1.75; margin-bottom: 14px;
+}
+.tool-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 24px; }
+.tool-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tool-field > span { font-size: 11.5px; color: var(--text-4); }
+.tool-line { display: flex; align-items: center; gap: 8px; }
+.tool-line .inp { flex: 1; min-width: 0; }
+.tool-field small { color: var(--text-3); overflow-wrap: anywhere; }
+.tool-warn { color: var(--warning) !important; }
+.tool-actions { display: flex; gap: 8px; margin-top: 14px; }
+.tool-error { color: var(--critical); font-size: 12.5px; margin-top: 10px; }
+.tool-ok { color: var(--ok); font-size: 12.5px; margin-top: 10px; }
+.btn.secondary { background: var(--surface-2); color: var(--text-2); border-color: var(--line-2); }
+@media (max-width: 760px) { .tool-grid { grid-template-columns: 1fr; } }
 .count-badge {
   font-size: 11px; padding: 1px 7px; border-radius: 99px;
   background: var(--panel-3); color: var(--text-3);

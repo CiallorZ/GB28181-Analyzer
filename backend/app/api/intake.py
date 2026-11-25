@@ -138,7 +138,7 @@ class Recording(BaseModel):
 def dumpcap():
     if os.getenv('GB_DESKTOP_CAPTURE') != '1':
         raise HTTPException(403, '实时采集仅在本机桌面工作台提供')
-    path = shutil.which('dumpcap') or (Path(capture.TSHARK).with_name('dumpcap.exe') if capture.TSHARK else None)
+    path = capture.DUMPCAP
     if not path or not Path(path).is_file():
         raise HTTPException(503, '未找到 dumpcap，请安装 Wireshark 和 Npcap')
     return str(path)

@@ -95,7 +95,7 @@ func launch() error {
 	} else if err != nil {
 		return err
 	}
-	for key, path := range map[string]string{"TSHARK_PATH": "Wireshark/tshark.exe", "CAPINFOS_PATH": "Wireshark/capinfos.exe", "FFMPEG_PATH": "ffmpeg/ffmpeg.exe", "FFPROBE_PATH": "ffmpeg/ffprobe.exe", "WEBVIEW2_BROWSER_EXECUTABLE_FOLDER": "WebView2"} {
+	for key, path := range map[string]string{"TSHARK_PATH": "Wireshark/tshark.exe", "CAPINFOS_PATH": "Wireshark/capinfos.exe", "DUMPCAP_PATH": "Wireshark/dumpcap.exe", "FFMPEG_PATH": "ffmpeg/ffmpeg.exe", "FFPROBE_PATH": "ffmpeg/ffprobe.exe", "WEBVIEW2_BROWSER_EXECUTABLE_FOLDER": "WebView2"} {
 		if err = os.Setenv(key, filepath.Join(root, path)); err != nil {
 			return err
 		}

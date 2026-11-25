@@ -25,3 +25,6 @@ $env:FFPROBE_PATH = 'D:\ffmpeg\bin\ffprobe.exe'
 ```
 
 DeepSeek 是可选的联网功能。主动配置并运行后会向配置的模型服务发送分析摘要。Windows 可执行文件未做代码签名。可对照 Release 的 `SHA256SUMS.txt` 校验下载。
+
+设置页的“外部工具路径”可为 TShark、Capinfos、Dumpcap、FFmpeg、FFprobe 指定本机文件。优先级为手动配置 > 环境变量 > PATH/打包内置，离线单文件包同样适用。配置保存在数据目录的 tools.json，清空输入或点击“恢复自动探测”即可回到内置工具。
+

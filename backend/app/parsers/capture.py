@@ -18,52 +18,31 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import shutil
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from ..core import analysis_control
+from ..core import analysis_control, toolchain
 
 # ---------------------------------------------------------------
 # 工具定位
 # ---------------------------------------------------------------
-def _find_tool(name: str, env_key: str) -> str | None:
-    """查找外部工具：环境变量 > PATH > 常见安装路径"""
-    p = os.environ.get(env_key)
-    if p and os.path.isfile(p):
-        return p
-    p = shutil.which(name)
-    if p:
-        return p
-    candidates = {
-        'tshark': [
-            r'C:\Program Files\Wireshark\tshark.exe',
-            r'D:\Program Files\Wireshark\tshark.exe',
-        ],
-        'ffmpeg': [
-            r'C:\Program Files\ffmpeg\bin\ffmpeg.exe',
-            r'D:\Program Files\ffmpeg-7.0.2-full_build\bin\ffmpeg.exe',
-        ],
-        'ffprobe': [
-            r'C:\Program Files\ffmpeg\bin\ffprobe.exe',
-            r'D:\Program Files\ffmpeg-7.0.2-full_build\bin\ffprobe.exe',
-        ],
-        'capinfos': [
-            r'C:\Program Files\Wireshark\capinfos.exe',
-            r'D:\Program Files\Wireshark\capinfos.exe',
-        ],
-    }.get(name, [])
-    for c in candidates:
-        if os.path.isfile(c):
-            return c
-    return None
+def refresh_tools() -> None:
+    """Re-read manual paths, environment and PATH without restarting the app."""
+    global TSHARK, CAPINFOS, FFMPEG, FFPROBE, DUMPCAP
+    TSHARK = toolchain.find_tool('tshark')
+    CAPINFOS = toolchain.find_tool('capinfos')
+    FFMPEG = toolchain.find_tool('ffmpeg')
+    FFPROBE = toolchain.find_tool('ffprobe')
+    DUMPCAP = toolchain.find_tool('dumpcap')
 
 
-TSHARK = _find_tool('tshark', 'TSHARK_PATH')
-CAPINFOS = _find_tool('capinfos', 'CAPINFOS_PATH')
-FFMPEG = _find_tool('ffmpeg', 'FFMPEG_PATH')
-FFPROBE = _find_tool('ffprobe', 'FFPROBE_PATH')
+TSHARK = None
+CAPINFOS = None
+FFMPEG = None
+FFPROBE = None
+DUMPCAP = None
+refresh_tools()
 
 TSHARK_TIMEOUT = 1800        # 单次 tshark 超时（秒）
 FFMPEG_TIMEOUT = 900

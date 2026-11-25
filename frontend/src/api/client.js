@@ -40,6 +40,9 @@ async function resumableUpload(file, progress) {
 export const api = {
   health: () => client.get('/health').then(r => r.data),
   rules: () => client.get('/rules').then(r => r.data),
+  tools: () => client.get('/settings/tools').then(r => r.data),
+  saveTools: (body) => client.put('/settings/tools', body).then(r => r.data),
+  resetTools: () => client.delete('/settings/tools').then(r => r.data),
 
   upload: (file, onProgress) => {
     if (file.size > 16 * 1024**3) throw Error('抓包超过 16 GiB 上限')
