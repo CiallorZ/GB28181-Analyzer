@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from ..core import analysis_control, toolchain
+from . import rtp_analyzer
 
 # ---------------------------------------------------------------
 # 工具定位
@@ -77,6 +78,8 @@ def _run(cmd: list[str], timeout: int, what: str) -> subprocess.CompletedProcess
     try:
         return analysis_control.run(cmd, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), capture_output=True, text=True,
                               errors='replace', timeout=timeout)
+    except analysis_control.Cancelled:
+        raise
     except subprocess.TimeoutExpired:
         raise CaptureError('%s 超时（%d 秒）' % (what, timeout))
     except FileNotFoundError:
@@ -279,15 +282,22 @@ def iter_packets(path: str, display_filter: str | None = None,
         except Exception:
             err = ''
         if proc.returncode not in (0, None) and err:
+            analysis_control.checkpoint()
             raise CaptureError('tshark 读取报文失败：%s' % err.strip()[:400])
 
 
 # ---------------------------------------------------------------
 # 域值抽取（供 SIP / RTP / TCP 流使用）
 # ---------------------------------------------------------------
-def extract_fields(path: str, fields: list[str], display_filter: str | None = None,
-                   separator: str = '\x1f') -> list[list[str]]:
-    """按字段抽取，返回二维列表。用于 SIP 头、RTP 头等结构化数据"""
+def iter_fields(path: str, fields: list[str],
+                display_filter: str | None = None,
+                separator: str = '\x1f'):
+    """流式产出字段行，避免把整份 tshark 输出读进内存
+
+    大抓包（数百 MB）时 ``subprocess.run(capture_output=True)`` 会同时
+    持有 stdout/stderr 的完整字符串；RTP 载荷还要按十六进制展开成
+    两倍大小的文本。这里改为逐行读取，调用方按需聚合或丢弃。
+    """
     if not TSHARK:
         raise CaptureError('未找到 tshark')
     cmd = [TSHARK, '-r', path, '-T', 'fields',
@@ -296,28 +306,55 @@ def extract_fields(path: str, fields: list[str], display_filter: str | None = No
         cmd += ['-Y', display_filter]
     for f in fields:
         cmd += ['-e', f]
-    r = _run(cmd, TSHARK_TIMEOUT, '抽取字段')
-    if r.returncode != 0:
-        return []
-    rows = []
-    for line in r.stdout.splitlines():
-        if not line.strip():
-            continue
-        parts = line.split(separator)
-        while len(parts) < len(fields):
-            parts.append('')
-        rows.append(parts[:len(fields)])
-    return rows
+    proc = subprocess.Popen(
+        cmd, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, errors='replace', bufsize=1 << 20)
+    try:
+        with analysis_control.track(proc):
+            for line in proc.stdout:
+                if not line.strip():
+                    continue
+                parts = line.rstrip('\r\n').split(separator)
+                while len(parts) < len(fields):
+                    parts.append('')
+                yield parts[:len(fields)]
+    finally:
+        try:
+            if proc.poll() is None:
+                proc.kill()
+        except Exception:
+            pass
+        try:
+            err = proc.stderr.read() if proc.stderr else ''
+            proc.wait(timeout=10)
+        except Exception:
+            err = ''
+        if proc.returncode not in (0, None) and err:
+            # 取消时进程会被杀掉，returncode 同样非 0；不能把取消误报成
+            # 抓包读取失败，否则上层 except CaptureError 会吞掉取消。
+            analysis_control.checkpoint()
+            raise CaptureError('tshark 读取报文失败：%s' % err.strip()[:400])
+
+
+def extract_fields(path: str, fields: list[str], display_filter: str | None = None,
+                   separator: str = '\x1f') -> list[list[str]]:
+    """按字段抽取，返回二维列表。用于 SIP 头、RTP 头等结构化数据"""
+    return list(iter_fields(path, fields, display_filter, separator))
 
 
 # ---------------------------------------------------------------
 # RTP 抽取（自研，不依赖 tshark 的 rtp 解码器）
 # ---------------------------------------------------------------
+# TCP 重组需要保存完整段；为防止多路大码流把内存吃光，设一个全局预算。
+# 超出后仍记录时间窗与元信息，但不再保存负载，并在结果里标记。
+TCP_PAYLOAD_KEEP_BYTES = 256 * 1024 * 1024
+
+
 def dump_tcp_segments(path: str) -> dict:
     """导出 TCP 负载段，按「stream + 方向」聚合
 
-    返回 {key: {segs: {seq: bytes}, meta: {...}, t0, t1}}
-    key 形如 ``"3:10.0.0.1:5060->10.0.0.2:5060"``。
+    返回 {key: {segs: {seq: bytes}, meta: {...}, t0, t1, truncated}}
 
     一个 tcp.stream 天然是双向的，两个方向各有独立的 seq 空间。
     混在一起按 seq 排序时，反向数据会被判成"空洞"，reassemble_tcp
@@ -326,11 +363,12 @@ def dump_tcp_segments(path: str) -> dict:
     """
     if not TSHARK:
         raise CaptureError('未找到 tshark')
-    rows = extract_fields(path, [
+    streams: dict = {}
+    kept_bytes = 0
+    rows = iter_fields(path, [
         'tcp.stream', 'tcp.seq_raw', 'tcp.time_relative',
         'ip.src', 'tcp.srcport', 'ip.dst', 'tcp.dstport', 'tcp.payload'
     ], 'tcp.len>0')
-    streams: dict = {}
     for r in rows:
         sid, seq_s, ts_s, sip, sport, dip, dport, hexpay = (r + [''] * 8)[:8]
         if not hexpay or not seq_s:
@@ -345,9 +383,9 @@ def dump_tcp_segments(path: str) -> dict:
             continue
         key = '%s:%s:%s->%s:%s' % (sid, sip, sport, dip, dport)
         entry = streams.setdefault(key, {
-            'segs': {}, 'meta': {}, 't0': None, 't1': None
+            'segs': {}, 'meta': {}, 't0': None, 't1': None,
+            'truncated': False,
         })
-        entry['segs'][seq] = data
         entry['t0'] = ts if entry['t0'] is None else min(entry['t0'], ts)
         entry['t1'] = ts if entry['t1'] is None else max(entry['t1'], ts)
         if not entry['meta']:
@@ -357,31 +395,72 @@ def dump_tcp_segments(path: str) -> dict:
                 'src_ip': sip, 'src_port': int(sport) if sport else None,
                 'dst_ip': dip, 'dst_port': int(dport) if dport else None,
             }
+        if kept_bytes + len(data) > TCP_PAYLOAD_KEEP_BYTES:
+            entry['truncated'] = True
+            continue
+        kept_bytes += len(data)
+        entry['segs'][seq] = data
     return streams
 
 
+# UDP RTP 的载荷只为编码分析/预览保留开头一段；统计所需的 RTP 头始终保留。
+# 不设上限时，一份 227 MiB 的抓包在 Python 里会膨胀到 2.6 GiB。
+RTP_PAYLOAD_KEEP_SECONDS = 60.0
+RTP_PAYLOAD_KEEP_BYTES = 256 * 1024 * 1024
+RTP_HEADER_BYTES = 12
+
+
 def extract_udp_rtp(path: str) -> list:
-    """抽取 UDP 承载的 RTP（一个数据报就是一个 RTP 包）"""
+    """抽取 UDP 承载的 RTP（一个数据报就是一个 RTP 包）
+
+    大抓包只保留每条流开头 60 秒 / 全局 256 MiB 的完整载荷，
+    之后的包仍保留 RTP 头和真实载荷长度，包数、码率、序号缺口
+    统计不受影响；只有 PS/ES 编码分析与预览取样会被限制。
+    """
     if not TSHARK:
         raise CaptureError('未找到 tshark')
-    rows = extract_fields(path, [
+    out = []
+    stream_start: dict = {}
+    kept_bytes = 0
+    for r in iter_fields(path, [
         'frame.number', 'frame.time_relative',
         'ip.src', 'udp.srcport', 'ip.dst', 'udp.dstport', 'udp.payload'
-    ], 'udp.length>20')
-    out = []
-    for r in rows:
+    ], 'udp.length>20'):
+        r = (r + [''] * 7)[:7]
         try:
             payload = bytes.fromhex(re.sub(r'[^0-9a-fA-F]', '', r[6]))
         except (ValueError, TypeError):
             continue
         if len(payload) < 12 or (payload[0] >> 6) != 2:
             continue
+        # RTCP 与 RTP 的版本位相同，PT 却是 200-207；若不先剔除，
+        # SR/RR 会被当成 RTP 流参与码率、序号缺口和媒体关联。
+        if rtp_analyzer.is_rtcp(payload):
+            continue
+        try:
+            ts = float(r[1]) if r[1] else 0.0
+            frame = int(r[0]) if r[0] else 0
+        except (TypeError, ValueError):
+            continue
+        ssrc_key = payload[8:12]
+        stream_key = (ssrc_key, r[2], r[3], r[4], r[5])
+        t0 = stream_start.setdefault(stream_key, ts)
+        keep = (ts - t0 <= RTP_PAYLOAD_KEEP_SECONDS
+                and kept_bytes + len(payload) <= RTP_PAYLOAD_KEEP_BYTES)
+        if keep:
+            kept_bytes += len(payload)
+            kept = payload
+        else:
+            # 至少保留固定头，上层还要解析序号/时间戳/SSRC。
+            kept = payload[:RTP_HEADER_BYTES]
         out.append({
-            'frame': int(r[0]) if r[0] else 0,
-            'ts': float(r[1]) if r[1] else 0.0,
+            'frame': frame,
+            'ts': ts,
             'src_ip': r[2], 'src_port': int(r[3]) if r[3] else None,
             'dst_ip': r[4], 'dst_port': int(r[5]) if r[5] else None,
-            'payload': payload,
+            'payload': kept,
+            'payload_size': len(payload),
+            'payload_truncated': not keep,
         })
     return out
 

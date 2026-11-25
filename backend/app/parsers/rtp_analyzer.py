@@ -17,6 +17,15 @@ from dataclasses import dataclass, field
 
 CLOCK_RATE_DEFAULT = 90000     # 国标 PS 流常用 90kHz
 
+# RTCP 的 PT 占满第二个字节（200-207）；RTP 的 PT 只有低 7 位。
+# 不能先 & 0x7f 再判断，否则 RTCP SR 的 200 会被掩成 72。
+RTCP_PAYLOAD_TYPES = frozenset(range(200, 208))
+
+
+def is_rtcp(payload: bytes) -> bool:
+    """载荷是否是 RTCP 包（SR/RR/SDES/BYE/APP，PT 200-207）。"""
+    return len(payload) >= 2 and payload[1] in RTCP_PAYLOAD_TYPES
+
 
 @dataclass
 class RtpPacket:
@@ -29,6 +38,9 @@ class RtpPacket:
     arrival: float = 0.0
     size: int = 0
     payload: bytes = b''
+    # 即便载荷被取样丢弃，也要保留真实载荷长度供码率/字节统计使用。
+    payload_size: int = 0
+    payload_truncated: bool = False   # 载荷只为统计保留，未进入编码分析
     packet_number: int = 0      # 原始报文号（TCP 重组时可能为 0）
 
 
@@ -163,7 +175,15 @@ def analyze_stream(packets: list[RtpPacket], transport: str = 'UDP',
     st.end_time = packets[-1].arrival
     st.packet_count = len(packets)
     st.byte_count = sum(p.size for p in packets)
-    st.payload_bytes = sum(len(p.payload) for p in packets)
+    st.payload_bytes = sum(
+        p.payload_size if p.payload_size else len(p.payload) for p in packets)
+    if len(packets) < 3:
+        st.notes.append(
+            '样本仅 %d 个 RTP 包，抖动/码率/缺口指标不可作为稳定结论'
+            % len(packets))
+    if any(getattr(p, 'payload_truncated', False) for p in packets):
+        st.notes.append('媒体载荷超过分析预算，后续包仅保留 RTP 头；'
+                        '包数、码率与序号统计不受影响')
 
     span = st.end_time - st.start_time
     st.duration = round(span, 3) if span > 0 else None
@@ -305,20 +325,25 @@ def _detect_ts_anomalies(packets: list[RtpPacket],
     """检测 RTP 时间戳异常
 
     常见异常：
-    1. 时间戳倒退（除回绕）
+    1. 时间戳大幅倒退（超过 1 秒；小回退视为乱序/B 帧）
     2. 时间戳跳变过大（超过 5 秒的跃变）
     3. 时间戳不递增但序号递增（说明时基有问题）
+
+    这里不能对任何负 delta 报警：网络乱序会让后到的包时间戳更小，
+    H.264/H.265 的 B 帧也可能出现合法的时间戳回退。只有超过一个
+    时钟周期（1 秒）的倒退，才值得作为时基异常上报。
     """
     out = []
     if len(packets) < 2:
         return out
+    rate = clock_rate if clock_rate > 0 else CLOCK_RATE_DEFAULT
     prev = packets[0]
     for p in packets[1:]:
         d = p.timestamp - prev.timestamp
         # 允许 32 位回绕
         if d < -2**31:
             d += 2**32
-        if d < 0:
+        if d < -rate:
             if len(out) < 20:
                 out.append({
                     'type': 'timestamp_backward',
@@ -326,7 +351,7 @@ def _detect_ts_anomalies(packets: list[RtpPacket],
                     'time': round(p.arrival, 3),
                     'delta': d,
                 })
-        elif clock_rate > 0 and d > clock_rate * 5:      # 超过 5 秒的跃变
+        elif d > rate * 5:      # 超过 5 秒的跃变
             if len(out) < 20:
                 out.append({
                     'type': 'timestamp_jump',
@@ -372,13 +397,19 @@ def reassemble_tcp(segments: dict) -> bytes:
 
 
 MAX_RTP_PACKET = 65535     # RFC4571 的长度字段是 2 字节，上限就是 65535
+DEFAULT_MAX_SCAN = 32768   # 抓包起点可能落在很长的 SIP 消息之后
 
 
-def parse_rfc4571_ex(buf: bytes, max_scan: int = 8000, min_pkts: int = 3):
-    """扫描对齐偏移并解析 RFC4571 帧，返回 (offset, pkts, stats) 或 None
+def parse_rfc4571_streams(buf: bytes, max_scan: int = DEFAULT_MAX_SCAN,
+                          min_pkts: int = 3):
+    """扫描对齐偏移，按 SSRC 分组解析 RFC4571 帧
 
-    为什么不能从偏移 0 开始：抓包起点往往不在 RTP 包边界上，
-    实测遇到过偏移 1158 / 1829 字节的情况。
+    返回 (offset, {ssrc: [RtpPacket]}, stats) 或 None。
+
+    同一条 TCP 连接上可能承载多路媒体（共享 8808 端口时并不少见），
+    各 SSRC 的帧可能顺序出现，也可能交织出现。早期实现一遇到 SSRC
+    变化就 break，只能保留第一路，其余流被静默丢弃。这里改为按 SSRC
+    分组，同时要求每组至少 min_pkts 个包，避免随机字节被当成媒体。
 
     stats:
       truncated —— 最后一帧的长度字段超出缓冲区（抓包被截断），
@@ -393,20 +424,24 @@ def parse_rfc4571_ex(buf: bytes, max_scan: int = 8000, min_pkts: int = 3):
         if (buf[off + 2] >> 6) != 2:          # 快速过滤：RTP 版本必须为 2
             continue
         o = off
-        pkts = []
+        groups: dict = {}
         truncated = 0
-        stream_ssrc = None
         while o + 2 <= len(buf):
             L = int.from_bytes(buf[o:o + 2], 'big')
             if L < 12 or L > MAX_RTP_PACKET:
                 break
             if o + 2 + L > len(buf):
-                if pkts:                      # 已经有完整帧，尾部这帧才算截断
+                if groups:                    # 已经有完整帧，尾部这帧才算截断
                     truncated = 1
                 break
             pp = buf[o + 2:o + 2 + L]
             if (pp[0] >> 6) != 2:
                 break
+            # RTCP 可能和 RTP 复用同一条 TCP 连接（RFC4571 帧格式相同）。
+            # 跳过它，但继续解析后面的 RTP，不能因此截断整条流。
+            if is_rtcp(pp):
+                o += 2 + L
+                continue
             header_length = 12 + 4 * (pp[0] & 0x0f)
             if header_length > L:
                 break
@@ -417,13 +452,10 @@ def parse_rfc4571_ex(buf: bytes, max_scan: int = 8000, min_pkts: int = 3):
                 if header_length > L:
                     break
             ssrc = int.from_bytes(pp[8:12], 'big')
-            if stream_ssrc is not None and ssrc != stream_ssrc:
-                break
-            stream_ssrc = ssrc
             padding = pp[-1] if pp[0] & 0x20 else 0
             if pp[0] & 0x20 and (not padding or padding > L - header_length):
                 break
-            pkts.append(RtpPacket(
+            groups.setdefault(ssrc, []).append(RtpPacket(
                 seq=int.from_bytes(pp[2:4], 'big'),
                 timestamp=int.from_bytes(pp[4:8], 'big'),
                 ssrc=ssrc,
@@ -433,14 +465,33 @@ def parse_rfc4571_ex(buf: bytes, max_scan: int = 8000, min_pkts: int = 3):
                 payload=pp[header_length:L - padding if padding else L],
             ))
             o += 2 + L
-        if len(pkts) >= min_pkts and (best is None or len(pkts) > len(best[1])):
-            best = (off, pkts, {'truncated': truncated})
-            if len(pkts) > 400:               # 已足够确认对齐正确
+
+        qualifying = {ssrc: pkts for ssrc, pkts in groups.items()
+                      if len(pkts) >= min_pkts}
+        total = sum(len(pkts) for pkts in qualifying.values())
+        if total and (best is None or total > best[0]):
+            best = (total, off, qualifying, {'truncated': truncated})
+            if total > 400:                   # 已足够确认对齐正确
                 break
-    return best
+    if best is None:
+        return None
+    _total, off, groups, stats = best
+    return off, groups, stats
 
 
-def parse_rfc4571(buf: bytes, max_scan: int = 8000, min_pkts: int = 3):
+def parse_rfc4571_ex(buf: bytes, max_scan: int = DEFAULT_MAX_SCAN,
+                     min_pkts: int = 3):
+    """兼容旧调用：返回 (offset, 最大的一组 RtpPacket, stats) 或 None"""
+    got = parse_rfc4571_streams(buf, max_scan=max_scan, min_pkts=min_pkts)
+    if not got:
+        return None
+    off, groups, stats = got
+    _ssrc, pkts = max(groups.items(), key=lambda kv: len(kv[1]))
+    return off, pkts, stats
+
+
+def parse_rfc4571(buf: bytes, max_scan: int = DEFAULT_MAX_SCAN,
+                  min_pkts: int = 3):
     """兼容旧调用：只返回 (offset, pkts)"""
     got = parse_rfc4571_ex(buf, max_scan=max_scan, min_pkts=min_pkts)
     if not got:
