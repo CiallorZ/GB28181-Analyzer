@@ -164,18 +164,7 @@ def inspect_file(path: str) -> FileInfo:
         else:
             info.warnings.append('capinfos 读取失败，文件可能损坏')
 
-    # 统计 IP / TCP / UDP 数量
-    r = _run([TSHARK, '-r', path, '-q', '-z', 'io,phs'], 300, '协议分层统计')
-    if r.returncode == 0:
-        out = r.stdout
-        info.ip_count = _count_ips(path)
-        info.tcp_count = _count_field(path, 'tcp')
-        info.udp_count = _count_field(path, 'udp')
-        if 'ip' not in out.lower():
-            info.warnings.append('未发现 IP 层流量')
-    else:
-        err = (r.stderr or '')[:300]
-        raise CaptureError('无法解析该抓包文件：%s' % err)
+    # IP / TCP / UDP 计数在报文索引阶段顺带计算，避免重复全量扫描。
 
     # 抓包完整性判断
     if info.packet_count is not None and info.packet_count == 0:
@@ -222,27 +211,6 @@ def _parse_time(s) -> datetime | None:
         except ValueError:
             continue
     return None
-
-
-def _count_field(path: str, proto: str) -> int | None:
-    r = _run([TSHARK, '-r', path, '-Y', proto, '-T', 'fields', '-e', 'frame.number'],
-             300, '统计 %s 报文' % proto)
-    if r.returncode != 0:
-        return None
-    return len([x for x in r.stdout.splitlines() if x.strip()])
-
-
-def _count_ips(path: str) -> int | None:
-    r = _run([TSHARK, '-r', path, '-Y', 'ip', '-T', 'fields',
-              '-e', 'ip.src', '-e', 'ip.dst'], 300, '统计 IP 地址')
-    if r.returncode != 0:
-        return None
-    ips = set()
-    for line in r.stdout.splitlines():
-        for x in line.split('\t'):
-            if x.strip():
-                ips.add(x.strip())
-    return len(ips) if ips else None
 
 
 # ---------------------------------------------------------------

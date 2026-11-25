@@ -327,6 +327,9 @@ watch(filtered, (items) => {
           <small v-if="interval && video" class="foot"
             >预览未提供原始 PTS 与抓包时间的映射，请使用播放器进度条定位。</small
           >
+          <small v-if="video?.extra?.ps_sampled" class="foot"
+            >编码结构取样自流开头 60 秒或 256 MiB，媒体质量指标仍覆盖完整流。</small
+          >
           <div v-if="!video" class="vacant">此次抓包未观察到可展示的媒体流</div>
         </section>
         <section id="station-events" class="instrument">

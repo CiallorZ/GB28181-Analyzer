@@ -39,6 +39,8 @@ class Settings:
     UPLOAD_DIR: Path = DATA_DIR / 'uploads'
     REBUILD_DIR: Path = DATA_DIR / 'rebuilt'
     REPORT_DIR: Path = DATA_DIR / 'reports'
+    LOG_DIR: Path = DATA_DIR / 'logs'
+    BACKUP_DIR: Path = DATA_DIR / 'backups'
 
     # 上传限制
     MAX_UPLOAD_MB: int = int(_env('MAX_UPLOAD_MB', '2048'))
@@ -85,5 +87,6 @@ if settings.ALLOWED_HOSTS is None:
     settings.ALLOWED_HOSTS = default_allowed_hosts(settings.HOST)
 
 for d in (settings.DATA_DIR, settings.UPLOAD_DIR,
-          settings.REBUILD_DIR, settings.REPORT_DIR):
+          settings.REBUILD_DIR, settings.REPORT_DIR,
+          settings.LOG_DIR, settings.BACKUP_DIR):
     d.mkdir(parents=True, exist_ok=True)

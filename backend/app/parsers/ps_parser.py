@@ -302,8 +302,9 @@ def parse_h265_sps(nal: bytes) -> dict:
 
         sps_id, pos = _read_ue(data, pos)
         chroma_format, pos = _read_ue(data, pos)
+        separate_colour_plane = 0
         if chroma_format == 3:
-            _, pos = _read_bits(data, pos, 1)
+            separate_colour_plane, pos = _read_bits(data, pos, 1)
 
         width, pos = _read_ue(data, pos)
         height, pos = _read_ue(data, pos)
@@ -314,16 +315,28 @@ def parse_h265_sps(nal: bytes) -> dict:
             r, pos = _read_ue(data, pos)
             t, pos = _read_ue(data, pos)
             b, pos = _read_ue(data, pos)
-            sub_w = 1 if chroma_format == 1 or chroma_format == 2 else 1
-            sub_h = 1 if chroma_format == 1 else 1
+            # HEVC conformance window 使用 SubWidthC/SubHeightC。4:2:0
+            # 的常见 1080p 会编码为 1088 并裁掉底部 4 个色度单位。
+            if separate_colour_plane or chroma_format == 0:
+                sub_w, sub_h = 1, 1
+            elif chroma_format == 1:
+                sub_w, sub_h = 2, 2
+            elif chroma_format == 2:
+                sub_w, sub_h = 2, 1
+            else:
+                sub_w, sub_h = 1, 1
             width -= (l + r) * sub_w
             height -= (t + b) * sub_h
 
-        bit_depth = 8
+        bit_depth_luma_minus8, pos = _read_ue(data, pos)
+        bit_depth_chroma_minus8, pos = _read_ue(data, pos)
+        bit_depth = bit_depth_luma_minus8 + 8
         return {
             'width': width, 'height': height,
             'profile': H265_PROFILES.get(profile_idc, 'Profile %d' % profile_idc),
             'bit_depth': bit_depth,
+            'bit_depth_chroma': bit_depth_chroma_minus8 + 8,
+            'chroma_format': chroma_format,
             'sps_id': sps_id,
         }
     except Exception:

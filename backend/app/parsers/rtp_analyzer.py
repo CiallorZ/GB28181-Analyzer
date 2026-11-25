@@ -77,6 +77,7 @@ class StreamStat:
 
     loss_confidence: str = 'observed_gap'   # observed_gap / confirmed_loss
     notes: list = field(default_factory=list)
+    ps_sampled: bool = False
 
 
 # ---------------------------------------------------------------
@@ -260,7 +261,7 @@ def analyze_stream(packets: list[RtpPacket], transport: str = 'UDP',
             st.peak_bitrate = max(b['kbps'] for b in st.bitrate_series)
 
     # ---- 时间戳异常 ----
-    st.ts_anomalies = _detect_ts_anomalies(packets)
+    st.ts_anomalies = _detect_ts_anomalies(packets, clock_rate)
 
     return st
 
@@ -299,7 +300,8 @@ def _bitrate_series(packets: list[RtpPacket], t0: float,
     return series
 
 
-def _detect_ts_anomalies(packets: list[RtpPacket]) -> list[dict]:
+def _detect_ts_anomalies(packets: list[RtpPacket],
+                         clock_rate: int = CLOCK_RATE_DEFAULT) -> list[dict]:
     """检测 RTP 时间戳异常
 
     常见异常：
@@ -324,7 +326,7 @@ def _detect_ts_anomalies(packets: list[RtpPacket]) -> list[dict]:
                     'time': round(p.arrival, 3),
                     'delta': d,
                 })
-        elif d > 90000 * 5:      # 超过 5 秒的跃变
+        elif clock_rate > 0 and d > clock_rate * 5:      # 超过 5 秒的跃变
             if len(out) < 20:
                 out.append({
                     'type': 'timestamp_jump',

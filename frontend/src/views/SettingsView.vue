@@ -54,6 +54,7 @@ onMounted(async () => {
           </div>
           <div class="full"><span>tshark 路径</span><b class="mono-sm">{{ health.tshark_path || '—' }}</b></div>
           <div class="full"><span>ffmpeg 路径</span><b class="mono-sm">{{ health.ffmpeg_path || '—' }}</b></div>
+          <div class="full"><span>运行日志</span><b class="mono-sm">{{ health.log_path || '—' }}</b></div>
         </div>
       </div>
     </div>

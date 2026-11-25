@@ -182,9 +182,16 @@ def _run(db: Session, task: AnalysisTask):
     # 仅这一份列表就要几百 MB —— 这是大包 OOM 的主要来源。
     stats = {'count': 0, 'first_ts': None, 'last_ts': None, 'has_rtp': False}
     endpoints: dict = {}
+    ip_addresses = set()
+    transport_counts = {'TCP': 0, 'UDP': 0}
     batch = []
     for p in capture.iter_packets(path):
         stats['count'] += 1
+        for address in (p.get('src_ip'), p.get('dst_ip')):
+            if address:
+                ip_addresses.add(address)
+        if p.get('transport') in transport_counts:
+            transport_counts[p['transport']] += 1
         ts = p.get('ts')
         if ts is not None:
             stats['first_ts'] = ts if stats['first_ts'] is None else min(stats['first_ts'], ts)
@@ -221,6 +228,19 @@ def _run(db: Session, task: AnalysisTask):
         db.add(Endpoint(task_id=task.id, ip=ep['ip'], port=ep['port'],
                         role='unknown', packet_count=ep['count'],
                         byte_count=ep['bytes']))
+
+    # 这些计数原来由额外的 3 次 tshark 扫描得到。现在从已经流式读过的
+    # 报文索引直接汇总，既保持字段含义，也减少大包上的重复 I/O。
+    cf.ip_count = len(ip_addresses)
+    cf.tcp_count = transport_counts['TCP']
+    cf.udp_count = transport_counts['UDP']
+    if cf.packet_count is None:
+        cf.packet_count = stats['count']
+    if stats['count'] and not ip_addresses:
+        warnings = list(cf.warnings or [])
+        if '未发现 IP 层流量' not in warnings:
+            warnings.append('未发现 IP 层流量')
+        cf.warnings = warnings
     db.commit()
 
     # ---------------- 3. SIP 消息 ----------------
@@ -667,7 +687,9 @@ def _run_ps_analysis(pkts, st):
     """
     try:
         from ..parsers import ps_parser
-        payloads = [p.payload for p in pkts if p.payload]
+        from .rebuild import sample_payloads, sample_timed_payloads
+        pairs, st.ps_sampled = sample_timed_payloads(pkts)
+        payloads = [payload for payload, _arrival in pairs]
         if not payloads:
             return None
         # 快速判断：任一包里出现 PS pack 起始码就认为需要解析
@@ -676,7 +698,10 @@ def _run_ps_analysis(pkts, st):
                        for p in payloads[:20])
         if not looks_ps:
             return None
-        times = [p.arrival - (pkts[0].arrival if pkts else 0) for p in pkts]
+        start = pkts[0].arrival if pkts else 0
+        times = [arrival - start for _payload, arrival in pairs]
+        if st.ps_sampled:
+            st.notes.append('编码分析取样自流开头有界窗口（60 秒或 256 MiB）')
         return ps_parser.analyze_ps(payloads, times)
     except Exception:
         # PS 分析失败不能影响主流程
@@ -779,6 +804,7 @@ def _save_stream(db: Session, task: AnalysisTask, st, key, transport,
         rebuild_error=(rb.error if rb and not rb.ok else None),
         extra={'notes': st.notes,
                'loss_confidence': st.loss_confidence,
+               'ps_sampled': st.ps_sampled,
                'ts_anomalies': st.ts_anomalies[:10],
                'seq_gap_events': st.seq_gap_events[:50],
                'ps': ps.to_dict() if ps else None,
@@ -788,6 +814,7 @@ def _save_stream(db: Session, task: AnalysisTask, st, key, transport,
                    'poster': bool(rb and rb.poster_path),
                    'duration': rb.duration if rb else None,
                    'ps_bytes': rb.ps_bytes if rb else 0,
+                   'sampled': rb.sampled if rb else False,
                    'error': rb.error if rb else None,
                    # 预览产物的编码与尺寸，和上面的源信息分开记录
                    'output_codec': (rb.codec.upper() if rb and rb.codec else None),

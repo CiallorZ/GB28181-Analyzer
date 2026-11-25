@@ -23,6 +23,14 @@ def test_version_is_semver():
     assert re.fullmatch(r'\d+\.\d+\.\d+', __version__), __version__
 
 
+def test_health_exposes_persisted_log_path(client):
+    response = client.get('/api/v1/health')
+    assert response.status_code == 200
+    log_path = response.json()['log_path']
+    assert log_path.endswith('analyzer.log')
+    assert Path(log_path).is_file()
+
+
 def test_frontend_version_matches():
     pkg = Path(__file__).resolve().parents[2] / 'frontend' / 'package.json'
     if not pkg.exists():

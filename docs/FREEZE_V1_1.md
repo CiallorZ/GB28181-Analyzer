@@ -71,3 +71,28 @@
 - 回归：[test_retention_coordination.py](../backend/tests/test_retention_coordination.py)、[test_field_workbench.py](../backend/tests/test_field_workbench.py)、[test_diagnostic_observations.py](../backend/tests/test_diagnostic_observations.py)。
 - 文档：[README.md](../README.md)、[IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md)、[ROADMAP.md](ROADMAP.md)、[CHANGELOG.md](../CHANGELOG.md)、本报告。
 - 已知限制：单机 SQLite、Windows 便携包无代码签名、网络部署需独立验收。DeepSeek 公网、设备端实采权限、现场异构双点、完整 RTCP SR/RR 对时与极限容量待验证。本轮现场文件和诊断报告数据保存在本机。
+
+
+## 迭代验收：v1.2 可信度与容量补丁
+
+本轮以 940cd57 为基线，修复数值口径并降低大包内存峰值，不改变诊断规则数量。
+
+- **H.265 SPS**：conformance window 按 4:2:0/4:2:2 的 SubWidthC/SubHeightC 裁剪，读取 luma/chroma bit depth。新增带 1088→1080 底部裁剪、Main10 的合成 SPS 黄金值测试。
+- **RTP 时间戳**：跳变阈值跟随 clock_rate，新增 8 kHz 流 6 秒跳变与 4 秒不误报的测试。
+- **抓包扫描**：去掉 capinfos 之外的 IP/TCP/UDP 三次全量 tshark 计数，改由报文索引汇总。inspect_file 仍负责格式、时长、链路类型与文件校验。
+- **PS/ES 与预览**：编码结构分析与 MP4 预览取样流开头 60 秒或 256 MiB，媒体质量指标仍覆盖完整流；界面标注取样范围。新增窗口与字节预算测试。
+- **可支持性**：运行日志写入数据目录 logs/analyzer.log，5 MiB × 4 滚动；健康检查返回日志路径。应用版本变化时通过 SQLite 在线备份 API 生成 backups/analyzer-<version>-<time>.db，保留最近 5 份，升级前失败会记录日志。
+- **桌面构建**：Windows 脚本缺少 Rust 时给出明确错误，并兼容用户目录下的 .cargo/bin/cargo.exe；新增构建契约测试。
+
+验证结果（Windows 11，本地）：
+
+| 检查 | 结果 |
+|---|---|
+| 后端 pytest | 261 通过，1 个 POSIX 权限用例跳过 |
+| Ruff | 通过 |
+| 前端 lint / Vitest | 0 error / 42 通过 |
+| 前端构建与首屏预算 | 通过，100.1 KB / 110 KB |
+| WebView 冒烟 | 设置页显示日志路径；待分析任务标题显示分析中；beforeunload 被拦截；已有任务视频与编码区正常渲染 |
+| 真实分析 | 示例抓包 126 报文、1 条流完成分析，日志落盘 |
+
+未在本机验证：Tauri 桌面 EXE 重编译（本机缺少 Rust，winget 安装请求未获确认）；离线单文件 EXE 的重新打包。两者需要在带 Rust 工具链的 Windows 构建机上完成。
