@@ -152,6 +152,20 @@ def list_tasks(page: int = 1, page_size: int = 20,
     )
 
 
+@router.get('/active-count')
+def active_count(db: Session = Depends(get_db)):
+    """Number of tasks that still own a worker or are queued for analysis."""
+    count = db.scalar(
+        select(func.count())
+        .select_from(AnalysisTask)
+        .where(
+            (AnalysisTask.status == TaskStatus.ANALYZING) |
+            ((AnalysisTask.status == TaskStatus.PENDING) & (AnalysisTask.stage == '排队中'))
+        )
+    )
+    return {'count': int(count or 0)}
+
+
 @router.get('/{task_id}', response_model=S.TaskDetail)
 def get_task(task_id: int, db: Session = Depends(get_db)):
     task = db.get(AnalysisTask, task_id)

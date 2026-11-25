@@ -285,6 +285,8 @@ function onWheel(e) {
       </div>
     </div>
 
+    <p v-if="messages.length" class="ladder-tip">图表可左右滑动查看完整时序</p>
+
     <div v-if="!messages.length" class="empty">
       没有可展示的信令消息
     </div>
@@ -323,6 +325,14 @@ function onWheel(e) {
   background-size: 40px 40px;
 }
 .ladder-scroll > div { min-width: 460px; }
+.ladder-tip { display: none; }
 .ladder-scroll :deep(.hit:focus-visible) { outline: 2px solid var(--brand); outline-offset: -2px; }
 .ladder-scroll :deep(.hit:hover) { fill: var(--surface-3); fill-opacity: .28; }
+@media (max-width: 680px) {
+  .ladder-tip {
+    display: block; padding: 6px 12px;
+    font-size: 11px; color: var(--text-4);
+    background: var(--surface-2); border-top: 1px solid var(--line);
+  }
+}
 </style>

@@ -31,6 +31,16 @@ def test_health_exposes_persisted_log_path(client):
     assert Path(log_path).is_file()
 
 
+def test_desktop_version_matches():
+    root = Path(__file__).resolve().parents[2]
+    tauri = json.loads((root / 'desktop' / 'tauri.conf.json').read_text(encoding='utf-8'))
+    assert tauri['version'] == __version__
+    cargo = (root / 'desktop' / 'Cargo.toml').read_text(encoding='utf-8')
+    assert 'version = "%s"' % __version__ in cargo
+    lock = (root / 'desktop' / 'Cargo.lock').read_text(encoding='utf-8')
+    assert 'name = "gb28181-desktop"\nversion = "%s"' % __version__ in lock
+
+
 def test_frontend_version_matches():
     pkg = Path(__file__).resolve().parents[2] / 'frontend' / 'package.json'
     if not pkg.exists():

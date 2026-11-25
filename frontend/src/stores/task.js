@@ -5,6 +5,7 @@ import { api } from '../api/client'
 export const useTaskStore = defineStore('task', () => {
   const currentTaskId = ref(Number(localStorage.getItem('currentTaskId')) || null)
   const aiPanelOpen = ref(false)      // AI 设置抽屉（全局）
+  const activeCount = ref(0)
   const task = ref(null)
   const loading = ref(false)
   let pollTimer = null
@@ -54,13 +55,21 @@ export const useTaskStore = defineStore('task', () => {
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
   }
 
+  async function refreshActive() {
+    try {
+      activeCount.value = Number((await api.activeTasks()).count) || 0
+    } catch {
+      // The last known count is safer than assuming no work is running.
+    }
+  }
+
   function openAiPanel() { aiPanelOpen.value = true }
   function closeAiPanel() { aiPanelOpen.value = false }
 
   return {
-    currentTaskId, task, loading, aiPanelOpen,
+    currentTaskId, task, loading, aiPanelOpen, activeCount,
     isAnalyzing, isReady,
-    setCurrent, loadTask, startPolling, stopPolling,
+    setCurrent, loadTask, startPolling, stopPolling, refreshActive,
     openAiPanel, closeAiPanel
   }
 })

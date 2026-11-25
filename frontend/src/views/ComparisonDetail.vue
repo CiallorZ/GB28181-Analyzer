@@ -5,6 +5,18 @@ import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api/client'
 import { allowedLink, fieldName, formatValue, groups, judgments } from '../utils/compare'
 
+// 后端返回的是不带时区的 UTC 时间，这里统一成 "YYYY-MM-DD HH:MM:SS"，
+// 避免把微秒级精度直接摊在界面上。
+function utcTime(value) {
+  if (!value) return '未知'
+  const iso = /[zZ]|[+-]\d{2}:?\d{2}$/.test(value) ? value : value + 'Z'
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return String(value)
+  const pad = n => String(n).padStart(2, '0')
+  return date.getUTCFullYear() + '-' + pad(date.getUTCMonth() + 1) + '-' + pad(date.getUTCDate()) +
+    ' ' + pad(date.getUTCHours()) + ':' + pad(date.getUTCMinutes()) + ':' + pad(date.getUTCSeconds())
+}
+
 const route = useRoute()
 const router = useRouter()
 const data = shallowRef(null)
@@ -85,7 +97,7 @@ function identifiers(values) {
         <section v-for="side in sides" :key="side" class="card card-body">
           <div class="row"><b class="side">{{ side.toUpperCase() }}</b><h2>{{ data['label_'+side] || '抓包任务' }} #{{ data['task_'+side+'_id'] }}</h2></div>
           <p v-for="(f,i) in data.fingerprint[side].files" :key="i">{{ f.filename }}</p>
-          <p class="meta">完成时间（UTC） {{ formatValue(data.fingerprint[side].completed_at) }} · {{ data.fingerprint[side].sessions }} 个会话 · {{ data.fingerprint[side].streams }} 条流</p>
+          <p class="meta">完成时间（UTC） {{ utcTime(data.fingerprint[side].completed_at) }} · {{ data.fingerprint[side].sessions }} 个会话 · {{ data.fingerprint[side].streams }} 条流</p>
           <button class="btn" :disabled="!!reason(side,null)" @click="jump(side)">查看报文</button> <small>{{ reason(side,null) }}</small>
         </section>
       </div>

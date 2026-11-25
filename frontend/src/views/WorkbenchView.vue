@@ -362,6 +362,7 @@ async function handleFile(f) {
     } catch (error) {
       startFailure.value = { id: res.task_id, message: error.message }
     }
+    await store.refreshActive()
     if (router.currentRoute.value === uploadRoute) {
       await router.push({ name: 'task', params: { id: res.task_id } })
     }
@@ -435,6 +436,7 @@ async function cancelAnalysis() {
   err.value = ''
   try {
     await api.cancel(tid)
+    await store.refreshActive()
     if (tid === store.currentTaskId) await loadAll()
   } catch (error) {
     err.value = error.message
@@ -455,6 +457,7 @@ async function reanalyze() {
     const updated = await store.loadTask(tid)
     if (tid !== store.currentTaskId) return
     task.value = updated
+    await store.refreshActive()
     if (updated.status === 'completed') await loadAll()
     else startPoll()
   } catch (e) {

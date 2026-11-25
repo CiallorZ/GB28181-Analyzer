@@ -1,3 +1,5 @@
+import sys
+
 import pytest
 
 from app.core import toolchain
@@ -42,6 +44,16 @@ def test_tool_api_saves_and_resets_manual_path(client, tmp_path):
     reset = client.delete('/api/v1/settings/tools')
     assert reset.status_code == 200
     assert reset.json()['tools']['tshark']['configured'] is None
+
+
+def test_tool_api_probes_version(client):
+    response = client.post('/api/v1/settings/tools/probe', json={
+        'name': 'tshark', 'path': sys.executable,
+    })
+    assert response.status_code == 200
+    body = response.json()
+    assert body['ok'] is True
+    assert body['version']
 
 
 def test_tool_api_rejects_missing_path(client, tmp_path):

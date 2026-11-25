@@ -8,5 +8,21 @@ def test_windows_build_reports_missing_rust_toolchain():
     assert '--locked' in script
     main = (Path(__file__).resolve().parents[2] / 'desktop' / 'src' / 'main.rs').read_text(encoding='utf-8')
     assert 'set_analysis_busy' in main
+    assert 'pick_executable' in main
+    assert 'generate_handler![set_analysis_busy, pick_executable]' in main
     assert 'CloseRequested' in main
     assert 'prevent_close' in main
+
+
+def test_offline_build_includes_dumpcap_and_real_versions():
+    script = (Path(__file__).resolve().parents[2] / 'scripts' / 'offline' / 'build.py').read_text(encoding='utf-8')
+    assert 'dumpcap.exe' in script
+    assert 'tshark-version' in script
+    assert 'webview-version' in script
+    assert 'TShark 4.6.10' not in script
+
+
+def test_offline_launcher_removes_stale_runtimes():
+    launcher = (Path(__file__).resolve().parents[2] / 'scripts' / 'offline' / 'main.go').read_text(encoding='utf-8')
+    assert 'removeOldRuntimes' in launcher
+    assert 'os.RemoveAll' in launcher

@@ -11,7 +11,20 @@ from zipfile import ZipFile, ZIP_DEFLATED
 parser = argparse.ArgumentParser()
 for arg in ("app", "wireshark", "ffmpeg", "webview", "output"):
     parser.add_argument("--" + arg, type=Path, required=True)
+parser.add_argument("--tshark-version", default="unknown")
+parser.add_argument("--ffmpeg-version", default="unknown")
+parser.add_argument("--webview-version", default="unknown")
 a = parser.parse_args()
+required = {
+    "app": a.app,
+    "wireshark/dumpcap.exe": a.wireshark / "dumpcap.exe",
+    "ffmpeg/bin/ffmpeg.exe": a.ffmpeg / "bin" / "ffmpeg.exe",
+    "ffmpeg/bin/ffprobe.exe": a.ffmpeg / "bin" / "ffprobe.exe",
+    "webview": a.webview,
+}
+missing = [name for name, path in required.items() if not path.exists()]
+if missing:
+    raise SystemExit("missing required inputs: " + ", ".join(missing))
 system = Path(os.environ["SystemRoot"]) / "System32"
 with tempfile.TemporaryDirectory(dir=a.output.parent) as temp:
     temp = Path(temp)
@@ -28,8 +41,9 @@ with tempfile.TemporaryDirectory(dir=a.output.parent) as temp:
             add(child, child.name)
         for file in a.wireshark.glob("*.dll"):
             add(file, "Wireshark/" + file.name)
-        for name in ("tshark.exe", "capinfos.exe", "COPYING.txt", "README.txt", "plugins",
-                     "profiles", "diameter", "dtds", "protobuf", "radius", "snmp", "tpncp", "wimaxasncp"):
+        for name in ("tshark.exe", "capinfos.exe", "dumpcap.exe", "COPYING.txt", "README.txt",
+                     "plugins", "profiles", "diameter", "dtds", "protobuf", "radius", "snmp",
+                     "tpncp", "wimaxasncp"):
             add(a.wireshark/name, "Wireshark/"+name)
         for pat in ("msvcp140*.dll", "vcruntime140*.dll", "concrt140.dll"):
             for file in system.glob(pat):
@@ -40,7 +54,12 @@ with tempfile.TemporaryDirectory(dir=a.output.parent) as temp:
         add(a.ffmpeg/"LICENSE", "ffmpeg/LICENSE")
         add(a.ffmpeg/"README.txt", "ffmpeg/README.txt")
         add(a.webview, "WebView2")
-        z.writestr("Third-party.txt", "TShark 4.6.10: https://gitlab.com/wireshark/wireshark/-/tree/v4.6.10\nFFmpeg 9.0.2 Gyan full build: https://www.gyan.dev/ffmpeg/builds/ and https://github.com/FFmpeg/FFmpeg/tree/n9.0.2\nWebView2 Fixed Version 158.0.4370.33: https://developer.microsoft.com/microsoft-edge/webview2/\n")
+        z.writestr("Third-party.txt", (
+            f"TShark {a.tshark_version}: https://www.wireshark.org/download.html\n"
+            f"FFmpeg {a.ffmpeg_version}: https://www.gyan.dev/ffmpeg/builds/\n"
+            f"WebView2 {a.webview_version}: "
+            "https://developer.microsoft.com/microsoft-edge/webview2/\n"
+        ))
     with archive.open("rb") as f:
         digest = hashlib.file_digest(f, "sha256").hexdigest()
     source = Path(__file__).resolve()

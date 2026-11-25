@@ -74,6 +74,10 @@ class Settings:
         h.strip() for h in os.environ['ALLOWED_HOSTS'].split(',') if h.strip()
     ] if os.environ.get('ALLOWED_HOSTS') else None   # None=按 HOST 取默认
 
+    # 是否允许通过非本机请求修改工具路径。默认关闭；启用前应放在
+    # 反向代理认证之后。桌面版与 TestClient 不受影响。
+    ALLOW_REMOTE_SETTINGS: bool = _env('ALLOW_REMOTE_SETTINGS', '0') == '1'
+
     # CORS（前端 dev server）
     CORS_ORIGINS: list = _env(
         'CORS_ORIGINS',

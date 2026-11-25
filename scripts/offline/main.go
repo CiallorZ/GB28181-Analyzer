@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"unsafe"
 )
@@ -51,6 +52,25 @@ func extract(z *zip.Reader, root string) error {
 	return nil
 }
 
+// Keep only the current unpacked runtime. Failed launches never create a
+// completed directory, so stale versions would otherwise accumulate forever.
+func removeOldRuntimes(parent, current string) {
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if name == filepath.Base(current) || strings.HasPrefix(name, "stage-") {
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(parent, name))
+	}
+}
+
 func launch() error {
 	if len(buildID) != 64 {
 		return errors.New("missing package identity")
@@ -64,6 +84,7 @@ func launch() error {
 		return err
 	}
 	root := filepath.Join(parent, buildID)
+	removeOldRuntimes(parent, root)
 	if _, err = os.Stat(root); os.IsNotExist(err) {
 		exe, err := os.Executable()
 		if err != nil {

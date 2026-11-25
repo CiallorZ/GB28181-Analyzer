@@ -16,6 +16,22 @@ fn set_analysis_busy(busy: bool) {
     ANALYSIS_BUSY.store(busy, Ordering::SeqCst);
 }
 
+#[tauri::command]
+fn pick_executable(window: tauri::Window, title: String) -> Option<String> {
+    // 以主窗口为父窗口，对话框才会以模态方式出现在窗口前面。
+    let mut dialog = rfd::FileDialog::new().set_title(&title).set_parent(&window);
+    if let Some(profile) = std::env::var_os("USERPROFILE") {
+        let desktop = std::path::PathBuf::from(profile).join("Desktop");
+        if desktop.is_dir() {
+            dialog = dialog.set_directory(desktop);
+        }
+    }
+    dialog
+        .add_filter("可执行文件", &["exe"])
+        .pick_file()
+        .map(|path| path.display().to_string())
+}
+
 fn start() -> Result<(), Box<dyn std::error::Error>> {
     let engine = std::env::current_exe()?.with_file_name("engine").join("AnalyzerEngine.exe");
     // Closing our last job handle also terminates any active TShark/FFmpeg descendants.
@@ -51,7 +67,7 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
     let port = rx.recv_timeout(Duration::from_secs(45)).map_err(|_| "分析服务启动失败，请检查是否已经打开工作台，以及数据目录是否可写。")?;
     let url: tauri::Url = format!("http://127.0.0.1:{port}/").parse()?;
     let app = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![set_analysis_busy])
+        .invoke_handler(tauri::generate_handler![set_analysis_busy, pick_executable])
         .build(tauri::generate_context!())?;
     let origin = url.origin();
     // Tauri's work area excludes the taskbar and is reported in physical pixels.

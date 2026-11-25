@@ -1,12 +1,9 @@
 <script setup>
 /**
- * DeepSeek 智能分析面板
+ * DeepSeek 会诊面板
  *
- * 视觉：中国铁塔红（品牌）+ DeepSeek 蓝（AI）双色融合
- * 行为：
- *   1. 先展示本次分析的关键事实（让用户知道 AI 看到了什么）
- *   2. 深度思考动画 → 流式报告
- *   3. 报告后可直接追问
+ * 三个阶段：确认配置 → 选择专家并确认发送内容 → 研判报告与追问。
+ * 视觉沿用应用本身的仪器面板语言：1px 细线、小圆角、蓝色只作为 AI 强调色。
  */
 import { ref, reactive, computed, watch, nextTick, onUnmounted } from 'vue'
 import { api } from '../api/client'
@@ -15,47 +12,52 @@ import InterfaceState from './InterfaceState.vue'
 import { feedback } from '../stores/interface'
 import { useTaskStore } from '../stores/task'
 import { renderMd } from '../utils/markdown'
+import { AI_STEPS, resolvePhase, stepIndexFor } from '../utils/aiStages'
 
 const props = defineProps({ open: Boolean })
 const emit = defineEmits(['update:open'])
 
 const store = useTaskStore()
 
-const tab = ref('report')
+const view = ref('flow')            // 'config' | 'flow'
 const drawerRef = ref(null)
+const bodyRef = ref(null)
 let previousFocus = null
+
 const report = ref('')
 const previewOpen = ref(false)
 const reportContextHash = ref('')
+const reportSeconds = ref('')
+const reportExpert = ref('general')
 let reportController = null
 let chatController = null
 onUnmounted(() => { reportController?.abort(); chatController?.abort() })
+
 const running = ref(false)
-const thinkOpen = ref(true)
-const thinkDone = ref(false)
-const thinkTitle = ref('')
-const steps = ref([])
-const elapsed = ref(0)
 const err = ref('')
+const copied = ref(false)
 
 const chat = ref([])
 const question = ref('')
 const chatBusy = ref(false)
-const chatBox = ref(null)
 const questionInput = ref(null)
-const streamLabels = { followup: '正在生成追问回复…', analysis: '正在生成分析报告…' }
+
 const expert = ref('general')
 const profiles = {
-  general: ['综合研判', '串联信令与媒体证据', ['第一处异常出现在哪里？', '哪些结论仍需补抓验证？']],
+  general: ['综合研判', '串联信令、媒体与规则证据', ['第一处异常出现在哪里？', '哪些结论仍需补抓验证？']],
   sip: ['信令事务', '追踪请求、响应与重传', ['哪个事务缺少最终响应？', '重传与明确拒绝如何区分？']],
   media: ['媒体链路', '核对 SSRC、丢包与画面', ['协商和实际 SSRC 是否一致？', '画面重建失败有哪些可验证原因？']],
   field: ['现场排障', '制定两端复核步骤', ['平台侧先检查什么？', '下一次应在哪一端抓包？']]
 }
 const suggestedQuestions = computed(() => profiles[expert.value][2])
+const expertName = computed(() => profiles[expert.value][0])
 
 function useSuggestion(text) {
   question.value = text
-  nextTick(() => questionInput.value?.focus())
+  nextTick(() => {
+    questionInput.value?.focus()
+    autoGrow()
+  })
 }
 
 const cfg = ref({ has_key: false, key_hint: '', model: '', base_url: '' })
@@ -63,30 +65,35 @@ const keyInput = ref('')
 const modelInput = ref('')
 const baseInput = ref('')
 const cfgMsg = ref('')
+const cfgMsgOk = ref(false)
 const cfgBusy = ref(false)
 const testing = ref(false)
 
-const PLAN = ['等待模型响应', '接收分析结果']
+const canAnalyze = computed(() => store.task && store.task.status === 'completed')
 
-const canAnalyze = computed(() =>
-  store.task && store.task.status === 'completed')
-
-/* ---- 分析事实摘要（让用户知道 AI 的依据） ---- */
 const facts = computed(() => {
   const s = store.task?.summary || {}
   const d = s.diagnostics || {}
   return [
     { k: '报文', v: (s.packet_count || 0).toLocaleString() },
     { k: '会话', v: s.session_count ?? 0 },
-    { k: '信令成功', v: s.signal_success_rate != null
-        ? s.signal_success_rate.toFixed(1) + '%' : '—',
-      cls: s.signal_success_rate >= 90 ? 'ok' : 'warning' },
-    { k: '有媒体', v: s.sessions_with_media ?? 0,
-      cls: s.sessions_with_media ? 'ok' : 'critical' },
-    { k: '严重', v: d.critical || 0, cls: d.critical ? 'critical' : '' },
-    { k: '警告', v: d.warning || 0, cls: d.warning ? 'warning' : '' }
+    { k: '信令成功', v: s.signal_success_rate != null ? s.signal_success_rate.toFixed(1) + '%' : '—' },
+    { k: '有媒体', v: s.sessions_with_media ?? 0 },
+    { k: '严重', v: d.critical || 0, tone: d.critical ? 'critical' : '' },
+    { k: '警告', v: d.warning || 0, tone: d.warning ? 'warning' : '' }
   ]
 })
+
+/* 阶段：配置 → 选择 → 确认发送 → 研判结果 */
+const phase = computed(() => resolvePhase({
+  view: view.value,
+  report: report.value,
+  previewOpen: previewOpen.value
+}))
+
+const stepIndex = computed(() => stepIndexFor(phase.value))
+
+const taskName = computed(() => store.task?.file?.filename || store.task?.name || '')
 
 const close = () => emit('update:open', false)
 
@@ -101,18 +108,28 @@ function onDrawerKeydown(event) {
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
 }
 
+function scrollBody(toTop) {
+  nextTick(() => {
+    const el = bodyRef.value
+    if (el && toTop) el.scrollTop = 0
+  })
+}
+
+
+/* ---------------- 配置 ---------------- */
 async function loadCfg() {
   try {
     cfg.value = await api.aiConfig()
     modelInput.value = cfg.value.model || ''
     baseInput.value = cfg.value.base_url || ''
-    if (cfg.value.has_key && tab.value === 'config') tab.value = 'report'
-  } catch { /* 忽略 */ }
+    if (cfg.value.has_key && view.value === 'config') view.value = 'flow'
+  } catch { /* 读取失败时保持默认，用户仍可手动填写 */ }
 }
 
 async function saveCfg() {
   cfgBusy.value = true
   cfgMsg.value = ''
+  cfgMsgOk.value = false
   try {
     const body = {}
     if (keyInput.value.trim()) body.api_key = keyInput.value.trim()
@@ -120,8 +137,10 @@ async function saveCfg() {
     if (baseInput.value.trim()) body.base_url = baseInput.value.trim()
     cfg.value = await api.aiSaveConfig(body)
     keyInput.value = ''
-    cfgMsg.value = '已保存'
-    if (cfg.value.has_key) tab.value = 'report'
+    cfgMsg.value = '已保存，可以开始会诊'
+    cfgMsgOk.value = true
+    feedback('success')
+    if (cfg.value.has_key) view.value = 'flow'
   } catch (e) {
     cfgMsg.value = '保存失败：' + e.message
   } finally {
@@ -132,9 +151,11 @@ async function saveCfg() {
 async function testConn() {
   testing.value = true
   cfgMsg.value = ''
+  cfgMsgOk.value = false
   try {
     const r = await api.aiTest()
     cfgMsg.value = '连接正常：' + (r.reply || 'OK')
+    cfgMsgOk.value = true
   } catch (e) {
     cfgMsg.value = '连接失败：' + e.message
   } finally {
@@ -142,53 +163,24 @@ async function testConn() {
   }
 }
 
-/* ---- 思考动画 ---- */
-function startThinking() {
-  thinkOpen.value = true
-  thinkDone.value = false
-  thinkTitle.value = '等待模型响应'
-  steps.value = PLAN.map(t => ({ text: t, state: 'wait', time: '' }))
-  steps.value[0].state = 'active'
-  elapsed.value = 0
-  const t0 = Date.now()
-  const timer = setInterval(() => { elapsed.value = ((Date.now() - t0) / 1000).toFixed(1) }, 200)
-  return {
-    toReport() {
-      steps.value[0].state = 'done'
-      steps.value[1].state = 'active'
-      thinkTitle.value = '正在接收结果'
-    },
-    finish() {
-      clearInterval(timer)
-      steps.value.forEach(s => { s.state = 'done' })
-      thinkDone.value = true
-      thinkOpen.value = false
-      thinkTitle.value = '分析完成'
-    },
-    fail() {
-      clearInterval(timer)
-      thinkDone.value = true
-      thinkTitle.value = '分析中断'
-    }
-  }
-}
-
-/* ---- 报告 ---- */
+/* ---------------- 报告 ---------------- */
 async function runAnalyze(contextHash) {
   previewOpen.value = false
   if (running.value || !canAnalyze.value) return
-  if (!cfg.value.has_key) { tab.value = 'config'; return }
+  if (!cfg.value.has_key) { view.value = 'config'; return }
 
   running.value = true
   err.value = ''
   report.value = ''
   reportContextHash.value = ''
   chat.value = []
-  const think = startThinking()
+  reportExpert.value = expert.value
+  const t0 = Date.now()
   reportController = new AbortController()
+  scrollBody(true)
 
   try {
-    const res = await fetch(`/api/v1/ai/analyze/${store.currentTaskId}`, {
+    const res = await fetch('/api/v1/ai/analyze/' + store.currentTaskId, {
       method: 'POST',
       signal: reportController.signal,
       headers: { 'Content-Type': 'application/json' },
@@ -202,7 +194,7 @@ async function runAnalyze(contextHash) {
 
     const reader = res.body.getReader()
     const dec = new TextDecoder()
-    let buf = '', acc = '', first = true, completed = false
+    let buf = '', acc = '', completed = false
 
     while (true) {
       const { done, value } = await reader.read()
@@ -222,7 +214,6 @@ async function runAnalyze(contextHash) {
         try { j = JSON.parse(data) } catch { continue }
 
         if (ev === 'delta') {
-          if (first) { first = false; think.toReport() }
           acc += j.t || ''
           report.value = acc
         } else if (ev === 'done') {
@@ -236,12 +227,12 @@ async function runAnalyze(contextHash) {
     if (!completed) throw new Error('连接中断，分析结果可能不完整，请重试')
     if (!report.value.trim()) throw new Error('模型没有返回内容')
     reportContextHash.value = contextHash
-    think.finish()
+    reportSeconds.value = ((Date.now() - t0) / 1000).toFixed(1)
     feedback('success')
+    scrollBody(true)
   } catch (e) {
     report.value = ''
     err.value = e.message
-    think.fail()
     if (e.name !== 'AbortError') feedback('error')
   } finally {
     running.value = false
@@ -249,9 +240,18 @@ async function runAnalyze(contextHash) {
   }
 }
 
-/* ---- 追问 ---- */
+
+/* ---------------- 追问 ---------------- */
+function autoGrow() {
+  const el = questionInput.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = Math.min(el.scrollHeight, 132) + 'px'
+}
+
 function composerKeydown(event) {
-  if (event.isComposing || event.keyCode === 229 || event.shiftKey) return
+  if (event.isComposing || event.keyCode === 229) return
+  if (event.shiftKey) return
   event.preventDefault()
   sendQuestion()
 }
@@ -262,6 +262,7 @@ async function sendQuestion() {
 
   feedback('send')
   question.value = ''
+  nextTick(autoGrow)
   const userMessage = reactive({ role: 'user', content: q })
   chat.value.push(userMessage)
   const history = chat.value.slice(0, -1).filter(m => !m.failed).map(m => ({
@@ -276,7 +277,7 @@ async function sendQuestion() {
   scrollChat()
 
   try {
-    const res = await fetch(`/api/v1/ai/chat/${store.currentTaskId}`, {
+    const res = await fetch('/api/v1/ai/chat/' + store.currentTaskId, {
       method: 'POST',
       signal: chatController.signal,
       headers: { 'Content-Type': 'application/json' },
@@ -338,11 +339,12 @@ async function sendQuestion() {
 
 function scrollChat() {
   nextTick(() => {
-    const el = chatBox.value
+    const el = bodyRef.value
     if (el) el.scrollTop = el.scrollHeight
   })
 }
 
+/* ---------------- 报告动作 ---------------- */
 function exportReport() {
   const url = URL.createObjectURL(new Blob([report.value], { type: 'text/markdown;charset=utf-8' }))
   const link = document.createElement('a')
@@ -352,631 +354,791 @@ function exportReport() {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-function copyReport() {
-  navigator.clipboard?.writeText(report.value)
+async function copyReport() {
+  try {
+    await navigator.clipboard?.writeText(report.value)
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 1600)
+  } catch { copied.value = false }
+}
+
+function resetReport() {
+  report.value = ''
+  reportContextHash.value = ''
+  reportSeconds.value = ''
+  chat.value = []
+  question.value = ''
+  err.value = ''
+  previewOpen.value = false
+  scrollBody(true)
+}
+
+/* 全屏抽屉打开时锁住页面滚动，否则手机上背后的结果页会一起滚 */
+let previousOverflow = ''
+
+function lockPageScroll() {
+  previousOverflow = document.documentElement.style.overflow
+  document.documentElement.style.overflow = 'hidden'
+}
+
+function unlockPageScroll() {
+  document.documentElement.style.overflow = previousOverflow
 }
 
 watch(() => props.open, async (v) => {
-  if (!v) { previousFocus?.focus?.(); previousFocus = null; return }
+  if (!v) {
+    unlockPageScroll()
+    previousFocus?.focus?.()
+    previousFocus = null
+    return
+  }
   previousFocus = document.activeElement
+  lockPageScroll()
   await nextTick()
   drawerRef.value?.focus()
   const before = cfg.value.has_key
   await loadCfg()
-  if (!cfg.value.has_key) tab.value = 'config'
-  else if (!before || !report.value) tab.value = 'report'
+  if (!cfg.value.has_key) view.value = 'config'
+  else if (!before && !report.value) view.value = 'flow'
 })
+
+onUnmounted(unlockPageScroll)
 </script>
+
 
 <template>
   <Teleport to="body">
-    <Transition name="slide">
-      <div v-if="open" class="mask" @click.self="close">
-        <aside ref="drawerRef" class="drawer glass-panel" role="dialog" aria-modal="true" aria-label="DeepSeek 智能分析" tabindex="-1" @keydown="onDrawerKeydown">
-          <!-- 双品牌头部 -->
-          <div class="head">
-            <div class="head-in">
-              <div class="logos"><img src="/brand/analyzer.svg" class="tower-mark" alt="铁塔抓包分析"><span class="brand-join" aria-hidden="true"></span>
-                <img src="/brand/deepseek.svg" alt="" class="lg-ds" />
-              </div>
-              <div class="head-txt">
-                <div class="head-name">DeepSeek 专家会诊</div>
-                <div class="head-sub">
-                  <span class="dot-brand"></span>
-                  结合本次抓包分析结果
-                  <template v-if="cfg.model"> · <span class="mono">{{ cfg.model }}</span></template>
-                </div>
-              </div>
-              <div class="spacer"></div>
-              <button class="hbtn" @click="tab = tab === 'config' ? 'report' : 'config'"
-                      :title="tab === 'config' ? '返回' : '设置'">
-                <AppIcon :name="tab === 'config' ? 'back' : 'settings'" />
-              </button>
-              <button class="hbtn" @click="close" title="关闭">
+    <Transition name="ai-slide">
+      <div v-if="open" class="ai-mask" @click.self="close">
+        <aside
+          ref="drawerRef"
+          class="ai-drawer"
+          role="dialog"
+          aria-modal="true"
+          aria-label="DeepSeek 会诊"
+          tabindex="-1"
+          @keydown="onDrawerKeydown"
+        >
+          <header class="ai-head">
+            <span class="ai-mark" aria-hidden="true"><img src="/brand/deepseek.svg" alt="" /></span>
+            <div class="ai-head-text">
+              <strong>DeepSeek 会诊</strong>
+              <span class="ai-head-sub">
+                <template v-if="taskName">{{ taskName }}</template>
+                <template v-else>尚未选择任务</template>
+                <template v-if="cfg.model"> · <span class="mono">{{ cfg.model }}</span></template>
+              </span>
+            </div>
+            <div class="ai-head-acts">
+              <button
+                v-if="phase !== 'config'"
+                type="button"
+                class="ai-icon-btn"
+                title="连接设置"
+                aria-label="连接设置"
+                @click="view = 'config'"
+              ><AppIcon name="settings" /></button>
+              <button type="button" class="ai-icon-btn" title="关闭" aria-label="关闭会诊" @click="close">
                 <AppIcon name="close" />
               </button>
             </div>
-          </div>
+          </header>
 
-          <!-- 配置 -->
-          <div v-if="tab === 'config'" class="body">
-            <div class="cfg-note">
-              <div class="cn-title">数据边界</div>
-              只发送解析后的<strong>结构化摘要</strong>（会话、流、诊断结论），
-              <strong>绝不发送抓包原始字节</strong>。
-              Key 仅保存在本机后端，前端只能看到末四位。
-            </div>
+          <nav v-if="view === 'flow' && canAnalyze" class="ai-steps" aria-label="会诊流程">
+            <template v-for="(label, i) in AI_STEPS" :key="label">
+              <span class="ai-step" :class="{ on: stepIndex === i, done: stepIndex > i }">
+                <i aria-hidden="true">{{ stepIndex > i ? '✓' : i + 1 }}</i>{{ label }}
+              </span>
+              <span v-if="i < 2" class="ai-step-line" :class="{ done: stepIndex > i }" aria-hidden="true"></span>
+            </template>
+          </nav>
 
-            <div class="field">
-              <label>API Key</label>
-              <input v-model="keyInput" type="password" class="inp full"
-                     :placeholder="cfg.has_key ? '已配置 ' + cfg.key_hint + '（留空则不修改）' : 'sk-...'" />
-            </div>
-            <div class="field">
-              <label>模型</label>
-              <input v-model="modelInput" type="text" class="inp full"
-                     placeholder="deepseek-flash" />
-              <div class="hint">
-                使用当前服务账户已开通的模型 ID。设置完成后可测试连接。
+          <div ref="bodyRef" class="ai-body">
+            <div v-if="view === 'config'" class="ai-config">
+              <div class="ai-note">
+                <span class="ai-note-icon" aria-hidden="true"><AppIcon name="info" /></span>
+                <div>
+                  <strong>只发送结构化摘要</strong>
+                  <p>会话、流与规则结论会发送给模型服务，抓包原始字节不会离开本机。API Key 只保存在本机后端，前端仅显示末四位。</p>
+                </div>
+              </div>
+
+              <div class="ai-field">
+                <label for="ai-key">API Key</label>
+                <input
+                  id="ai-key"
+                  v-model="keyInput"
+                  type="password"
+                  class="inp"
+                  autocomplete="off"
+                  :placeholder="cfg.has_key ? '已配置 ' + cfg.key_hint + '，留空则不修改' : 'sk-…'"
+                />
+                <p class="ai-hint">在 DeepSeek 开放平台创建，写入本机数据目录。</p>
+              </div>
+
+              <div class="ai-field">
+                <label for="ai-model">模型 ID</label>
+                <input id="ai-model" v-model="modelInput" type="text" class="inp" placeholder="deepseek-flash" spellcheck="false" />
+                <p class="ai-hint">填当前账号已开通的模型，留空使用默认值。</p>
+              </div>
+
+              <div class="ai-field">
+                <label for="ai-base">接口地址</label>
+                <input id="ai-base" v-model="baseInput" type="text" class="inp" placeholder="https://api.deepseek.com" spellcheck="false" />
+                <p class="ai-hint">使用自建网关时填写完整地址，需为 HTTPS。</p>
+              </div>
+
+              <p v-if="cfgMsg" class="ai-msg" :class="cfgMsgOk ? 'ok' : 'bad'" role="status">{{ cfgMsg }}</p>
+
+              <div class="ai-config-acts">
+                <button type="button" class="btn primary" :disabled="cfgBusy" @click="saveCfg">
+                  {{ cfgBusy ? '保存中…' : '保存设置' }}
+                </button>
+                <button type="button" class="btn" :disabled="testing || !cfg.has_key" @click="testConn">
+                  {{ testing ? '测试中…' : '测试连接' }}
+                </button>
+                <button v-if="canAnalyze" type="button" class="btn ghost" @click="view = 'flow'">返回会诊</button>
               </div>
             </div>
-            <div class="field">
-              <label>接口地址</label>
-              <input v-model="baseInput" type="text" class="inp full"
-                     placeholder="https://api.deepseek.com" />
-            </div>
-
-            <div v-if="cfgMsg" class="cfg-msg" :class="{ bad: cfgMsg.includes('失败') }">
-              {{ cfgMsg }}
-            </div>
-
-            <div class="row mt-20" style="gap:8px">
-              <button class="btn primary" @click="saveCfg" :disabled="cfgBusy">
-                {{ cfgBusy ? '保存中…' : '保存' }}
-              </button>
-              <button class="btn" @click="testConn" :disabled="testing || !cfg.has_key">
-                {{ testing ? '测试中…' : '测试连接' }}
-              </button>
-            </div>
-          </div>
-
-          <!-- 报告 -->
-          <div v-else class="body flush">
-            <InterfaceState v-if="!canAnalyze" icon="signal" title="请先完成一次抓包分析"
-              detail="会诊将使用当前任务的信令、媒体与规则诊断摘要。" />
 
             <template v-else>
-              <AiContextPreview v-if="previewOpen" :task-id="store.currentTaskId" @cancel="previewOpen = false" @confirm="runAnalyze" />
-              <!-- 分析事实（AI 的依据） -->
-              <div class="facts">
-                <div class="facts-title">本次分析事实</div>
-                <div class="facts-grid">
-                  <div v-for="f in facts" :key="f.k" class="fact">
-                    <i>{{ f.k }}</i>
-                    <b :class="f.cls">{{ f.v }}</b>
-                  </div>
-                </div>
-              </div>
+              <InterfaceState
+                v-if="!canAnalyze"
+                icon="signal"
+                title="先完成一次抓包分析"
+                detail="会诊使用当前任务的信令、媒体与规则诊断摘要。"
+              />
 
-              <!-- 起始 -->
-              <div v-if="!report && !running" class="start">
-                <header class="consult-title"><img src="/brand/deepseek.svg" alt="" /><h3>选择会诊专家</h3></header>
-                <div class="expert-list">
-                  <button v-for="(profile,key) in profiles" :key="key" type="button" :aria-pressed="expert === key" @click="expert = key">
-                    <span><strong>{{ profile[0] }}</strong><small>{{ profile[1] }}</small></span>
-                    <span aria-hidden="true">{{ expert === key ? '✓' : '○' }}</span>
-                  </button>
-                </div>
-                <section class="focus-preview" aria-live="polite"><strong>本次分析重点</strong>
-                  <ul><li v-for="item in suggestedQuestions" :key="item">{{ item }}</li></ul>
-                </section>
-                <button class="btn primary lg" @click="previewOpen = true"
-                        :disabled="running || !cfg.has_key">
-                  <img src="/brand/deepseek-white.svg" alt="" class="btn-ico" />
-                  查看发送内容
-                </button>
-                <div v-if="!cfg.has_key" class="hint mt-10">需要先配置 API Key</div>
-              </div>
+              <template v-else>
+                <AiContextPreview
+                  v-if="phase === 'preview'"
+                  :task-id="store.currentTaskId"
+                  :expert="expertName"
+                  :expert-key="expert"
+                  @cancel="previewOpen = false"
+                  @confirm="runAnalyze"
+                />
 
-              <!-- 思考过程 -->
-              <div v-if="steps.length" class="think" :class="{ done: thinkDone }">
-                <button type="button" class="think-head" :aria-expanded="thinkOpen" @click="thinkOpen = !thinkOpen">
-                  <img src="/brand/deepseek.svg" alt="" class="whale" />
-                  <span class="t-title">{{ thinkTitle }}</span>
-                  <span v-if="!thinkDone" class="t-dots"><i></i><i></i><i></i></span>
-                  <span class="spacer"></span>
-                  <span class="t-time mono">{{ elapsed }}s</span>
-                  <span class="t-arrow" :class="{ open: thinkOpen }"><AppIcon name="next" /></span>
-                </button>
-                <div v-show="thinkOpen" class="t-steps">
-                  <div v-for="(s, i) in steps" :key="i" class="tstep" :class="s.state">
-                    <span class="sdot"></span>
-                    <span class="stxt">{{ s.text }}</span>
-                    <span class="stime mono">{{ s.time }}</span>
-                  </div>
-                </div>
-              </div>
-
-              <p v-if="running || chatBusy" role="status" class="stream-state">{{ chatBusy ? streamLabels.followup : streamLabels.analysis }}</p>
-              <!-- 报告 -->
-              <div v-if="report" class="report">
-                <div class="r-tools"><strong class="signature">{{ profiles[expert][0] }} · 研判报告</strong>
-                  <button class="btn-mini" :disabled="running || chatBusy" @click="report = ''; chat = []; steps = []; question = ''; reportContextHash = ''">新会诊</button>
-                  <button class="btn-mini" @click="copyReport">复制</button><button class="btn-mini" @click="exportReport">导出 .md</button>
-                  <button class="btn-mini" @click="previewOpen = true" :disabled="running">
-                    重新分析
-                  </button>
-                </div>
-                <div class="md" v-html="renderMd(report)"></div>
-              </div>
-
-              <div v-if="err" class="err-box" style="margin:12px 14px">{{ err }}</div>
-
-              <!-- 对话 -->
-              <div v-if="report" class="chat">
-                <div class="chat-log" ref="chatBox" aria-label="会诊对话" :aria-busy="chatBusy">
-                  <div v-for="(m, i) in chat" :key="i" class="cmsg" :class="m.role">
-                    <div class="cav" :class="m.role">
-                      <img v-if="m.role === 'assistant'" src="/brand/deepseek.svg" alt="" />
-                      <span v-else>我</span>
-                    </div>
-                    <div class="message-content">
-                      <div class="message-byline">{{ m.role === 'assistant' ? 'DeepSeek' : '你' }}</div>
-                      <div class="cbub" :class="{ streaming: m.streaming, 'message-failed': m.failed }">
-                        <div v-if="m.role === 'assistant'" v-html="renderMd(m.content)"></div>
-                        <div v-else>{{ m.content }}</div>
+                <template v-else-if="phase === 'choose'">
+                  <section class="ai-block">
+                    <h3 class="ai-block-title">本次会诊依据</h3>
+                    <dl class="ai-facts">
+                      <div v-for="f in facts" :key="f.k">
+                        <dt>{{ f.k }}</dt>
+                        <dd :class="f.tone">{{ f.v }}</dd>
                       </div>
-                      <button v-if="m.role === 'user' && m.failed && !chatBusy" type="button" class="btn-mini"
-                        @click="useSuggestion(m.content)">填回输入框</button>
+                    </dl>
+                  </section>
+
+                  <section class="ai-block">
+                    <h3 class="ai-block-title">选择会诊视角</h3>
+                    <p class="ai-block-desc">不同视角决定模型先看哪一层证据，报告结构也会随之变化。</p>
+                    <div class="ai-experts" role="radiogroup" aria-label="会诊视角">
+                      <button
+                        v-for="(profile, key) in profiles"
+                        :key="key"
+                        type="button"
+                        role="radio"
+                        :aria-checked="expert === key"
+                        class="ai-expert"
+                        :class="{ on: expert === key }"
+                        @click="expert = key"
+                      >
+                        <span class="ae-head">
+                          <strong>{{ profile[0] }}</strong>
+                          <span class="ae-tick" aria-hidden="true"><AppIcon name="check" /></span>
+                        </span>
+                        <span class="ae-desc">{{ profile[1] }}</span>
+                      </button>
                     </div>
+                  </section>
+
+                  <section class="ai-block">
+                    <h3 class="ai-block-title">这个视角会先问</h3>
+                    <ul class="ai-prompts">
+                      <li v-for="item in suggestedQuestions" :key="item">{{ item }}</li>
+                    </ul>
+                  </section>
+
+                  <div class="ai-run">
+                    <button type="button" class="btn primary lg" :disabled="!cfg.has_key" @click="previewOpen = true">
+                      查看发送内容
+                    </button>
+                    <span v-if="!cfg.has_key" class="ai-hint">需要先在连接设置里填入 API Key。</span>
+                    <span v-else class="ai-hint">下一步会展示将发送给模型的摘要全文。</span>
                   </div>
-                </div>
-                <div class="chat-prompts" v-if="!chatBusy && reportContextHash && !running">
-                  <span>继续探索</span>
-                  <div class="prompt-list">
-                    <button v-for="prompt in suggestedQuestions" :key="prompt" @click="useSuggestion(prompt)">{{ prompt }} <span aria-hidden="true"><AppIcon name="open" /></span></button>
+                </template>
+
+                <template v-else>
+                  <div v-if="running && !report" class="ai-running" role="status">
+                    <span class="ai-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span>正在生成研判报告，通常需要十几秒</span>
                   </div>
-                </div>
-                <div class="chat-in">
-                  <textarea ref="questionInput" v-model="question" rows="1" aria-label="输入追问"
-                            :disabled="running || !reportContextHash"
-                            placeholder="继续追问，例如：这个 SSRC 要去哪里改？"
-                            @keydown.enter="composerKeydown"></textarea>
-                  <button class="send" @click="sendQuestion" aria-label="发送追问"
-                          :disabled="chatBusy || running || !reportContextHash || !question.trim()">
-                    <AppIcon name="send" />
-                  </button>
-                </div>
-                <div class="chat-hint">Enter 发送 · Shift + Enter 换行 · 请勿输入敏感信息</div>
-              </div>
+
+                  <p v-if="err" class="ai-msg bad" role="alert">{{ err }}</p>
+
+                  <article v-if="report" class="ai-report">
+                    <header class="ai-report-head">
+                      <div class="arh-text">
+                        <h3>{{ profiles[reportExpert][0] }} · 研判报告</h3>
+                        <p>
+                          任务 #{{ store.currentTaskId }}
+                          <template v-if="reportSeconds"> · 用时 {{ reportSeconds }}s</template>
+                          <template v-if="report.length"> · {{ report.length.toLocaleString() }} 字</template>
+                        </p>
+                      </div>
+                      <div class="arh-acts">
+                        <button type="button" class="btn-mini" @click="copyReport">{{ copied ? '已复制' : '复制' }}</button>
+                        <button type="button" class="btn-mini" @click="exportReport">导出 .md</button>
+                        <button type="button" class="btn-mini" :disabled="running" @click="previewOpen = true">重新分析</button>
+                        <button type="button" class="btn-mini" :disabled="running || chatBusy" @click="resetReport">新会诊</button>
+                      </div>
+                    </header>
+                    <div class="ai-md" v-html="renderMd(report)"></div>
+                  </article>
+
+                  <section v-if="report" class="ai-thread" aria-label="会诊对话">
+                    <h4 class="ai-thread-title">
+                      追问
+                      <span v-if="!chat.length" class="ai-thread-hint">报告里的结论可以继续追问</span>
+                    </h4>
+
+                    <div v-for="(m, i) in chat" :key="i" class="ai-msg-row" :class="m.role">
+                      <span class="ai-avatar" :class="m.role" aria-hidden="true">
+                        <img v-if="m.role === 'assistant'" src="/brand/deepseek.svg" alt="" />
+                        <template v-else>我</template>
+                      </span>
+                      <div class="ai-bubble" :class="{ failed: m.failed }">
+                        <div v-if="m.role === 'assistant'" class="ai-md" v-html="renderMd(m.content)"></div>
+                        <p v-else class="ai-user-text">{{ m.content }}</p>
+                        <span v-if="m.streaming" class="ai-caret" aria-hidden="true"></span>
+                      </div>
+                      <button
+                        v-if="m.role === 'user' && m.failed && !chatBusy"
+                        type="button"
+                        class="btn-mini ai-retry"
+                        @click="useSuggestion(m.content)"
+                      >填回输入框</button>
+                    </div>
+
+                    <div v-if="!chatBusy && reportContextHash" class="ai-followups">
+                      <span>接着问</span>
+                      <button
+                        v-for="prompt in suggestedQuestions"
+                        :key="prompt"
+                        type="button"
+                        @click="useSuggestion(prompt)"
+                      >{{ prompt }}</button>
+                    </div>
+                  </section>
+                </template>
+              </template>
             </template>
           </div>
+
+          <footer v-if="phase === 'result' && report" class="ai-composer">
+            <div class="ai-input">
+              <textarea
+                ref="questionInput"
+                v-model="question"
+                rows="1"
+                aria-label="输入追问"
+                :disabled="running || !reportContextHash"
+                placeholder="继续追问，例如：这个 SSRC 要去哪里改？"
+                @input="autoGrow"
+                @keydown.enter="composerKeydown"
+              ></textarea>
+              <button
+                type="button"
+                class="ai-send"
+                aria-label="发送追问"
+                :disabled="chatBusy || running || !reportContextHash || !question.trim()"
+                @click="sendQuestion"
+              ><AppIcon name="send" /></button>
+            </div>
+            <p class="ai-composer-hint">
+              <span v-if="chatBusy">正在回答…</span>
+              <template v-else>Enter 发送 · Shift + Enter 换行</template>
+              <span class="ai-composer-warn">对话内容不做脱敏，请勿粘贴敏感信息</span>
+            </p>
+          </footer>
         </aside>
       </div>
     </Transition>
   </Teleport>
 </template>
 
+
 <style scoped>
-.mask {
+.ai-mask {
   position: fixed; inset: 0; z-index: 300;
-  background:color-mix(in srgb,var(--bg) 26%,transparent);
-  backdrop-filter:blur(14px) saturate(.85);
   display: flex; justify-content: flex-end;
+  background: color-mix(in srgb, var(--bg) 46%, transparent);
+  backdrop-filter: blur(3px);
 }
-.drawer {
-  width:clamp(580px,44vw,880px); min-width:0; max-width:100%; height:100%;
+
+.ai-drawer {
+  display: flex; flex-direction: column;
+  width: clamp(560px, 46vw, 820px);
+  max-width: 100%;
+  height: 100%;
+  min-width: 0;
   background: var(--bg-2);
   border-left: 1px solid var(--line-strong);
-  display: flex; flex-direction: column;
-  box-shadow: -12px 0 40px rgba(0, 0, 0, .35);
+  box-shadow: -18px 0 46px rgba(0, 0, 0, .18);
 }
 
-.slide-enter-active, .slide-leave-active { transition: opacity .2s; }
-.slide-enter-active .drawer, .slide-leave-active .drawer {
-  transition: transform .28s var(--ease);
+@media (min-width: 900px) {
+  .ai-drawer {
+    margin: 12px;
+    height: calc(100% - 24px);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-xl);
+    overflow: hidden;
+  }
 }
-.slide-enter-from, .slide-leave-to { opacity: 0; }
-.slide-enter-from .drawer, .slide-leave-to .drawer {
-  transform: translateX(100%);
-}
+
+.ai-slide-enter-active, .ai-slide-leave-active { transition: opacity .18s var(--ease); }
+.ai-slide-enter-active .ai-drawer, .ai-slide-leave-active .ai-drawer { transition: transform .26s var(--ease-out); }
+.ai-slide-enter-from, .ai-slide-leave-to { opacity: 0; }
+.ai-slide-enter-from .ai-drawer, .ai-slide-leave-to .ai-drawer { transform: translateX(24px); }
 
 /* ===== 头部 ===== */
-.head {
-  position: relative;
+.ai-head {
   flex: none;
-  background: var(--surface-2);
+  display: flex; align-items: center; gap: 11px;
+  padding: 12px 14px;
+  background: var(--surface);
   border-bottom: 1px solid var(--line);
-  box-shadow: inset 0 2px 0 var(--ds);
 }
-.head-in {
-  position: relative;
-  display: flex; align-items: center; gap: 12px;
-  padding: 14px 16px;
+.ai-mark {
+  flex: none;
+  display: grid; place-items: center;
+  width: 32px; height: 32px;
+  border-radius: var(--radius-sm);
+  background: var(--ds-soft);
+  border: 1px solid var(--ds-line);
 }
-.logos { display:flex; align-items:center;gap:7px }
-.tower-mark {width:38px;height:38px}.brand-join {width:16px;height:1px;background:linear-gradient(90deg,var(--brand),var(--ds))}
-.head-in { background:linear-gradient(115deg,var(--ds-soft),transparent 75%); }
-@supports (backdrop-filter:blur(1px)) {
-  .drawer.glass-panel {
-    background:color-mix(in srgb,var(--bg-2) 77%,transparent);
-    backdrop-filter:blur(24px) saturate(115%);
-  }
+.ai-mark img { width: 18px; height: auto; }
+.ai-head-text { min-width: 0; line-height: 1.3; }
+.ai-head-text strong {
+  display: block;
+  font-size: 14px; font-weight: 650; color: var(--text);
 }
-@media (min-width:851px) {
-  .drawer.glass-panel {
-    margin:12px; height:calc(100% - 24px); overflow:hidden;
-    border:1px solid var(--line-strong); border-radius:16px;
-    box-shadow:0 12px 42px rgb(0 0 0 / 18%);
-  }
-}
-@media (max-width:850px) { .drawer { width:min(100%,640px); } }
-@media (max-width:480px) {
-  .head-in { gap:8px; padding-inline:12px; }
-  .logos .tower-mark { width:28px; height:28px; }
-  .brand-join { display:none; }
-  .head-txt { min-width:0; }
-  .head-sub { overflow-wrap:anywhere; }
-}
-
-.lg-ds { height: 20px; width: auto; }
-.head-txt { line-height: 1.35; min-width: 0; }
-.head-name {
-  font-size: 18px; font-weight: 600;
-  color: var(--text); letter-spacing: -.1px;
-}
-.head-sub {
-  font-size: 10.5px; color: var(--text-4);
+.ai-head-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px; color: var(--text-4);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.dot-brand {
-  display: inline-block;
-  width: 5px; height: 5px; border-radius: 50%;
-  background: var(--ds); opacity: .9; vertical-align: middle; margin-right: 4px;
+.ai-head-acts { margin-left: auto; display: flex; gap: 2px; flex: none; }
+.ai-icon-btn {
+  width: 30px; height: 30px;
+  display: grid; place-items: center;
+  border: 1px solid transparent; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-3);
+  cursor: pointer;
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
-.hbtn {
-  width: 28px; height: 28px;
-  border-radius: 5px;
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--text-3); cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: .15s;
+.ai-icon-btn:hover { background: var(--surface-3); color: var(--text); }
+.ai-icon-btn :deep(svg) { width: 15px; height: 15px; }
+.ai-icon-btn:focus-visible { outline: 2px solid var(--ds); outline-offset: 1px; }
+
+/* ===== 阶段 ===== */
+.ai-steps {
   flex: none;
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 16px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--text-4);
+  overflow: hidden;
 }
-.hbtn:hover { background: var(--surface-3); border-color: var(--line); color: var(--text); }
-.hbtn svg { width: 14px; height: 14px; }
+.ai-step { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.ai-step i {
+  width: 16px; height: 16px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--line-2);
+  font-style: normal; font-size: 9.5px;
+  color: var(--text-4);
+}
+.ai-step.on { color: var(--text); font-weight: 600; }
+.ai-step.on i { border-color: var(--ds); background: var(--ds); color: #fff; }
+.ai-step.done i { border-color: var(--ds-line); background: var(--ds-soft); color: var(--ds); }
+.ai-step-line { flex: 1; min-width: 8px; height: 1px; background: var(--line); }
+.ai-step-line.done { background: var(--ds-line); }
 
-.body { flex: 1; overflow-y: auto; padding: 16px; }
-.body.flush { padding: 0; display: flex; flex-direction: column; }
+/* ===== 主体 ===== */
+.ai-body {
+  flex: 1; min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
 
-/* 配置 */
-.cfg-note {
+
+.ai-block { padding: 18px 18px 0; }
+.ai-block:last-of-type { padding-bottom: 4px; }
+.ai-block-title {
+  margin: 0 0 8px;
+  font-size: 12px; font-weight: 650;
+  color: var(--text-2);
+  letter-spacing: .01em;
+}
+.ai-block-desc { margin: -2px 0 10px; font-size: 11.5px; color: var(--text-4); line-height: 1.6; }
+
+.ai-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: 1px;
+  margin: 0;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.ai-facts div { padding: 9px 11px; background: var(--surface); }
+.ai-facts dt { font-size: 10.5px; color: var(--text-4); }
+.ai-facts dd {
+  margin: 3px 0 0;
+  font-family: var(--font-data);
+  font-size: 15px; font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.ai-facts dd.critical { color: var(--critical); }
+.ai-facts dd.warning { color: var(--warning); }
+
+.ai-experts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: 8px;
+}
+.ai-expert {
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 11px 12px;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
   background: var(--surface);
   border: 1px solid var(--line);
-  border-left: 3px solid var(--ds);
   border-radius: var(--radius-sm);
-  padding: 13px 15px;
-  font-size: 12px; color: var(--text-3);
-  line-height: 1.8; margin-bottom: 18px;
+  cursor: pointer;
+  transition: border-color var(--dur) var(--ease), background-color var(--dur) var(--ease);
 }
-.cn-title {
-  font-size: 11.5px; font-weight: 600;
-  color: var(--ds-lt); margin-bottom: 5px;
+.ai-expert:hover { border-color: var(--line-strong); background: var(--surface-2); }
+.ai-expert.on { border-color: var(--ds); background: var(--ds-soft); }
+.ai-expert:focus-visible { outline: 2px solid var(--ds); outline-offset: 1px; }
+.ae-head { display: flex; align-items: center; gap: 8px; }
+.ae-head strong { font-size: 13px; font-weight: 600; }
+.ae-tick {
+  margin-left: auto;
+  width: 15px; height: 15px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--line-2);
+  color: transparent;
 }
-.cfg-note strong { color: var(--text-2); }
+.ae-tick :deep(svg) { width: 9px; height: 9px; }
+.ai-expert.on .ae-tick { border-color: var(--ds); background: var(--ds); color: #fff; }
+.ae-desc { font-size: 11.5px; color: var(--text-3); line-height: 1.55; }
 
-.field { margin-bottom: 15px; }
-.field label {
-  display: block; font-size: 11.5px;
-  color: var(--text-3); margin-bottom: 6px;
+.ai-prompts {
+  margin: 0; padding: 0;
+  list-style: none;
+  display: flex; flex-direction: column; gap: 6px;
 }
-.inp.full { width: 100%; }
-.hint { font-size: 10.5px; color: var(--text-4); margin-top: 5px; line-height: 1.6; }
-.cfg-msg { font-size: 12px; color: var(--ok); margin-top: 10px; }
-.cfg-msg.bad { color: var(--critical); }
-
-/* 事实摘要 */
-.facts {
-  padding: 14px 16px 0;
-}
-.facts-title {
-  font-size: 11px; color: var(--text-4);
-  margin-bottom: 6px;
-}
-.facts-grid {
-  display: grid; grid-template-columns: repeat(6, 1fr);
-  gap: 6px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  padding: 11px 8px;
-}
-.fact { text-align: center; }
-.fact i {
-  display: block; font-size: 11px;
-  color: var(--text-4); font-style: normal;
-  margin-bottom: 2px;
-}
-.fact b {
-  font-size: 14px; font-weight: 650;
-  color: var(--text); font-variant-numeric: tabular-nums;
-}
-.fact b.ok { color: var(--ok); }
-.fact b.warning { color: var(--warning); }
-.fact b.critical { color: var(--critical); }
-
-/* 起始 */
-.start { padding: 40px 26px 26px; text-align: center; }
-.drawer .btn.primary { background: var(--ds-dk); border-color: var(--ds-dk); color: #fff; }
-.drawer .btn.primary:hover:not(:disabled) { background: var(--ds); border-color: var(--ds); }
-.start-icon {
-  width: 56px; height: 56px; margin: 0 auto 16px;
-  border-radius: 15px;
+.ai-prompts li {
+  position: relative;
+  padding: 8px 11px 8px 26px;
+  font-size: 12px; color: var(--text-2);
   background: var(--surface-2);
   border: 1px solid var(--line);
-  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm);
 }
-.start-icon img { width: 28px; height: auto; }
-.start-title {
-  font-size: 15px; font-weight: 650;
-  margin-bottom: 8px;
+.ai-prompts li::before {
+  content: '?';
+  position: absolute; left: 10px; top: 8px;
+  font-size: 11px; font-weight: 700;
+  color: var(--ds);
 }
-.start-desc {
-  font-size: 12px; color: var(--text-3);
-  line-height: 1.78; margin-bottom: 20px;
-  max-width: 380px; margin-left: auto; margin-right: auto;
-}
-.btn-ico { height: 15px; width: auto; }
 
-/* 思考 */
-.think {
-  margin: 14px 16px 0;
+.ai-run {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  padding: 18px;
+  margin-top: 4px;
+}
+.ai-run .btn.primary.lg { min-width: 150px; }
+
+/* ===== 配置 ===== */
+.ai-config { padding: 16px 18px 24px; max-width: 620px; }
+.ai-note {
+  display: flex; gap: 10px;
+  padding: 11px 13px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--ds);
+  border-radius: var(--radius-sm);
+  margin-bottom: 18px;
+}
+.ai-note-icon { color: var(--ds); flex: none; }
+.ai-note-icon :deep(svg) { width: 15px; height: 15px; }
+.ai-note strong { display: block; font-size: 12px; color: var(--text-2); margin-bottom: 3px; }
+.ai-note p { margin: 0; font-size: 11.5px; line-height: 1.7; color: var(--text-4); }
+
+.ai-field { margin-bottom: 14px; }
+.ai-field label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 11.5px; color: var(--text-3);
+}
+.ai-field .inp { width: 100%; }
+.ai-hint { margin: 5px 0 0; font-size: 11px; color: var(--text-4); line-height: 1.6; }
+
+.ai-msg { margin: 12px 0 0; font-size: 12px; color: var(--critical); }
+.ai-msg.bad { color: var(--critical); }
+.ai-msg.ok { color: var(--ok); }
+.ai-config-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+
+/* 会诊里的主操作统一用 AI 蓝，避免和"故障红"混淆 */
+.ai-drawer .btn.primary {
+  background: var(--ds-dk);
+  border-color: var(--ds-dk);
+  color: #fff;
+}
+.ai-drawer .btn.primary:hover:not(:disabled) {
+  background: var(--ds);
+  border-color: var(--ds);
+}
+
+/* ===== 运行中 ===== */
+.ai-running {
+  display: flex; align-items: center; gap: 10px;
+  margin: 18px;
+  padding: 12px 14px;
+  font-size: 12.5px; color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--ds);
+  border-radius: var(--radius-sm);
+}
+.ai-dots { display: inline-flex; gap: 3px; }
+.ai-dots i {
+  width: 4px; height: 4px; border-radius: 50%;
+  background: var(--ds);
+  animation: ai-dot 1.2s ease-in-out infinite;
+}
+.ai-dots i:nth-child(2) { animation-delay: .15s }
+.ai-dots i:nth-child(3) { animation-delay: .3s }
+@keyframes ai-dot { 0%, 60%, 100% { opacity: .25 } 30% { opacity: 1 } }
+
+
+/* ===== 报告 ===== */
+.ai-report {
+  margin: 16px 18px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+.ai-report-head {
+  display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 12px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+.arh-text { min-width: 0; }
+.arh-text h3 { margin: 0; font-size: 13px; font-weight: 650; color: var(--text); }
+.arh-text p {
+  margin: 3px 0 0;
+  font-size: 11px; color: var(--text-4);
+  font-family: var(--font-data);
+}
+.arh-acts { margin-left: auto; display: flex; flex-wrap: wrap; gap: 5px; }
+
+.ai-md {
+  padding: 14px 16px 16px;
+  font-size: 12.5px; line-height: 1.82;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+/* renderMd 把 ## 映射成 h3、# 映射成 h2，两个层级都要带强调条 */
+.ai-md :deep(h2),
+.ai-md :deep(h3) {
+  font-size: 13px; font-weight: 650; color: var(--text);
+  margin: 18px 0 8px; padding-left: 9px;
+  border-left: 3px solid var(--ds);
+  line-height: 1.5;
+}
+.ai-md :deep(h2:first-child),
+.ai-md :deep(h3:first-child) { margin-top: 0; }
+.ai-md :deep(h4) { font-size: 12.5px; font-weight: 620; color: var(--text); margin: 14px 0 6px; }
+.ai-md :deep(p) { margin: 7px 0; }
+.ai-md :deep(ul), .ai-md :deep(ol) { margin: 7px 0 7px 18px; padding: 0; }
+.ai-md :deep(li) { margin: 3px 0; }
+.ai-md :deep(strong) { color: var(--text); font-weight: 600; }
+.ai-md :deep(code) {
+  padding: 1px 5px;
+  background: var(--surface-3);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--text);
+}
+.ai-md :deep(pre) {
+  margin: 9px 0; padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: auto;
+}
+.ai-md :deep(pre code) { background: none; padding: 0; font-size: 11px; }
+.ai-md :deep(blockquote) {
+  margin: 9px 0; padding: 6px 12px;
+  border-left: 2px solid var(--line-strong);
+  color: var(--text-3);
+}
+.ai-md :deep(hr) { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
+.ai-md :deep(table) {
+  width: 100%; margin: 10px 0;
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+.ai-md :deep(th) {
+  padding: 6px 9px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  text-align: left; font-weight: 600; color: var(--text-3);
+}
+.ai-md :deep(td) { padding: 6px 9px; border: 1px solid var(--line); }
+
+/* ===== 对话 ===== */
+.ai-thread {
+  margin: 16px 18px 0;
+  padding-bottom: 4px;
+  border-top: 1px solid var(--line);
+}
+.ai-thread-title {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  margin: 14px 0 10px;
+  font-size: 12px; font-weight: 650; color: var(--text-2);
+}
+.ai-thread-hint { font-size: 11px; font-weight: 400; color: var(--text-4); }
+
+.ai-msg-row { display: flex; gap: 9px; margin-bottom: 12px; align-items: flex-start; }
+.ai-msg-row.user { flex-direction: row-reverse; }
+.ai-avatar {
+  flex: none;
+  width: 24px; height: 24px;
+  display: grid; place-items: center;
+  border-radius: var(--radius-sm);
+  font-size: 10.5px; font-weight: 600;
+}
+.ai-avatar.assistant { background: var(--ds-soft); border: 1px solid var(--ds-line); }
+.ai-avatar.assistant img { width: 13px; height: auto; }
+.ai-avatar.user { background: var(--surface-3); border: 1px solid var(--line-2); color: var(--text-3); }
+
+.ai-bubble {
+  min-width: 0;
+  max-width: min(88%, 62ch);
+  padding: 9px 12px;
+  font-size: 12.5px; line-height: 1.7;
+  color: var(--text-2);
   background: var(--surface-2);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  overflow: hidden;
 }
-.think-head {
-  width:100%; background:transparent; color:inherit; border:0; text-align:left;
-  display: flex; align-items: center; gap: 9px;
-  padding: 11px 14px; cursor: pointer;
-}
-.whale {
-  width: 18px; height: 14px; flex: none;
-  animation: whaleFloat 2.2s ease-in-out infinite;
-}
-@keyframes whaleFloat {
-  0%, 100% { transform: translateY(0) }
-  50% { transform: translateY(-3px) }
-}
-.think.done .whale { animation: none; }
-.t-title {
-  font-size: 12.5px; font-weight: 600;
-  color: var(--ds-lt);
-}
-.t-dots { display: inline-flex; gap: 3px; }
-.t-dots i {
-  width: 3.5px; height: 3.5px; border-radius: 50%;
-  background: var(--ds-lt);
-  animation: dotPulse 1.3s ease-in-out infinite;
-}
-.t-dots i:nth-child(2) { animation-delay: .17s }
-.t-dots i:nth-child(3) { animation-delay: .34s }
-@keyframes dotPulse {
-  0%, 60%, 100% { opacity: .28 }
-  30% { opacity: 1 }
-}
-.t-time { font-size: 10px; color: var(--text-4); }
-.t-arrow {
-  color: var(--text-4); font-size: 15px;
-  transition: transform .2s;
-}
-.t-arrow.open { transform: rotate(90deg); }
-
-.t-steps { padding: 0 14px 12px; }
-.tstep {
-  display: flex; align-items: center; gap: 10px;
-  padding: 5px 0; font-size: 12px;
-  color: var(--text-4);
-  transition: color .2s;
-}
-.sdot {
-  width: 12px; height: 12px; border-radius: 50%;
-  border: 1.5px solid var(--line-strong);
-  flex: none; position: relative;
-}
-.tstep.active { color: var(--text-2); }
-.tstep.active .sdot {
-  border-color: var(--ds);
-  animation: dotPulse 1.4s ease-in-out infinite;
-}
-.tstep.done { color: var(--text-2); }
-.tstep.done .sdot { background: var(--ds); border-color: var(--ds); }
-.tstep.done .sdot::after {
-  content: ''; position: absolute; left: 3.5px; top: 1px;
-  width: 4px; height: 6.5px;
-  border: solid #fff; border-width: 0 1.5px 1.5px 0;
-  transform: rotate(45deg);
-}
-.stxt { flex: 1; }
-.stime { font-size: 9.5px; color: var(--text-4); }
-
-/* 报告 */
-.report { margin:16px 12px 8px; padding:16px; border-radius:12px; background:var(--surface);border:1px solid var(--ds-line);box-shadow:0 2px 12px rgb(0 0 0 / 4%); }
-.report :deep(h2) {padding-block:8px;border-bottom:1px solid var(--line);}
-.r-tools {
-  display: flex; gap: 6px; justify-content: flex-end;
-  margin-bottom: 12px;
-}
-.md {
-  font-size: 12.5px; line-height: 1.82;
-  color: var(--text-2);
-}
-.md :deep(h2) {
-  font-size: 14px; color: var(--text); font-weight: 650;
-  margin: 18px 0 9px; padding-left: 10px;
-  border-left: 3px solid var(--ds);
-}
-.md :deep(h3) {
-  font-size: 13px; color: var(--text);
-  font-weight: 620; margin: 14px 0 7px;
-}
-.md :deep(p) { margin: 8px 0; }
-.md :deep(ul), .md :deep(ol) { margin: 8px 0 8px 20px; }
-.md :deep(li) { margin: 4px 0; }
-.md :deep(strong) { color: var(--text); font-weight: 600; }
-.md :deep(code) {
-  background: var(--surface-3);
-  padding: 1.5px 6px; border-radius: 4px;
-  font-family: var(--font-mono); font-size: 11px;
-  color: var(--warning);
-}
-.md :deep(table) {
-  width: 100%; border-collapse: collapse;
-  margin: 10px 0; font-size: 11.5px;
-}
-.md :deep(th) {
-  background: var(--surface-2); padding: 7px 10px;
-  border: 1px solid var(--line); text-align: left;
-  font-weight: 600; color: var(--text-3);
-}
-.md :deep(td) {
-  padding: 7px 10px;
-  border: 1px solid var(--line);
-}
-
-/* 对话 */
-.chat {
-  margin-top: auto;
-  border-top: 1px solid var(--line);
-  background: var(--surface);
-  flex: none;
-}
-.chat-log {
-  max-height: min(32dvh, 420px); overflow-y: auto;
-  padding: 14px 16px 0;
-  display: flex; flex-direction: column; gap: 12px;
-}
-.chat-log:empty { display: none; }
-.chat-prompts { padding: 14px 16px 0; }
-.chat-prompts > span { color: var(--text-3); font-size: 11px; font-weight: 600; letter-spacing: .04em; }
-.prompt-list { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
-.prompt-list button { padding: 7px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface-2); color: var(--text-2); font: inherit; font-size: 11px; cursor: pointer; transition: border-color .18s, color .18s, transform .18s; }
-.prompt-list button:hover { border-color: var(--ds); color: var(--ds); transform: translateY(-1px); }
-.prompt-list button span { color: var(--ds); margin-left: 3px; }
-.chat-hint { padding: 0 16px 13px; color: var(--text-3); font-size: 12px; }
-.cmsg { display: flex; gap: 9px; }
-.cmsg.user { flex-direction: row-reverse; }
-.cav {
-  width: 24px; height: 24px; border-radius: 6px;
-  flex: none; display: flex; align-items: center; justify-content: center;
-  font-size: 10.5px; font-weight: 600;
-}
-.cav.assistant {
-  background: var(--ds-soft);
-  border: 1px solid var(--ds-line);
-}
-.cav.assistant img { width: 14px; height: auto; }
-.cav.user {
-  background: var(--surface-3);
-  border: 1px solid var(--line-2);
-  color: var(--text-3);
-}
-.message-content { max-width:min(88%,54ch); min-width:0; }
-.message-byline { margin:0 0 5px; color:var(--text-3); font-size:11px; font-weight:650; }
-.cmsg.user .message-byline { text-align:right; }
-.cbub {
-  padding: 9px 13px; border-radius: var(--radius-lg);
-  font-size: 13px; line-height: 1.6;
-  overflow-wrap:anywhere;
-}
-.message-content .btn-mini { margin-top:4px; }
-
-.head-name,.start h3 { font-family:var(--font-heading); }
-.cmsg.assistant .cbub {
-  background: var(--ds-soft);
-  border: 1px solid var(--ds-line);
-  color: var(--text-2);
-}
-.cmsg.user .cbub {
-  background: var(--surface-2);
-  border: 1px solid var(--line-2);
-  color: var(--text-2);
-}
-.cmsg .cbub.message-failed { border-color:var(--critical); }
-.cbub.streaming::after {
-  content: '▊'; color: var(--ds-lt);
-  animation: blink 1s step-end infinite;
-  margin-left: 2px;
-}
-@keyframes blink { 50% { opacity: 0 } }
-.cbub :deep(p) { margin: 4px 0; }
-.cbub :deep(code) {
-  background: var(--surface-3);
-  padding: 1px 4px; border-radius: 3px;
-  font-family: var(--font-mono);
-  font-size: 10.5px; color: var(--warning);
-}
-.cbub :deep(ul) { margin: 5px 0 5px 16px; }
-
-.chat-in {
-  display: flex; gap: 9px; align-items: flex-end;
-  padding:8px;
-  margin:12px 16px 6px;
-  background:var(--ui-layer-raised);
-  border:1px solid var(--line);
-  border-radius:var(--radius-lg);
-}
-.chat-in:focus-within { border-color:var(--ds); }
-.chat-in textarea {
-  flex: 1;
-  background: var(--bg);
-  border: 1px solid var(--line-2);
-  border-radius: 10px;
-  padding: 9px 12px;
-  color: var(--text);
-  font-size: 12.5px;
-  font-family: inherit;
-  min-width:0;
-  resize: vertical;
-  max-height: 110px;
-  line-height: 1.6;
-  transition: .15s;
-}
-.chat-in textarea:focus {
-  outline: none;
-  border-color: var(--ds);
-  box-shadow: 0 0 0 3px var(--ds-soft);
-}
-.chat-in textarea::placeholder { color: var(--text-4); }
-.send {
-  width: 36px; height: 36px; flex: none;
-  border-radius: 10px;
+.ai-msg-row.assistant .ai-bubble { border-left: 2px solid var(--ds-line); }
+.ai-msg-row.user .ai-bubble { background: var(--surface); }
+.ai-bubble.failed { border-color: var(--critical); }
+.ai-bubble .ai-md { padding: 0; font-size: 12.5px; line-height: 1.7; }
+.ai-user-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ai-caret {
+  display: inline-block;
+  width: 2px; height: 12px;
+  margin-left: 2px; vertical-align: -1px;
   background: var(--ds);
-  border: none; color: #fff;
+  animation: ai-blink 1s step-end infinite;
+}
+@keyframes ai-blink { 50% { opacity: 0 } }
+.ai-retry { margin-top: 6px; }
+
+.ai-followups {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin-top: 4px; padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+.ai-followups > span { font-size: 11px; color: var(--text-4); }
+.ai-followups button {
+  padding: 5px 9px;
+  font: inherit; font-size: 11.5px;
+  color: var(--text-2);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: 99px;
   cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: background-color .15s;
+  transition: border-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
-.send:hover:not(:disabled) { background: var(--ds-dk); }
-.send:disabled { opacity: .4; cursor: not-allowed; }
-.send svg { width: 14px; height: 14px; }
-.start { text-align:left; padding:clamp(18px,3vw,38px); }
-.consult-title {display:flex;align-items:center;gap:12px}
-.consult-title img {width:36px}
-.consult-title h3 {margin:0}
-.expert-list {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:8px;margin:20px 0}
-.expert-list button {display:flex;align-items:center;justify-content:space-between;gap:8px;padding:14px;text-align:left;color:var(--text);background:color-mix(in srgb,var(--surface) 68%,transparent);border:1px solid var(--line);border-radius:10px;cursor:pointer}
-.expert-list button[aria-pressed=true] {border-color:var(--ds);background:var(--ds-soft)}
-.expert-list small {display:block;color:var(--text-2);margin-top:5px}
-.focus-preview {border-inline-start:2px solid var(--ds);padding-inline:14px;margin:18px 0;color:var(--text-2)}
-.focus-preview ul {padding-left:18px;line-height:1.65;margin:6px 0}
-.stream-state {color:var(--ds-lt);font-size:13px;margin:12px 18px}
-.signature {margin-right:auto;color:var(--ds-lt)}
-@supports (backdrop-filter:blur(1px)) {
-  .drawer .report,.drawer .chat {background:color-mix(in srgb,var(--surface) 80%,transparent)}
+.ai-followups button:hover { border-color: var(--ds); color: var(--ds); }
+
+/* ===== 输入 ===== */
+.ai-composer {
+  flex: none;
+  padding: 10px 16px 12px;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
 }
-.drawer .chat-in:focus-within {outline:2px solid var(--ds);outline-offset:2px}
-.drawer .chat-log {scrollbar-gutter:stable}
+.ai-input {
+  display: flex; align-items: flex-end; gap: 8px;
+  padding: 6px 6px 6px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.ai-input:focus-within { border-color: var(--ds); box-shadow: 0 0 0 3px var(--ds-soft); }
+.ai-input textarea {
+  flex: 1; min-width: 0;
+  max-height: 132px;
+  padding: 5px 0;
+  border: 0; background: transparent;
+  color: var(--text);
+  font: inherit; font-size: 12.5px; line-height: 1.6;
+  resize: none;
+  outline: none;
+}
+.ai-input textarea::placeholder { color: var(--text-4); }
+.ai-send {
+  flex: none;
+  width: 32px; height: 32px;
+  display: grid; place-items: center;
+  border: 1px solid var(--ds-dk); border-radius: var(--radius-sm);
+  background: var(--ds-dk); color: #fff;
+  cursor: pointer;
+  transition: background-color var(--dur) var(--ease);
+}
+.ai-send:hover:not(:disabled) { background: var(--ds); }
+.ai-send:disabled { opacity: .38; cursor: not-allowed; }
+.ai-send :deep(svg) { width: 14px; height: 14px; }
+.ai-composer-hint {
+  display: flex; flex-wrap: wrap; gap: 4px 12px;
+  margin: 7px 0 0;
+  font-size: 10.5px; color: var(--text-4);
+}
+.ai-composer-warn { margin-left: auto; }
+
+@media (max-width: 620px) {
+  .ai-drawer { width: 100%; }
+  .ai-steps { padding-inline: 12px; }
+  .ai-block, .ai-config { padding-inline: 14px; }
+  .ai-report, .ai-thread { margin-inline: 14px; }
+  .ai-composer { padding-inline: 12px; }
+  .ai-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ai-report-head { flex-direction: column; gap: 9px; }
+  .arh-acts { margin-left: 0; width: 100%; }
+  .ai-md { padding: 12px 13px 14px; }
+  .ai-composer-warn { margin-left: 0; }
+}
 </style>
+

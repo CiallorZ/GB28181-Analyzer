@@ -23,6 +23,20 @@ from app.models.entities import (
 from app.services import analyzer
 
 
+def test_active_count_tracks_running_and_queued_tasks(client, db, make_task):
+    running = make_task('running', status=TaskStatus.ANALYZING)
+    running.stage = '分析中'
+    queued = make_task('queued', status=TaskStatus.PENDING)
+    queued.stage = '排队中'
+    waiting = make_task('waiting', status=TaskStatus.PENDING)
+    waiting.stage = '待分析'
+    db.commit()
+
+    response = client.get('/api/v1/tasks/active-count')
+    assert response.status_code == 200
+    assert response.json() == {'count': 2}
+
+
 def _wait_until(pred, timeout=5.0):
     end = time.time() + timeout
     while time.time() < end:

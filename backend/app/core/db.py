@@ -8,7 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 import sqlite3
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import (Boolean, Float, Integer, String, Text, create_engine,
+                        event, inspect, text)
 from sqlalchemy.orm import sessionmaker
 
 from ..models.entities import Base
@@ -39,9 +40,54 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False,
                             autocommit=False, expire_on_commit=False)
 
 
+def ensure_columns() -> list[str]:
+    """Add simple scalar columns declared on models but missing on disk.
+
+    The project keeps its single-file deployment model. This is not a full
+    migration tool: it never drops or rewrites data, and skips required
+    columns and JSON/date types where a safe default cannot be inferred.
+    """
+    if not settings.DATABASE_URL.startswith('sqlite'):
+        return []
+    changed = []
+    with engine.begin() as connection:
+        inspector = inspect(connection)
+        tables = set(inspector.get_table_names())
+        for table in Base.metadata.sorted_tables:
+            if table.name not in tables:
+                continue
+            existing = {column['name'] for column in inspector.get_columns(table.name)}
+            for column in table.columns:
+                if column.name in existing:
+                    continue
+                default = None
+                nullable = column.nullable
+                if column.default is not None and not column.default.is_callable:
+                    default = column.default.arg
+                if not isinstance(column.type, (Boolean, Integer, Float, String, Text)):
+                    # Only fill simple scalar columns; never guess JSON or dates.
+                    continue
+                if not nullable and default is None:
+                    # Never guess a value for a required field.
+                    continue
+                sql = 'ALTER TABLE "%s" ADD COLUMN "%s" %s' % (
+                    table.name, column.name,
+                    column.type.compile(dialect=engine.dialect),
+                )
+                if not nullable:
+                    sql += ' NOT NULL'
+                if default is not None:
+                    literal = str(default).replace("'", "''")
+                    sql += " DEFAULT '%s'" % literal
+                connection.execute(text(sql))
+                changed.append('%s.%s' % (table.name, column.name))
+    return changed
+
+
 def init_db():
-    """建表。生产环境应改用迁移脚本（migrations/）。"""
+    """Create missing tables, then add safe additive columns."""
     Base.metadata.create_all(engine)
+    ensure_columns()
 
 
 def backup_sqlite(path: Path, backup_dir: Path, marker: Path,

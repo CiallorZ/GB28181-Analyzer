@@ -78,6 +78,13 @@ const groups = computed(() => {
   return result
 })
 
+const firstRule = computed(() => groups.value.keys().next().value ?? null)
+
+function topSeverity(events) {
+  return events.reduce((acc, event) =>
+    (sevOrder[event.severity] ?? 9) < (sevOrder[acc] ?? 9) ? event.severity : acc, 'unknown')
+}
+
 const EV_LABEL = { confirmed: '已确认', suspected: '疑似', insufficient: '证据不足' }
 const EV_CLS = { confirmed: 'ok', suspected: 'warning', insufficient: 'unknown' }
 
@@ -144,8 +151,13 @@ watch([() => store.currentTaskId, sevFilter, ruleFilter], () => load(), { immedi
 
       <!-- 诊断列表 -->
       <div class="diag-list">
-        <details class="rule-group" v-for="[rule, events] in groups" :key="rule">
-          <summary><b class="mono">{{ rule }}</b> {{ ruleName[rule] }} · 已载入 {{ events.length }} 条</summary>
+        <details class="rule-group" v-for="[rule, events] in groups" :key="rule" :open="rule === firstRule">
+          <summary>
+            <span class="badge" :class="topSeverity(events)">{{ severityLabel[topSeverity(events)] }}</span>
+            <b class="mono">{{ rule }}</b>
+            <span class="sum-name">{{ ruleName[rule] }}</span>
+            <span class="sum-count">{{ events.length }} 条</span>
+          </summary>
           <div v-for="d in events" :key="d.id" class="diag-card" :class="d.severity">
             <button class="diag-head" type="button" :aria-expanded="!!expanded[d.id]" @click="toggle(d.id)">
               <span class="badge" :class="d.severity">{{ severityLabel[d.severity] || d.severity }}</span>
@@ -214,24 +226,44 @@ watch([() => store.currentTaskId, sevFilter, ruleFilter], () => load(), { immedi
 
 <style scoped>
 .stat-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: 0 24px;
+  display: flex; flex-wrap: wrap;
+  gap: 0 22px;
   border-top: 1px solid var(--line);
 }
 .stat-item {
-  padding: 9px 0 10px;
+  display: flex; align-items: baseline; gap: 9px;
+  flex: 1 1 240px; min-width: 0;
+  padding: 8px 0 9px;
   border-bottom: 1px solid var(--line);
 }
-.stat-id { font-size: 11px; color: var(--text-4); letter-spacing: .02em; }
-.stat-name { font-size: 12px; color: var(--text-2); margin: 2px 0 4px; line-height: 1.4; }
-.stat-cnt { font-size: 20px; font-weight: 560; font-family: var(--font-data); font-variant-numeric: tabular-nums; color: var(--text); }
+.stat-id { font-size: 11px; color: var(--text-4); letter-spacing: .02em; flex: none; }
+.stat-name { font-size: 12px; color: var(--text-2); line-height: 1.4; flex: 0 1 auto; min-width: 0; }
+.stat-cnt {
+  font-size: 16px; font-weight: 560; font-family: var(--font-data);
+  font-variant-numeric: tabular-nums; color: var(--text);
+  flex: none; margin-left: 2px;
+}
 
 .ev-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .ev-label { font-size: 11.5px; color: var(--text-4); }
 
 .diag-list { display: flex; flex-direction: column; gap: 10px; }
-.rule-group > summary { cursor: pointer; padding: 12px 8px; color: var(--text); border-bottom: 1px solid var(--line); }
+.rule-group > summary {
+  list-style: none; display: flex; align-items: center; gap: 8px;
+  cursor: pointer; padding: 11px 8px; color: var(--text);
+  border-bottom: 1px solid var(--line);
+}
+.rule-group > summary::-webkit-details-marker { display: none; }
+.rule-group > summary:hover { background: var(--surface-2); }
+.rule-group > summary::after {
+  content: '▸'; color: var(--text-4); font-size: 11px;
+  transition: transform var(--dur) var(--ease);
+}
+.rule-group[open] > summary::after { transform: rotate(90deg); }
+.sum-name { font-size: 12.5px; color: var(--text-2); min-width: 0; }
+.sum-count { margin-left: auto; color: var(--text-4); font-size: 11.5px; flex: none; }
 .rule-group[open] .diag-card { margin-top: 8px; }
+.rule-group[open] { padding-bottom: 8px; }
 .diag-card {
   background: var(--surface); border: 1px solid var(--line-2);
   border-left: 3px solid var(--line-strong);
@@ -242,7 +274,7 @@ watch([() => store.currentTaskId, sevFilter, ruleFilter], () => load(), { immedi
 .diag-card.info { border-left-color: var(--info); }
 
 .diag-head {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
   width:100%; border:0; background:transparent; color:var(--text); font:inherit; text-align:left;
   padding: 14px 16px; cursor: pointer;
 }

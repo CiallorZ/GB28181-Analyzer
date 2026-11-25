@@ -34,6 +34,46 @@ const info = computed(() => {
   }
 })
 
+// 转码失败时后端会回传 ffmpeg 的原始 stderr。直接把英文报错铺在画面上
+// 既吓人也没法行动，这里先给结论和下一步，原始输出收进折叠区。
+const failure = computed(() => {
+  const raw = String(info.value.error || '').trim()
+  const detail = raw.length > 480 ? raw.slice(0, 480) + '…' : raw
+  if (!raw) {
+    return {
+      title: '这段 RTP 没有可解码的视频载荷',
+      hint: '流里只有信令、空载荷或纯音频数据，没有可重建的视频帧。',
+      detail: ''
+    }
+  }
+  if (/Invalid data|could not find codec|moov|Invalid NAL|非 PS/i.test(raw)) {
+    return {
+      title: '抓包里的视频数据不完整，无法重建画面',
+      hint: '常见原因是抓包起点在关键帧之后、只覆盖了部分 GOP，或载荷不是标准 PS/H.264 封装。可对照诊断事件中的 MED 规则确认。',
+      detail
+    }
+  }
+  if (/timeout|超时/i.test(raw)) {
+    return {
+      title: '视频重建超时',
+      hint: '这段时间内的数据量较大或关键帧缺失，重建没有在限定时间内完成。可尝试截取包含完整 GOP 的较短抓包。',
+      detail
+    }
+  }
+  if (/No such file|ENOENT|找不到/i.test(raw)) {
+    return {
+      title: '临时文件已失效',
+      hint: '重建产物可能已被清理，重新分析该任务即可再次生成。',
+      detail
+    }
+  }
+  return {
+    title: '视频重建没有成功',
+    hint: '可先查看诊断事件与编码信息，确认抓包是否覆盖了完整关键帧。',
+    detail
+  }
+})
+
 const videoUrl = computed(() => `/api/v1/streams/${props.stream.id}/video`)
 const posterUrl = computed(() => `/api/v1/streams/${props.stream.id}/poster`)
 
@@ -108,7 +148,12 @@ watch(() => props.stream.id, () => {
           <AppIcon name="monitor" />
         </div>
         <div class="vn-title">未解出画面</div>
-        <div class="vn-reason">{{ info.error || '该流没有可解码的视频载荷' }}</div>
+        <div class="vn-reason">{{ failure.title }}</div>
+        <p class="vn-hint">{{ failure.hint }}</p>
+        <details v-if="failure.detail" class="vn-tech">
+          <summary>技术详情</summary>
+          <pre>{{ failure.detail }}</pre>
+        </details>
       </div>
     </div>
 
@@ -235,9 +280,10 @@ watch(() => props.stream.id, () => {
   position: absolute; inset: 0;
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
-  gap: 10px; padding: 24px;
+  gap: 7px; padding: 20px;
   background: var(--surface);
   text-align: center;
+  overflow: auto;
 }
 .vn-icon {
   width: 44px; height: 44px;
@@ -249,9 +295,27 @@ watch(() => props.stream.id, () => {
 }
 .vn-icon svg { width: 20px; height: 20px; }
 .vn-title { font-size: 13px; color: var(--text-2); font-weight: 550; }
+.vn-icon { margin-bottom: 2px; }
 .vn-reason {
+  font-size: 12.5px; color: var(--text-2); font-weight: 550;
+  line-height: 1.5; max-width: 34ch;
+}
+.vn-hint {
+  font-size: 11.5px; color: var(--text-4);
+  line-height: 1.65; max-width: 46ch; margin: 0;
+}
+.vn-tech { width: 100%; max-width: 430px; text-align: left; margin-top: 2px; }
+.vn-tech summary {
   font-size: 11px; color: var(--text-4);
-  line-height: 1.65; max-width: 320px;
+  cursor: pointer; text-align: center;
+}
+.vn-tech summary:hover { color: var(--text-2); }
+.vn-tech pre {
+  margin: 6px 0 0; padding: 8px 10px;
+  background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 6px; max-height: 92px; overflow: auto;
+  font-family: var(--font-mono); font-size: 10.5px; line-height: 1.5;
+  color: var(--text-4); white-space: pre-wrap; overflow-wrap: anywhere;
 }
 
 .vp-info {

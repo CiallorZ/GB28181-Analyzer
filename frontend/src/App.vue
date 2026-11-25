@@ -34,19 +34,23 @@ function chooseAppearance() {
 const engine = computed(() => {
   if (healthError.value) return ['服务离线', 'bad']
   if (!health.value) return ['正在连接', 'waiting']
-  if (!health.value.dependencies.tshark) return ['缺少 TShark', 'bad']
-  if (!health.value.dependencies.ffmpeg) return ['分析可用 · 无视频预览', 'partial']
+  const tools = health.value.dependencies || {}
+  if (!tools.tshark) return ['缺少 TShark', 'bad']
+  if (!tools.ffmpeg || !tools.ffprobe) return ['分析可用 · 无视频预览', 'partial']
+  if (!tools.capinfos) return ['分析可用 · 缺少 Capinfos', 'partial']
+  if (!tools.dumpcap) return ['分析可用 · 实时采集不可用', 'partial']
   return ['分析引擎就绪', 'ok']
 })
 
 const task = computed(() => store.task)
+const globalBusy = computed(() => store.activeCount > 0 || store.isAnalyzing)
 
 function setNativeBusy(busy) {
   const invoke = window.__TAURI__?.core?.invoke
   if (invoke) invoke('set_analysis_busy', { busy }).catch(() => {})
 }
 
-watch(() => store.isAnalyzing, (active) => {
+watch(globalBusy, (active) => {
   document.title = active
     ? '分析中 · GB28181 Analyzer'
     : 'GB28181 Analyzer · 视联网分析工作台'
@@ -54,7 +58,7 @@ watch(() => store.isAnalyzing, (active) => {
 }, { immediate: true })
 
 function guardUnload(event) {
-  if (!store.isAnalyzing) return
+  if (!globalBusy.value) return
   event.preventDefault()
   event.returnValue = ''
 }
@@ -73,14 +77,17 @@ watch(() => [route.name, store.currentTaskId], ([name, id]) => {
 }, { immediate: true })
 
 let healthTimer = null
+let activeTimer = null
 
 onMounted(() => {
   systemTheme.addEventListener('change', applyTheme)
   window.addEventListener('beforeunload', guardUnload)
   applyTheme()
   loadHealth()
+  store.refreshActive()
 
   healthTimer = setInterval(loadHealth, 30000)
+  activeTimer = setInterval(() => store.refreshActive(), 5000)
 })
 
 onUnmounted(() => {
@@ -88,6 +95,8 @@ onUnmounted(() => {
   window.removeEventListener('beforeunload', guardUnload)
   // 不清的话热更新会累积多个定时器，反复打健康检查
   if (healthTimer) { clearInterval(healthTimer); healthTimer = null }
+  if (activeTimer) { clearInterval(activeTimer); activeTimer = null }
+  setNativeBusy(false)
 })
 </script>
 
@@ -136,9 +145,16 @@ onUnmounted(() => {
             <option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option>
           </select>
 
-          <button class="ai-btn" data-cue="confirm" aria-label="DeepSeek 分析" @click="store.openAiPanel()">
+          <button
+            class="ai-btn"
+            :class="{ armed: store.aiPanelOpen }"
+            data-cue="confirm"
+            aria-label="打开 DeepSeek 会诊"
+            :aria-expanded="store.aiPanelOpen"
+            @click="store.openAiPanel()"
+          >
             <img src="/brand/deepseek.svg" alt="" class="ai-ico" />
-            <span>AI 分析助手</span>
+            <span>DeepSeek 会诊</span>
           </button>
 
 
@@ -254,6 +270,13 @@ onUnmounted(() => {
   background: var(--surface-3);
   border-color: var(--ds-lt);
 }
+.ai-btn:focus-visible { outline: 2px solid var(--ds); outline-offset: 2px; }
+.ai-btn.armed {
+  background: var(--ds-dk);
+  border-color: var(--ds-dk);
+  color: #fff;
+}
+.ai-btn.armed .ai-ico { filter: brightness(0) invert(1); }
 .ai-ico { height: 14px; width: auto; }
 
 .dep {

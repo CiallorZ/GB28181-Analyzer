@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 from .config import settings
@@ -117,6 +118,42 @@ def tool_source(name: str, path: str | None) -> str:
     if path == shutil.which(name):
         return 'path'
     return 'auto'
+
+
+PROBE_ARGS = {
+    'tshark': ['--version'],
+    'capinfos': ['--version'],
+    'dumpcap': ['--version'],
+    'ffmpeg': ['-version'],
+    'ffprobe': ['-version'],
+}
+
+
+def probe_tool(name: str, value: str) -> dict:
+    if name not in TOOL_NAMES:
+        return {'ok': False, 'error': '未知工具'}
+    path = _valid_file(value)
+    if not path:
+        return {'ok': False, 'error': '路径不存在或不是文件'}
+    try:
+        result = subprocess.run(
+            [path, *PROBE_ARGS[name]], capture_output=True, text=True,
+            errors='replace', timeout=8,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+        )
+    except subprocess.TimeoutExpired:
+        return {'ok': False, 'error': '工具响应超时（8 秒）'}
+    except OSError as exc:
+        return {'ok': False, 'error': str(exc)}
+    output = (result.stdout or '') + ' ' + (result.stderr or '')
+    version = next((line.strip() for line in output.splitlines() if line.strip()), '')
+    if result.returncode != 0:
+        return {
+            'ok': False,
+            'version': version[:200],
+            'error': '工具返回退出码 %d' % result.returncode,
+        }
+    return {'ok': True, 'version': version[:200]}
 
 
 def status() -> dict:

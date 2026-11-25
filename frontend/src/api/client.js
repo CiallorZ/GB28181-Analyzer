@@ -43,6 +43,8 @@ export const api = {
   tools: () => client.get('/settings/tools').then(r => r.data),
   saveTools: (body) => client.put('/settings/tools', body).then(r => r.data),
   resetTools: () => client.delete('/settings/tools').then(r => r.data),
+  probeTool: (body) => client.post('/settings/tools/probe', body).then(r => r.data),
+  activeTasks: () => client.get('/tasks/active-count').then(r => r.data),
 
   upload: (file, onProgress) => {
     if (file.size > 16 * 1024**3) throw Error('抓包超过 16 GiB 上限')

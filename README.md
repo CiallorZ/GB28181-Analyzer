@@ -4,7 +4,7 @@
 
 平台返回了 SIP 200 OK，为什么预览仍然黑屏？GB28181 Analyzer 把点播信令、SDP 协商、实际捕获的媒体、重建画面和诊断证据放进同一个任务。现场工程师可以从异常结论回到具体报文，平台和设备开发人员可以对照两端抓包，交付人员可以导出可复核的报告。
 
-**[下载 v1.2.0 离线单文件 EXE](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v1.2.0/GB28181-Analyzer-v1.2.0-offline-x64.exe)** · [SHA-256 校验文件](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v1.2.0/OFFLINE-SHA256.txt) · [发行说明](https://github.com/CiallorZ/gb28181-analyzer/releases/tag/v1.2.0)
+**[下载 v1.3.0 Windows x64 便携包](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v1.3.0/gb28181-analyzer-windows-x64-v1.3.0.zip)** · [SHA-256 校验文件](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v1.3.0/SHA256SUMS.txt) · [发行说明](https://github.com/CiallorZ/gb28181-analyzer/releases/tag/v1.3.0)
 
 ![工作台实图：左侧可导入抓包或试用示例，右侧展示平台与设备之间的点播流程](docs/images/workbench-intake.png)
 
@@ -12,11 +12,13 @@
 
 ## 第一次使用
 
-1. 在 Windows x64 上双击名称含 **offline-x64** 的 EXE。首次启动会将工具展开到当前用户的缓存，建议预留数 GB 空间，并为抓包和视频另留空间。后续启动复用缓存。本版未签名，可用 PowerShell 的 `Get-FileHash` 与发布页校验文件核对。
-2. 点击 **试用示例抓包** 熟悉工作台，或拖入自己的 PCAP、PCAPNG、CAP 文件。工具在本机完成导入和分析。离线 EXE 已包含 TShark、Capinfos、FFmpeg、FFprobe 和 WebView2，无需配置 PATH。
+1. 在 Windows x64 上完整解压便携包，双击 `GB28181-Analyzer.exe`。程序使用 Microsoft Edge WebView2 Runtime 显示独立窗口，Windows 10/11 通常已自带；离线设备可安装微软的 Evergreen Standalone Installer。本版未签名，可用 PowerShell 的 `Get-FileHash` 与发布页的 `SHA256SUMS.txt` 核对。
+2. 点击 **试用示例抓包** 熟悉工作台，或拖入自己的 PCAP、PCAPNG、CAP 文件。分析在本机完成，不上传抓包。
 3. 打开 **分析结论**，选择 **查看证据**。核对关联会话、信令消息、媒体流或原始报文，再决定需要转交哪些报告和视频。
 
-离线分析已有文件无需抓包驱动。直接从本机网卡采集需要 Npcap 和相应权限。发布页另有精简 ZIP，使用该包时需要自行准备外部工具。内置工具可在“设置 → 外部工具路径”替换为指定版本，手动配置优先于环境变量和打包内置。[Windows 使用说明](docs/WINDOWS.md)
+便携包内含分析服务与前端，运行时不需要 Python 或 Node.js。读取已有抓包需要 [Wireshark x64](https://www.wireshark.org/download.html)（勾选 TShark），重建画面需要 [FFmpeg](https://www.gyan.dev/ffmpeg/builds/)；缺少时仍可做信令与媒体层分析，界面会提示缺少哪一项。直接从本机网卡采集还需要 Npcap 和相应权限。
+
+外部工具可在「设置 → 运行依赖」里逐项指定并点击“测试”验证版本，优先级为手动配置 > 环境变量 > PATH。桌面版支持“浏览”直接选择 .exe。[Windows 使用说明](docs/WINDOWS.md)
 
 ## 功能图
 
@@ -63,7 +65,7 @@ AI 是可选的联网服务，发行包不提供测试 Key。用户可设置环�
 
 ```mermaid
 flowchart TD
-    EXE["离线 EXE · 当前用户运行时缓存"] --> SHELL["Tauri 桌面窗口 · WebView2"]
+    EXE["便携包 · GB28181-Analyzer.exe"] --> SHELL["Tauri 桌面窗口 · WebView2"]
     SHELL --> UI["Vue 3 工作台 · Pinia · ECharts"]
     UI <-->|"本机 HTTP /api/v1"| API["FastAPI 分析服务"]
     API --> TASK["任务调度与分析流水线"]

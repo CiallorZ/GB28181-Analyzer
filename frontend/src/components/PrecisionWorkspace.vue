@@ -398,19 +398,45 @@ watch(filtered, (items) => {
           <PacketsView embedded :seed="packets" :seed-total="packetTotal" :range="interval" />
         </section>
       </div>
-      <aside v-if="rail" class="assist">
+      <aside v-if="rail" class="assist" aria-label="AI 助手">
         <header>
-          <img src="/brand/deepseek.svg" alt="" />
-          <h2>AI 智能分析</h2>
+          <h2>AI 助手</h2>
           <button @click="collapseSidebar" aria-label="折叠 AI 助手">收起</button>
         </header>
+
+        <section class="assist-cta">
+          <div class="cta-head">
+            <img src="/brand/deepseek.svg" alt="" />
+            <div>
+              <strong>DeepSeek 会诊</strong>
+              <small>结合本次证据给出可追问的研判</small>
+            </div>
+          </div>
+          <dl class="cta-facts">
+            <div><dt>会话</dt><dd>{{ fmt(sum.session_count) }}</dd></div>
+            <div><dt>媒体流</dt><dd>{{ streams.length }}</dd></div>
+            <div><dt>诊断</dt><dd>{{ p.events.length }}</dd></div>
+          </dl>
+          <button class="consult-action" @click="store.openAiPanel()">开始会诊</button>
+        </section>
+
         <section>
           <h3>规则结论</h3>
           <strong>{{ first?.title || '未发现规则命中异常' }}</strong>
           <p>
             {{ first ? names[first.evidence_level] + ' · ' + first.rule_id : '当前抓包范围内的规则结果。' }}
           </p>
+          <button v-if="first" @click="evidenceOf(first, $event.currentTarget)">查看规则依据 ↗</button>
         </section>
+
+        <section>
+          <h3>下一步建议</h3>
+          <ol v-if="first?.recommendations?.length">
+            <li v-for="x in first.recommendations" :key="x">{{ x }}</li>
+          </ol>
+          <p v-else>当前规则未提供排查建议。</p>
+        </section>
+
         <section>
           <h3>观测证据</h3>
           <p>信令 · {{ fmt(sum.session_count) }} 个业务会话</p>
@@ -424,19 +450,9 @@ watch(filtered, (items) => {
             条关联会话
           </p>
           <p>重建 · {{ streams.filter((s) => s.rebuilt_path).length }} 份视频预览</p>
-          <button v-if="first" @click="evidenceOf(first, $event.currentTarget)">查看规则依据 ↗</button>
         </section>
-        <section>
-          <h3>下一步建议</h3>
-          <ol v-if="first?.recommendations?.length">
-            <li v-for="x in first.recommendations" :key="x">{{ x }}</li>
-          </ol>
-          <p v-else>当前规则未提供排查建议。</p>
-        </section>
-        <div class="rail-actions">
-          <small>规则观察与 AI 推断分别展示</small
-          ><button class="consult-action" @click="store.openAiPanel()">进入 DeepSeek 专家会诊 ↗</button>
-        </div>
+
+        <p class="rail-note">规则观察与 AI 推断分别展示</p>
       </aside>
     </div>
     <footer class="station-footer">
