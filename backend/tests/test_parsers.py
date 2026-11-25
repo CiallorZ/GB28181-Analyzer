@@ -652,7 +652,11 @@ class TestSessionBuilder:
         session_builder.link_media([s], streams)
         assert s.media_status == 'received'
         assert len(s.media_stream_keys) == 1
-        assert s.first_media_latency == 1.0
+        # 端口/时间只能弱关联：流被保留在会话下，但不能据此计算
+        # 首媒体耗时，否则会把同端口上无关的流算成本会话的媒体。
+        assert s.link_mode == 'weak'
+        assert s.first_media_latency is None
+        assert any('弱关联' in n for n in s.notes)
 
     def test_missing_transport_is_not_matching_evidence(self):
         session = session_builder.SessionInfo(start_time=0.0, end_time=10.0)
