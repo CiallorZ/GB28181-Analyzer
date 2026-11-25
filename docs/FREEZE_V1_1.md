@@ -95,5 +95,6 @@
 | WebView 冒烟 | 设置页显示日志路径；待分析任务标题显示分析中；浏览器式 beforeunload 被拦截（页面刷新/导航）；已有任务视频与编码区正常渲染 |
 | 真实分析 | 示例抓包 126 报文、1 条流完成分析，日志落盘 |
 | 候选便携包 | 用 v1.1.5 桌面壳替换新引擎后重新打包，ZIP 解包、WebView2 启动、关窗和引擎退出冒烟通过 |
+| Windows CI | PR #14 的 windows-latest 完整构建新 Tauri 壳，便携 ZIP 冒烟通过（6m17s） |
 
-未在本机验证：Tauri 桌面 EXE 重编译（本机缺少 Rust，winget 安装请求未获确认）；离线单文件 EXE 的重新打包。两者需要在带 Rust 工具链的 Windows 构建机上完成。
+Tauri 桌面壳已由 PR #14 的 windows-latest 构建通过，包含原生关窗确认代码，便携 ZIP 解包、启动、关窗和引擎退出冒烟通过。本机缺少 MSVC linker，无法在本机重复编译 Rust 壳。离线单文件 EXE 仍需在带完整 vendor 运行时的发布流程中重新打包。
