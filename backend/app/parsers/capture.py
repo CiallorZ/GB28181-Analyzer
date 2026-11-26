@@ -212,12 +212,9 @@ PACKET_FIELDS = [
     'frame.protocols',
 ]
 
-# SIP 字段跟在 PACKET_FIELDS 后面，顺序与 _load_sip 的解包顺序一致。
-# 与报文索引合并到同一次 tshark 扫描：大抓包上每多一次全量扫描就多一遍
-# 磁盘 I/O 与解包开销，而 SIP 字段在非 SIP 报文上为空，代价可以忽略。
+# 地址和端口直接复用报文索引字段。部分 TShark 版本收到重复的 -e
+# 时只填最后一列，会把前面索引列的 IP 和端口留空。
 SIP_FIELDS = [
-    'ip.src', 'udp.srcport', 'tcp.srcport',
-    'ip.dst', 'udp.dstport', 'tcp.dstport',
     'sip.CSeq', 'sip.Status-Code',
     'sip.Request-Line', 'sip.Status-Line',
     'sip.msg_hdr', 'sip.msg_body',
@@ -285,12 +282,10 @@ def iter_packets(path: str, display_filter: str | None = None,
                     'protocols': protos or '',
                 }
                 if include_sip:
-                    sip = parts[12:24]
-                    # 只有真正带 SIP 内容的报文才交给上层解析：判据是 sip.*
-                    # 字段（元组后 6 项），不是地址/端口——后者每个报文都有。
-                    # 这样 tcp.port==5060 上的握手与裸 TCP 段被自然过滤掉。
-                    if any(sip[6:]):
-                        item['sip'] = (num, ts, *sip)
+                    sip = parts[12:]
+                    if any(sip):
+                        item['sip'] = (num, ts, ip_src, u_sport, t_sport,
+                                       ip_dst, u_dport, t_dport, *sip)
                 yield item
                 count += 1
                 if limit and count >= limit:

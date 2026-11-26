@@ -41,10 +41,9 @@ def _index_line(num, ts, src, dst, proto_ports=('5060', '40000'), protos='eth:ip
 
 
 def _sip_line(num, ts, src, sport, dst, dport, request_line='INVITE sip:x SIP/2.0'):
-    # 索引 12 列 + SIP 12 列：地址/端口与索引列重复，随后是 sip.* 字段
+    # 索引字段后只有 6 个 SIP 专用字段。
     return _line(num, ts, '300', src, dst, '', '',
                  '', '', sport, dport, 'eth:ip:udp:sip',
-                 src, sport, '', dst, dport, '',
                  '1 INVITE', '', request_line, '',
                  'From: <sip:a@b>\r\nTo: <sip:c@d>\r\nCall-ID: abc\r\n',
                  '')
@@ -81,10 +80,34 @@ def test_iter_packets_collects_sip_only_for_sip_packets(fake_tshark):
     assert 'sip' not in items[0]
     sip = items[1]['sip']
     # 元组前缀是 frame.number、frame.time_relative，与 _load_sip 的解包顺序一致
+    assert items[1]['src_ip'] == sip[2] == '10.0.0.1'
+    assert items[1]['src_port'] == int(sip[3]) == 5060
     assert sip[0] == '2'
     assert sip[8] == '1 INVITE'              # sip.CSeq
     assert sip[10] == 'INVITE sip:x SIP/2.0'  # sip.Request-Line
     assert 'Call-ID: abc' in sip[12]         # sip.msg_hdr
+
+
+def test_merged_scan_never_requests_duplicate_fields(monkeypatch):
+    """tshark 遇到重复的 -e 只填最后一列，前面的同名列会被清空
+
+    真实抓包上这会把索引列的 ip.src/端口全部变成空串，ip_count、udp_count
+    归零。合并扫描因此必须只请求一份字段，地址/端口从索引列复用。
+    """
+    captured = {}
+
+    def fake_popen(cmd, *a, **k):
+        captured['cmd'] = list(cmd)
+        return _FakeProc([])
+
+    monkeypatch.setattr(capture, 'TSHARK', '/bin/true')
+    monkeypatch.setattr(capture.subprocess, 'Popen', fake_popen)
+
+    list(capture.iter_packets('ignored.pcap', include_sip=True))
+
+    cmd = captured['cmd']
+    names = [cmd[i + 1] for i, tok in enumerate(cmd) if tok == '-e']
+    assert len(names) == len(set(names)), '重复的 -e 字段：%s' % names
 
 
 def test_load_sip_accepts_precollected_rows(db, make_task):
