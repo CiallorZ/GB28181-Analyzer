@@ -414,6 +414,10 @@ def parse_rfc4571_streams(buf: bytes, max_scan: int = DEFAULT_MAX_SCAN,
     stats:
       truncated —— 最后一帧的长度字段超出缓冲区（抓包被截断），
                    这类帧不能算作解析成功，但必须让上层知道"少算了"。
+      rtcp      —— 同一条 TCP 连接上交织的 RTCP 帧 [(帧序号, 载荷), ...]。
+                   RFC4571 的帧格式与 RTP 相同，国标 TCP 承载常把 SR/RR
+                   复用在同一连接里；这些帧不参与媒体统计，但可以给出
+                   对端报告的丢包与 RTT。
 
     早期实现把长度上限写成 2048，导致 I 帧（通常 4KB~60KB）被静默跳过，
     TCP 承载的码率/帧数因此系统性偏小。
@@ -425,6 +429,7 @@ def parse_rfc4571_streams(buf: bytes, max_scan: int = DEFAULT_MAX_SCAN,
             continue
         o = off
         groups: dict = {}
+        rtcp_frames: list = []
         truncated = 0
         while o + 2 <= len(buf):
             L = int.from_bytes(buf[o:o + 2], 'big')
@@ -440,6 +445,9 @@ def parse_rfc4571_streams(buf: bytes, max_scan: int = DEFAULT_MAX_SCAN,
             # RTCP 可能和 RTP 复用同一条 TCP 连接（RFC4571 帧格式相同）。
             # 跳过它，但继续解析后面的 RTP，不能因此截断整条流。
             if is_rtcp(pp):
+                # 记录帧在缓冲区里的相对位置，上层用它把 RTCP 映射到
+                # 该 TCP 方向的 t0..t1 时间窗（TCP 没有逐帧时间戳）。
+                rtcp_frames.append((o / max(1, len(buf)), pp))
                 o += 2 + L
                 continue
             header_length = 12 + 4 * (pp[0] & 0x0f)
@@ -470,7 +478,8 @@ def parse_rfc4571_streams(buf: bytes, max_scan: int = DEFAULT_MAX_SCAN,
                       if len(pkts) >= min_pkts}
         total = sum(len(pkts) for pkts in qualifying.values())
         if total and (best is None or total > best[0]):
-            best = (total, off, qualifying, {'truncated': truncated})
+            best = (total, off, qualifying,
+                    {'truncated': truncated, 'rtcp': rtcp_frames})
             if total > 400:                   # 已足够确认对齐正确
                 break
     if best is None:

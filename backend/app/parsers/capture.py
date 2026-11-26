@@ -410,16 +410,19 @@ RTP_PAYLOAD_KEEP_BYTES = 256 * 1024 * 1024
 RTP_HEADER_BYTES = 12
 
 
-def extract_udp_rtp(path: str) -> list:
-    """抽取 UDP 承载的 RTP（一个数据报就是一个 RTP 包）
+def extract_udp_rtp_and_rtcp(path: str) -> tuple[list, list]:
+    """一次扫描同时抽取 UDP RTP 与 RTCP
 
-    大抓包只保留每条流开头 60 秒 / 全局 256 MiB 的完整载荷，
+    大抓包只保留每条流开头 60 秒 / 全局 256 MiB 的完整 RTP 载荷，
     之后的包仍保留 RTP 头和真实载荷长度，包数、码率、序号缺口
     统计不受影响；只有 PS/ES 编码分析与预览取样会被限制。
+
+    RTCP 通常很小，全部保留；compound 包交给 rtcp_analyzer 解析。
     """
     if not TSHARK:
         raise CaptureError('未找到 tshark')
-    out = []
+    rtp_out: list = []
+    rtcp_out: list = []
     stream_start: dict = {}
     kept_bytes = 0
     for r in iter_fields(path, [
@@ -431,16 +434,23 @@ def extract_udp_rtp(path: str) -> list:
             payload = bytes.fromhex(re.sub(r'[^0-9a-fA-F]', '', r[6]))
         except (ValueError, TypeError):
             continue
-        if len(payload) < 12 or (payload[0] >> 6) != 2:
-            continue
-        # RTCP 与 RTP 的版本位相同，PT 却是 200-207；若不先剔除，
-        # SR/RR 会被当成 RTP 流参与码率、序号缺口和媒体关联。
-        if rtp_analyzer.is_rtcp(payload):
+        if len(payload) < 8 or (payload[0] >> 6) != 2:
             continue
         try:
             ts = float(r[1]) if r[1] else 0.0
             frame = int(r[0]) if r[0] else 0
         except (TypeError, ValueError):
+            continue
+        meta = {
+            'frame': frame, 'ts': ts,
+            'src_ip': r[2], 'src_port': int(r[3]) if r[3] else None,
+            'dst_ip': r[4], 'dst_port': int(r[5]) if r[5] else None,
+        }
+        # 先判 RTCP：版本位与 RTP 相同，PT 200-207 不属于媒体统计。
+        if rtp_analyzer.is_rtcp(payload):
+            rtcp_out.append({**meta, 'payload': payload})
+            continue
+        if len(payload) < 12:
             continue
         ssrc_key = payload[8:12]
         stream_key = (ssrc_key, r[2], r[3], r[4], r[5])
@@ -453,16 +463,18 @@ def extract_udp_rtp(path: str) -> list:
         else:
             # 至少保留固定头，上层还要解析序号/时间戳/SSRC。
             kept = payload[:RTP_HEADER_BYTES]
-        out.append({
-            'frame': frame,
-            'ts': ts,
-            'src_ip': r[2], 'src_port': int(r[3]) if r[3] else None,
-            'dst_ip': r[4], 'dst_port': int(r[5]) if r[5] else None,
+        rtp_out.append({
+            **meta,
             'payload': kept,
             'payload_size': len(payload),
             'payload_truncated': not keep,
         })
-    return out
+    return rtp_out, rtcp_out
+
+
+def extract_udp_rtp(path: str) -> list:
+    """抽取 UDP 承载的 RTP（兼容旧调用，RTCP 由新接口单独返回）"""
+    return extract_udp_rtp_and_rtcp(path)[0]
 
 
 def extract_raw_packet(path: str, number: int) -> bytes | None:
