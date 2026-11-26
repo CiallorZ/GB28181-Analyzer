@@ -6,6 +6,7 @@ import { bindChartResize } from '../utils/chartResize'
 import { api } from '../api/client'
 import PageNav from '../components/PageNav.vue'
 import { useTaskStore } from '../stores/task'
+import { cachedLoad, cacheKey, set, taskRevision } from '../utils/taskCache'
 
 const store = useTaskStore()
 const streams = shallowRef([])
@@ -30,16 +31,43 @@ async function chart(id, opt) {
   charts[id].setOption({ animation: false, ...opt }, true)
 }
 
-watch(() => store.currentTaskId, async (id, _, onCleanup) => {
+// 任务完成时间作为缓存版本号。深链直接进 /media 时任务详情可能还没加载，
+// 版本号从 null 变成实际值后，用已经取到的结果补写缓存，不重复请求。
+const revision = computed(() => taskRevision(store.task))
+let loaded = null        // { taskId, key, items }
+
+watch([() => store.currentTaskId, revision], async ([id], _, onCleanup) => {
   const controller = new AbortController()
   onCleanup(() => controller.abort())
-  streams.value = []
   err.value = ''
   loading.value = !!id
-  if (!id) return
+  if (!id) {
+    streams.value = []
+    loaded = null
+    return
+  }
+  const rev = revision.value
+  const key = rev ? cacheKey(id, rev, 'media-quality') : ''
+
+  if (loaded && loaded.taskId === id) {
+    if (!key || loaded.key === key) return
+    if (!loaded.key) {
+      // 版本号补上了：把已取到的结果归入该版本，避免再打一次接口。
+      loaded.key = key
+      set(key, { items: loaded.items })
+      return
+    }
+  }
+
+  streams.value = []
   try {
-    const result = await api.mediaQuality(id, controller.signal)
-    if (!controller.signal.aborted) streams.value = result.items
+    // 缓存条目要能被后续页面复用，所以请求本身不绑定本次的 abort signal；
+    // 切换任务时只用 aborted 决定是否把结果写进组件。
+    const load = () => api.mediaQuality(id)
+    const result = key ? await cachedLoad(key, load) : await load()
+    if (controller.signal.aborted) return
+    streams.value = result.items
+    loaded = { taskId: id, key, items: result.items }
   } catch (e) {
     if (!controller.signal.aborted) err.value = e.message
   } finally {

@@ -14,6 +14,7 @@ import { chartPalette } from '../utils/chartTheme'
 import { bindChartResize } from '../utils/chartResize'
 import { api } from '../api/client'
 import { useTaskStore } from '../stores/task'
+import { cachedLoad, cacheKey, clearTask, taskRevision } from '../utils/taskCache'
 import VideoPlayer from '../components/VideoPlayer.vue'
 import AiSummarySection from '../components/AiSummarySection.vue'
 import CaptureIntake from '../components/CaptureIntake.vue'
@@ -136,13 +137,20 @@ async function loadAll() {
     if (stale()) return
     task.value = current
     if (current.status !== 'completed') return
+    // 已完成任务的同一版本结果可以直接复用：在 /media、/sip 之间来回
+    // 切换时不必把 6 个接口重取一遍。重新分析会更新 completed_at，
+    // 版本号随之改变，旧缓存自然失效。
+    const rev = taskRevision(current)
+    const key = name => cacheKey(tid, rev, name)
     const [ov, ss, dg, pk, media, stats] = await Promise.all([
-      api.overview(tid),
-      api.sessions(tid, { page_size: 30 }),
-      api.diagnostics(tid, { page_size: 40 }),
-      api.packets(tid, { page_size: 8 }),
-      api.taskMedia(tid),
-      api.taskMediaStats(tid).catch(() => null)
+      cachedLoad(key('overview'), () => api.overview(tid)),
+      cachedLoad(key('sessions'), () => api.sessions(tid, { page_size: 30 })),
+      cachedLoad(key('diagnostics'), () => api.diagnostics(tid, { page_size: 40 })),
+      cachedLoad(key('packets'), () => api.packets(tid, { page_size: 8 })),
+      cachedLoad(key('media'), () => api.taskMedia(tid)),
+      // 统计是可选的：失败时降级为 null，但不要把 null 缓存下来，
+      // 否则一次瞬时失败会让整个任务版本都看不到统计。
+      cachedLoad(key('media-stats'), () => api.taskMediaStats(tid)).catch(() => null)
     ])
     if (stale()) return
     overview.value = ov
@@ -162,7 +170,8 @@ async function loadAll() {
     if (ids.length) {
       metricsPending.value = true
       try {
-        const result = await api.taskMetrics(tid, ids)
+        const result = await cachedLoad(key('metrics:' + ids.join(',')),
+          () => api.taskMetrics(tid, ids))
         if (stale()) return
         metrics.value = Object.fromEntries(result.items.map(item => [item.stream_id, item]))
         renderMediaCharts()
@@ -409,6 +418,9 @@ function startPoll() {
         stopPoll()
         if (task.value.status === 'completed') {
           feedback('success')
+          // 重新分析会更新 completed_at，缓存版本号随之改变；
+          // 这里显式清一次，避免旧版本条目长期占着 LRU 名额。
+          clearTask(tid)
           await loadAll()
         } else if (task.value.status === 'failed') {
           feedback('error')
@@ -454,6 +466,9 @@ async function reanalyze() {
     await api.analyze(tid)
     if (tid !== store.currentTaskId) return
     startFailure.value = null
+    // 重新分析的结果会覆盖旧结果；缓存按 completed_at 分版本，
+    // 但旧版本条目不会再被命中，这里直接清掉避免占位。
+    clearTask(tid)
     const updated = await store.loadTask(tid)
     if (tid !== store.currentTaskId) return
     task.value = updated

@@ -6,6 +6,7 @@ import PageNav from '../components/PageNav.vue'
 import InterfaceState from '../components/InterfaceState.vue'
 import { feedback } from '../stores/interface'
 import { useTaskStore } from '../stores/task'
+import { clearTask } from '../utils/taskCache'
 
 const router = useRouter()
 const route = useRoute()
@@ -87,6 +88,7 @@ async function openTask(t) {
 async function reanalyze(t) {
   try {
     await api.analyze(t.id)
+    clearTask(t.id)          // 旧版本结果不会再被命中，直接释放
     feedback('confirm')
     await load()
   } catch (e) { feedback('error'); err.value = e.message }
@@ -96,6 +98,7 @@ async function removeTask(t) {
   if (!confirm(`确定删除任务「${t.name}」？文件与分析结果都会删除。`)) return
   try {
     await api.deleteTask(t.id)
+    clearTask(t.id)
     if (store.currentTaskId === t.id) store.setCurrent(null)
     await load()
   } catch (e) { err.value = e.message }
