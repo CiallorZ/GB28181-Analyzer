@@ -601,6 +601,10 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
         parsed = []
         for p in udp_pkts:
             payload = p['payload']
+            # payload_size 指 RTP 载荷（不含 12 字节 RTP 头），与 TCP 路径
+            # 保持一致；size 才是整包长度。载荷被预算截断时只保留了 RTP 头，
+            # 但 payload_size 仍是真实整包长度，减掉头长即为真实载荷长度。
+            total = p.get('payload_size') or len(payload)
             parsed.append(({
                 'src_ip': p['src_ip'], 'src_port': p['src_port'],
                 'dst_ip': p['dst_ip'], 'dst_port': p['dst_port'],
@@ -611,9 +615,9 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
                 payload_type=payload[1] & 0x7f,
                 marker=bool((payload[1] >> 7) & 1),
                 arrival=p['ts'],
-                size=p.get('payload_size') or len(payload),
+                size=total,
                 payload=payload[12:],
-                payload_size=p.get('payload_size') or len(payload),
+                payload_size=max(0, total - 12),
                 payload_truncated=bool(p.get('payload_truncated')),
                 packet_number=p['frame'],
             )))
@@ -641,16 +645,15 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
         tcp_streams = {}
 
     tcp_limits = []
+    # 预算耗尽后，之后每个 TCP 方向都会被标记 truncated。逐个方向各报一条
+    # 会让诊断列表塞满几乎相同的 CAP-001，把真正有信息量的一条淹没。
+    # 这里合并成一条汇总告警。
+    budget_hit = []
     for sid, entry in tcp_streams.items():
         segs = entry.get('segs') or {}
         meta = entry.get('meta') or {}
         if entry.get('truncated'):
-            tcp_limits.append({
-                'code': 'tcp_payload_budget',
-                'level': 'warning',
-                'message': 'TCP 流 %s 的负载超过分析内存预算，'
-                           '仅分析了前一部分数据' % (meta.get('stream_id') or sid),
-            })
+            budget_hit.append(meta.get('stream_id') or sid)
         if len(segs) < 3:
             continue
         buf = rtp_analyzer.reassemble_tcp(segs)
@@ -669,14 +672,16 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
             })
 
         # TCP 连接里交织的 RTCP：按它在缓冲区中的相对位置映射到该方向的
-        # t0..t1 时间窗。只有时间近似，没有逐帧时间戳。
+        # t0..t1 时间窗。只有时间近似，没有逐帧时间戳——用它算出的 RTT
+        # 只能标注为估算值。
         tcp_first, tcp_last = entry.get('t0'), entry.get('t1')
         for pos, payload in tcp_stats.get('rtcp') or []:
             arrival = (tcp_first + (tcp_last - tcp_first) * pos
                        if tcp_first is not None and tcp_last is not None
                        else (meta.get('ts') or 0.0))
             rtcp_events.append({'arrival': arrival, 'payload': payload,
-                                'source_ip': meta.get('src_ip')})
+                                'source_ip': meta.get('src_ip'),
+                                'arrival_estimated': True})
 
         # 同一 TCP 连接可能承载多路媒体（共享端口），逐 SSRC 建流。
         for _ssrc, pkts in ssrc_groups.items():
@@ -731,6 +736,18 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
             streams.append(row)
 
     db.commit()
+    if budget_hit:
+        if len(budget_hit) == 1:
+            message = ('TCP 流 %s 的负载超过分析内存预算，仅分析了前一部分数据'
+                       % budget_hit[0])
+        else:
+            message = ('%d 个 TCP 方向的负载超过分析内存预算，仅分析了前一部分'
+                       '数据（%s）' % (len(budget_hit), '、'.join(
+                           str(x) for x in budget_hit[:5])
+                           + (' 等' if len(budget_hit) > 5 else '')))
+        tcp_limits.append({'code': 'tcp_payload_budget', 'level': 'warning',
+                           'message': message})
+
     return streams, tcp_limits
 
 
