@@ -273,7 +273,7 @@ watch([activeMetric, streams, loading], async () => {
               <thead>
                 <tr>
                   <th>SSRC / 会话</th><th>传输</th><th>包数</th><th>码率</th>
-                  <th>抖动</th><th>缺口</th><th>静默</th>
+                  <th>抖动</th><th>缺口</th><th>对端丢包</th><th>RTT</th><th>静默</th>
                 </tr>
               </thead>
               <tbody>
@@ -287,6 +287,15 @@ watch([activeMetric, streams, loading], async () => {
                   </td>
                   <td class="num" :class="st.seq_gap_packets ? 'text-critical' : ''">
                     {{ st.seq_gap_packets }}
+                  </td>
+                  <td class="num" :class="st.extra?.rtcp?.fraction_lost_latest > 1 ? 'text-warning' : ''"
+                      :title="st.extra?.rtcp ? '来自对端 RTCP 接收报告' : '抓包中未观察到 RTCP 接收报告'">
+                    {{ st.extra?.rtcp?.fraction_lost_latest != null
+                      ? fmt(st.extra.rtcp.fraction_lost_latest, 2) + '%' : '—' }}
+                  </td>
+                  <td class="num">
+                    {{ st.extra?.rtcp?.rtt_ms_latest != null
+                      ? fmt(st.extra.rtcp.rtt_ms_latest, 1) + 'ms' : '—' }}
                   </td>
                   <td class="num" :class="st.max_gap > 3 ? 'text-warning' : ''">
                     {{ st.max_gap != null ? fmt(st.max_gap, 2) : '—' }}

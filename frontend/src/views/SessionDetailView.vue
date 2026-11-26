@@ -218,6 +218,15 @@ onUnmounted(() => {
           </div>
         </div>
         <div class="kpi">
+          <div class="kpi-label">首关键帧（估算）</div>
+          <div class="kpi-value" :class="session.first_keyframe_latency == null ? 'na' : ''"
+               title="按首个关键帧在流内的偏移估算，不是播放器实际显示时间">
+            {{ session.first_keyframe_latency != null
+              ? fmt(session.first_keyframe_latency, 3) : '无法计算' }}
+            <span v-if="session.first_keyframe_latency != null" class="kpi-unit">s</span>
+          </div>
+        </div>
+        <div class="kpi">
           <div class="kpi-label">结束原因</div>
           <div class="kpi-value" style="font-size:14px" :class="session.end_reason === 'normal' ? 'ok' : 'warning'">
             {{ { normal: '正常', abnormal: '异常', capture_ended: '抓包结束', unknown: '未知' }[session.end_reason] }}

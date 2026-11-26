@@ -1163,6 +1163,20 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
                   <div><i>缺口</i><b :class="st.seq_gap_packets ? 'text-critical' : ''">
                     {{ st.seq_gap_packets }}</b></div>
                 </div>
+                <div v-if="st.extra?.rtcp" class="sc-rtcp"
+                     title="来自对端 RTCP 接收报告，证据强于本端按序号缺口推断">
+                  <span>对端报告</span>
+                  <b :class="st.extra.rtcp.fraction_lost_latest > 1 ? 'text-warning' : ''">
+                    丢包 {{ st.extra.rtcp.fraction_lost_latest != null
+                      ? fmt(st.extra.rtcp.fraction_lost_latest, 2) + '%' : '—' }}
+                  </b>
+                  <b v-if="st.extra.rtcp.rtt_ms_latest != null">
+                    RTT {{ fmt(st.extra.rtcp.rtt_ms_latest, 1) }}ms
+                  </b>
+                  <b v-if="st.extra.rtcp.peer_jitter_ms != null">
+                    抖动 {{ fmt(st.extra.rtcp.peer_jitter_ms, 1) }}ms
+                  </b>
+                </div>
                 <div class="sc-bar">
                   <div class="sb-track">
                     <div class="sb-fill"
@@ -1654,6 +1668,13 @@ section.rise:nth-of-type(7) { animation-delay: .30s; }
   color: var(--text); font-variant-numeric: tabular-nums;
 }
 .sc-metrics b span { font-size: 9.5px; color: var(--text-4); font-weight: 400; margin-left: 1px; }
+.sc-rtcp {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
+  margin-top: 10px; padding-top: 8px;
+  border-top: 1px dashed var(--line-2);
+  font-size: 10.5px; color: var(--text-4);
+}
+.sc-rtcp b { font-weight: 600; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .sc-bar { margin-top: 12px; }
 .sb-track {
   height: 3px; background: var(--surface-4);
