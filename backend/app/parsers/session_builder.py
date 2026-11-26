@@ -428,6 +428,15 @@ def link_media(sessions: list[SessionInfo], streams: list[dict]) -> None:
                 ends = [st.get('end_time') for _sc, st in confirmed
                         if st.get('end_time') is not None and st.get('end_time') >= first_ts]
                 s.media_duration = round(max(ends) - first_ts, 3) if ends else None
+
+                # 首个可解码帧：关键帧偏移来自 PS/ES 分析，按 RTP 时间戳
+                # 换算成相对流起点的秒数。这是"从 INVITE 到第一个可解码帧"
+                # 的近似值；播放器实际显示时间仍无法从单点抓包得知。
+                offsets = [st.get('keyframe_offset') for _sc, st in confirmed
+                           if st.get('keyframe_offset') is not None]
+                if offsets:
+                    s.first_keyframe_latency = round(
+                        s.first_media_latency + min(offsets), 3)
             else:
                 # 媒体在会话窗口外，仍记录流但不给耗时指标
                 s.media_duration = None

@@ -33,7 +33,8 @@ from ..models.entities import (
     MediaStream, PacketIndex, SipDialog, SipMessage, TaskStatus,
     BusinessSession, Device,
 )
-from ..parsers import capture, rtp_analyzer, session_builder, sip_parser
+from ..parsers import (capture, rtcp_analyzer, rtp_analyzer, session_builder,
+                       sip_parser)
 from . import diagnosis as diag_engine
 
 log = logging.getLogger('gb28181.analyzer')
@@ -373,6 +374,7 @@ def _run(db: Session, task: AnalysisTask):
                      'start_time': r.start_time, 'end_time': r.end_time,
                      'has_video': r.has_video, 'frame_count': r.frame_count,
                      'transport': r.transport, 'src_ip': r.source_ip,
+                     'keyframe_offset': _keyframe_offset(r),
                      'link_mode': None}
                     for r in streams_raw]
     session_builder.link_media(sessions, stream_dicts)
@@ -388,6 +390,7 @@ def _run(db: Session, task: AnalysisTask):
         row.media_status = s.media_status
         row.first_media_latency = s.first_media_latency
         row.signal_to_first_media = s.signal_to_first_media
+        row.first_keyframe_latency = s.first_keyframe_latency
         row.media_duration = s.media_duration
         row.media_stream_count = len(s.media_stream_keys)
 
@@ -575,9 +578,12 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
 
     # ---- UDP 承载 ----
     try:
-        udp_pkts = capture.extract_udp_rtp(path)
+        udp_pkts, udp_rtcp = capture.extract_udp_rtp_and_rtcp(path)
     except capture.CaptureError:
-        udp_pkts = []
+        udp_pkts, udp_rtcp = [], []
+
+    rtcp_events = [{'arrival': r['ts'], 'payload': r['payload']}
+                   for r in udp_rtcp]
 
     if udp_pkts:
         # 逐包构造 RtpPacket
@@ -651,6 +657,15 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
                            '该帧未计入媒体统计' % (meta.get('stream_id') or sid),
             })
 
+        # TCP 连接里交织的 RTCP：按它在缓冲区中的相对位置映射到该方向的
+        # t0..t1 时间窗。只有时间近似，没有逐帧时间戳。
+        tcp_first, tcp_last = entry.get('t0'), entry.get('t1')
+        for pos, payload in tcp_stats.get('rtcp') or []:
+            arrival = (tcp_first + (tcp_last - tcp_first) * pos
+                       if tcp_first is not None and tcp_last is not None
+                       else (meta.get('ts') or 0.0))
+            rtcp_events.append({'arrival': arrival, 'payload': payload})
+
         # 同一 TCP 连接可能承载多路媒体（共享端口），逐 SSRC 建流。
         for _ssrc, pkts in ssrc_groups.items():
             # RFC4571 里没有逐包时间，用该方向负载段的到达时间近似：
@@ -672,6 +687,13 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
             pending.append((tag, pkts, st, key, 'TCP', meta, ps))
 
     # ---- 并行重建所有流（利用多核，显著缩短总耗时）----
+    # RTCP 是独立于 RTP 的接收端证据；解析失败不能影响主链路。
+    try:
+        rtcp_summary = rtcp_analyzer.summarize(rtcp_events)
+    except Exception:
+        log.exception('RTCP 解析失败（不影响 RTP 统计）')
+        rtcp_summary = {}
+
     if pending:
         try:
             from ..services import rebuild as rb_mod
@@ -692,7 +714,9 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
         for tag, pkts, st, key, transport, meta, ps in pending:
             analysis_control.checkpoint()
             row = _save_stream(db, task, st, key, transport, meta, ps,
-                               rb_map.get(tag))
+                               rb_map.get(tag),
+                               rtcp=rtcp_summary.get(st.ssrc)
+                               if st.ssrc is not None else None)
             streams.append(row)
 
     db.commit()
@@ -706,9 +730,9 @@ def _run_ps_analysis(pkts, st):
     """
     try:
         from ..parsers import ps_parser
-        from .rebuild import sample_timed_payloads
-        pairs, st.ps_sampled = sample_timed_payloads(pkts)
-        payloads = [payload for payload, _arrival in pairs]
+        from .rebuild import sample_timed_packets
+        sampled, st.ps_sampled = sample_timed_packets(pkts)
+        payloads = [p.payload for p in sampled]
         if not payloads:
             return None
         # 快速判断：任一包里出现 PS pack 起始码就认为需要解析
@@ -717,11 +741,13 @@ def _run_ps_analysis(pkts, st):
                        for p in payloads[:20])
         if not looks_ps:
             return None
-        start = pairs[0][1]
-        times = [arrival - start for _payload, arrival in pairs]
+        start = sampled[0].arrival
+        times = [p.arrival - start for p in sampled]
+        rtp_ts = [p.timestamp for p in sampled]
         if st.ps_sampled:
             st.notes.append('编码分析取样自流开头有界窗口（60 秒或 256 MiB）')
-        return ps_parser.analyze_ps(payloads, times)
+        return ps_parser.analyze_ps(payloads, times, rtp_ts,
+                                    clock_rate=st.clock_rate)
     except Exception:
         # PS 分析失败不能影响主流程
         log.exception('PS/ES 分析失败（不影响主流程）')
@@ -779,10 +805,18 @@ def _source_media(ps, rb) -> dict:
 
 
 def _save_stream(db: Session, task: AnalysisTask, st, key, transport,
-                 meta: dict | None = None, ps=None, rb=None) -> MediaStream:
+                 meta: dict | None = None, ps=None, rb=None,
+                 rtcp: dict | None = None) -> MediaStream:
     ssrc, sip_, sport, dip, dport = key
     meta = meta or {}
     source = _source_media(ps, rb)
+
+    if rtcp and rtcp.get('peer_jitter_raw') is not None and st.clock_rate:
+        # RTCP 抖动以 RTP 时间戳单位上报，换算成毫秒便于与本地 RFC3550
+        # 抖动对照。时钟率缺失时保留原始值，不猜。
+        rtcp = {**rtcp,
+                'peer_jitter_ms': round(
+                    rtcp['peer_jitter_raw'] * 1000 / st.clock_rate, 3)}
 
     def _int(v):
         try:
@@ -826,6 +860,7 @@ def _save_stream(db: Session, task: AnalysisTask, st, key, transport,
                'ps_sampled': st.ps_sampled,
                'ts_anomalies': st.ts_anomalies[:10],
                'seq_gap_events': st.seq_gap_events[:50],
+               'rtcp': rtcp,
                'ps': ps.to_dict() if ps else None,
                'rebuild': {
                    'ok': bool(rb and rb.ok),
@@ -902,6 +937,14 @@ def _load_devices(db: Session, task: AnalysisTask, sip_msgs: list[dict]):
     db.commit()
 
 
+def _keyframe_offset(stream: MediaStream) -> float | None:
+    """首个关键帧相对流起点的秒数（来自 PS/ES 分析，可能为 None）"""
+    ps = (stream.extra or {}).get('ps') or {}
+    video = ps.get('video') or {}
+    value = video.get('first_keyframe_offset')
+    return value if isinstance(value, (int, float)) else None
+
+
 def _session_dict(s, sid) -> dict:
     return {
         'id': sid,
@@ -922,6 +965,7 @@ def _session_dict(s, sid) -> dict:
         'subject_packet': s.subject_packet,
         'sdp_ssrc_packet': s.sdp_ssrc_packet,
         'first_media_latency': s.first_media_latency,
+        'first_keyframe_latency': s.first_keyframe_latency,
         'call_ids': s.call_ids,
     }
 
@@ -949,6 +993,9 @@ def _stream_dict(r: MediaStream) -> dict:
         'source_port': r.source_port, 'destination_port': r.destination_port,
         'source_ip': r.source_ip, 'destination_ip': r.destination_ip,
         'link_mode': (r.extra or {}).get('link_mode'),
+        'rtcp': (r.extra or {}).get('rtcp'),
+        'ps': (r.extra or {}).get('ps'),
+        'ps_sampled': (r.extra or {}).get('ps_sampled'),
     }
 
 
@@ -1030,6 +1077,8 @@ def _build_summary(task, session_rows, streams, diagnostics, stats,
 
     latencies = [s.first_media_latency for s in sessions
                  if s.first_media_latency is not None]
+    keyframe_latencies = [s.first_keyframe_latency for s in sessions
+                          if s.first_keyframe_latency is not None]
     jitters = [r.jitter_avg for r in streams if r.jitter_avg is not None]
 
     sev_count = {'critical': 0, 'warning': 0, 'info': 0, 'unknown': 0}
@@ -1048,6 +1097,9 @@ def _build_summary(task, session_rows, streams, diagnostics, stats,
         'total_streams': len(streams),
         'avg_first_media_latency': (round(sum(latencies) / len(latencies), 3)
                                     if latencies else None),
+        'avg_first_keyframe_latency': (
+            round(sum(keyframe_latencies) / len(keyframe_latencies), 3)
+            if keyframe_latencies else None),
         'avg_jitter_ms': (round(sum(jitters) / len(jitters), 2)
                           if jitters else None),
         'diagnostics': sev_count,

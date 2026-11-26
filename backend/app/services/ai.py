@@ -127,6 +127,9 @@ def build_context(db, task_id: int) -> str:
         lines.append('- 平均首媒体耗时：%s 秒' % s['avg_first_media_latency'])
     else:
         lines.append('- 平均首媒体耗时：无法计算（无媒体流）')
+    if s.get('avg_first_keyframe_latency') is not None:
+        lines.append('- 平均首关键帧耗时（估算）：%s 秒'
+                     % s['avg_first_keyframe_latency'])
     if s.get('avg_jitter_ms') is not None:
         lines.append('- 平均 RTP 抖动：%s ms' % s['avg_jitter_ms'])
 
@@ -152,12 +155,15 @@ def build_context(db, task_id: int) -> str:
                 addresses.setdefault(x.negotiated_ip, '地址%d' % (len(addresses) + 1))
             lines.append(
                 '- 会话#%d 设备=%s 信令=%s 媒体=%s 结束=%s 时长=%s '
-                '端口=%s:%s/%s Subject_SSRC=%s SDP_y_SSRC=%s 首媒体=%s'
+                '端口=%s:%s/%s Subject_SSRC=%s SDP_y_SSRC=%s 首媒体=%s '
+                '首关键帧=%s'
                 % (x.id, devices.get(x.device_id, '未知'), _enum_val(x.signal_status),
                    _enum_val(x.media_status), _enum_val(x.end_reason), dur,
                    addresses.get(x.negotiated_ip, '未知'), x.negotiated_port or '?',
                    x.negotiated_transport or '?',
-                   x.subject_ssrc or '空', x.sdp_ssrc or '空', fml))
+                   x.subject_ssrc or '空', x.sdp_ssrc or '空', fml,
+                   ('%.3fs' % x.first_keyframe_latency
+                    if x.first_keyframe_latency is not None else '无法计算')))
 
     # 媒体流明细
     streams = (db.query(MediaStream)

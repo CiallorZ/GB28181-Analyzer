@@ -98,14 +98,14 @@ def align_to_params(data: bytes) -> tuple[bytes, bool]:
 # ---------------------------------------------------------------
 # 从 RTP 包提取 PS
 # ---------------------------------------------------------------
-def sample_timed_payloads(pkts, max_seconds: float = PS_SAMPLE_SECONDS,
-                          max_bytes: int = PS_SAMPLE_BYTES):
-    """截取有界 RTP 载荷，并保留每个载荷的到达时间。
+def sample_timed_packets(pkts, max_seconds: float = PS_SAMPLE_SECONDS,
+                         max_bytes: int = PS_SAMPLE_BYTES):
+    """截取有界 RTP 包，保留包对象本身
 
-    质量指标仍使用完整流。这里限制的是 PS/ES 解封装和预览，
-    避免一条长流在内存里再复制一份几百 MB 的字节串。
+    与 sample_timed_payloads 同一窗口规则，但调用方还需要 RTP 时间戳
+    等头部字段（例如把关键帧字节偏移换算成时间）。
     """
-    pairs = []
+    chosen = []
     total = 0
     started = None
     payload_count = 0
@@ -117,11 +117,22 @@ def sample_timed_payloads(pkts, max_seconds: float = PS_SAMPLE_SECONDS,
             started = packet.arrival
         if packet.arrival - started > max_seconds:
             continue
-        if pairs and total + len(packet.payload) > max_bytes:
+        if chosen and total + len(packet.payload) > max_bytes:
             continue
-        pairs.append((packet.payload, packet.arrival))
+        chosen.append(packet)
         total += len(packet.payload)
-    return pairs, len(pairs) < payload_count
+    return chosen, len(chosen) < payload_count
+
+
+def sample_timed_payloads(pkts, max_seconds: float = PS_SAMPLE_SECONDS,
+                          max_bytes: int = PS_SAMPLE_BYTES):
+    """截取有界 RTP 载荷，并保留每个载荷的到达时间。
+
+    质量指标仍使用完整流。这里限制的是 PS/ES 解封装和预览，
+    避免一条长流在内存里再复制一份几百 MB 的字节串。
+    """
+    chosen, sampled = sample_timed_packets(pkts, max_seconds, max_bytes)
+    return [(p.payload, p.arrival) for p in chosen], sampled
 
 
 def sample_payloads(pkts, max_seconds: float = PS_SAMPLE_SECONDS,

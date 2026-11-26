@@ -62,6 +62,10 @@ class VideoInfo:
 
     first_keyframe_offset: float | None = None   # 相对流起点秒数
     keyframe_intervals: list = field(default_factory=list)
+    # 关键帧在 ES 中的字节偏移；由 analyze_ps 结合 RTP 到达时间换算成秒。
+    keyframe_offsets: list = field(default_factory=list)
+    keyframe_times: list = field(default_factory=list)      # 相对流起点秒数
+    keyframe_gop_seconds: list = field(default_factory=list)  # 相邻关键帧间隔
     frame_sizes: list = field(default_factory=list)   # 抽样后的大小分布
 
     warnings: list = field(default_factory=list)
@@ -80,6 +84,8 @@ class VideoInfo:
             'has_pps': self.has_pps, 'has_idr': self.has_idr,
             'first_keyframe_offset': self.first_keyframe_offset,
             'keyframe_intervals': self.keyframe_intervals[:50],
+            'keyframe_times': self.keyframe_times[:50],
+            'keyframe_gop_seconds': self.keyframe_gop_seconds[:50],
             'frame_size_stats': _size_stats(self.frame_sizes),
             'warnings': self.warnings,
         }
@@ -346,8 +352,13 @@ def parse_h265_sps(nal: bytes) -> dict:
 # ---------------------------------------------------------------
 # NAL 类型判定
 # ---------------------------------------------------------------
-def _iter_nal(data: bytes):
-    """按起始码切分 NAL，产出 (nal_type_byte, nal_bytes)"""
+def _iter_nal_spans(data: bytes):
+    """按起始码切分 NAL，产出 (nal_bytes, 起始码偏移)
+
+    偏移是相对整段 ES 的字节位置。关键帧时间要靠它映射回具体的 RTP 包，
+    所以不能用"累计 len(nal)+4"近似——起始码有 3 字节也有 4 字节，
+    长流上逐 NAL 的误差会累积到错位一个包。
+    """
     i = 0
     n = len(data)
     starts = []
@@ -367,7 +378,13 @@ def _iter_nal(data: bytes):
         begin = off + sc_len
         end = starts[idx + 1][0] if idx + 1 < len(starts) else n
         if end > begin:
-            yield data[begin:end]
+            yield data[begin:end], off
+
+
+def _iter_nal(data: bytes):
+    """按起始码切分 NAL，产出 nal_bytes"""
+    for nal, _off in _iter_nal_spans(data):
+        yield nal
 
 
 def _h264_slice_head(nal: bytes):
@@ -470,9 +487,9 @@ def analyze_es(es: bytes, start_time: float = 0.0) -> VideoInfo:
     keyframe_positions = []
     au_bytes = 0          # 当前 AU 已累计字节
     prefix_bytes = 0      # AU 之前、属于下一帧的参数集/SEI 字节
+    prefix_start = 0      # 上述前缀在 ES 中的起始偏移
     au_kind = None        # 'I' / 'P' / 'B'
     au_start = 0
-    byte_pos = 0
     have_au = False
 
     def _flush():
@@ -490,7 +507,7 @@ def analyze_es(es: bytes, start_time: float = 0.0) -> VideoInfo:
         else:
             info.p_frame_count += 1
 
-    for nal in _iter_nal(es):
+    for nal, nal_start in _iter_nal_spans(es):
         if not nal:
             continue
         size = len(nal) + 4
@@ -524,21 +541,23 @@ def analyze_es(es: bytes, start_time: float = 0.0) -> VideoInfo:
         if new_pic:
             _flush()
             au_bytes = prefix_bytes + size
+            # AU 从它的前缀（SPS/PPS/SEI）开始；没有前缀就从本 NAL 开始。
+            au_start = prefix_start if prefix_bytes else nal_start
             prefix_bytes = 0
             au_kind = kind
-            au_start = byte_pos
             have_au = True
         elif is_vcl and have_au:
             au_bytes += size
         else:
             # AUD/SPS/PPS/SEI 属于"下一帧"的前缀，不能算进当前帧
+            if prefix_bytes == 0:
+                prefix_start = nal_start
             prefix_bytes += size
-
-        byte_pos += size
 
     _flush()
 
     # 关键帧间隔（按字节位置换算成时间不可靠，这里只给间隔的字节跨度）
+    info.keyframe_offsets = keyframe_positions[:200]
     if len(keyframe_positions) >= 2:
         spans = [keyframe_positions[i + 1] - keyframe_positions[i]
                  for i in range(len(keyframe_positions) - 1)]
@@ -563,11 +582,19 @@ def estimate_fps(es_len: int, duration: float, frame_count: int) -> float | None
 # ---------------------------------------------------------------
 # PS 解封装主入口
 # ---------------------------------------------------------------
-def analyze_ps(payloads: list, timestamps: list | None = None) -> PsAnalysis:
+def analyze_ps(payloads: list, timestamps: list | None = None,
+               rtp_timestamps: list | None = None,
+               clock_rate: int | None = None) -> PsAnalysis:
     """对一条流的多个 RTP payload 做 PS 解封装
 
     payloads: [bytes, ...]  每个 RTP 包的载荷
     timestamps: 对应的到达时间（可选，用于定位首个关键帧）
+    rtp_timestamps: 对应的 RTP 时间戳（可选，比到达时间更稳）
+    clock_rate: RTP 时钟频率（可选，默认 90 kHz）
+
+    keyframe_times 以秒为单位、相对流起点。优先用 RTP 时间戳换算：
+    到达时间会被网络抖动和抓包点排队影响，RTP 时间戳才是编码器时基。
+    两者都没有时留空，不猜。
     """
     out = PsAnalysis()
     if not payloads:
@@ -578,6 +605,9 @@ def analyze_ps(payloads: list, timestamps: list | None = None) -> PsAnalysis:
     video_es = bytearray()
     audio_es = bytearray()
     keyframe_time = None
+    # ES 字节位置 → 该段最后一个 RTP 包的 (到达时间, RTP 时间戳)。
+    # 关键帧的字节偏移落在这段区间内时，用它定位到具体 RTP 包。
+    es_marks: list = []
 
     for idx, pay in enumerate(payloads):
         if not pay:
@@ -615,6 +645,12 @@ def analyze_ps(payloads: list, timestamps: list | None = None) -> PsAnalysis:
                                 or b'\x00\x00\x00\x01\x26' in seg):
                             keyframe_time = timestamps[idx]
                     video_es += seg
+                    es_marks.append((
+                        len(video_es),
+                        timestamps[idx] if timestamps and idx < len(timestamps) else None,
+                        (rtp_timestamps[idx]
+                         if rtp_timestamps and idx < len(rtp_timestamps) else None),
+                    ))
                 if nxt < 0:
                     break
                 pos = nxt
@@ -631,7 +667,14 @@ def analyze_ps(payloads: list, timestamps: list | None = None) -> PsAnalysis:
     if video_es:
         out.video = analyze_es(bytes(video_es))
         if keyframe_time is not None:
-            out.video.first_keyframe_offset = round(keyframe_time, 3)
+            # keyframe_time 是绝对到达时间；这里要的是"相对流起点"，
+            # 否则上层算出的首关键帧耗时会混进抓包时间轴的偏移。
+            origin = timestamps[0] if timestamps else 0.0
+            out.video.first_keyframe_offset = round(keyframe_time - origin, 3)
+        _fill_keyframe_times(
+            out.video, es_marks, clock_rate,
+            origin_arrival=timestamps[0] if timestamps else None,
+            origin_rtp=rtp_timestamps[0] if rtp_timestamps else None)
     else:
         out.video.warnings.append('未提取到视频 ES（可能是纯音频流或非 PS 封装）')
 
@@ -644,6 +687,66 @@ def analyze_ps(payloads: list, timestamps: list | None = None) -> PsAnalysis:
         out.warnings.append('载荷中未发现 PS 包头，可能不是 MPEG-PS 封装')
 
     return out
+
+
+def _wrap_delta(value: int, base: int) -> int:
+    """32 位 RTP 时间戳的有符号差值，跨回绕仍得到正的前进量"""
+    delta = (value - base) & 0xFFFFFFFF
+    return delta - (1 << 32) if delta & 0x80000000 else delta
+
+
+def _fill_keyframe_times(video: VideoInfo, es_marks: list,
+                         clock_rate: int | None,
+                         origin_arrival: float | None = None,
+                         origin_rtp: int | None = None) -> None:
+    """把关键帧的 ES 字节偏移换算成相对流起点的秒数
+
+    优先用 RTP 时间戳（编码器时基），缺失时退回到达时间；
+    两者都缺就留空。时钟率未知时按 90 kHz —— 国标 PS 流的事实标准。
+
+    基准是取样窗口的第一个 RTP 包（origin_*），不是首个关键帧：
+    "首关键帧耗时"要和"首媒体耗时"用同一根时间轴才能相加。
+    这里只给"相对流起点"的时间，不声称是播放器显示时间。
+    """
+    offsets = video.keyframe_offsets
+    if not offsets or not es_marks:
+        return
+    rate = clock_rate if clock_rate and clock_rate > 0 else 90000
+    marks = []
+    for off in offsets:
+        # es_marks 是每个 PES 段结束位置，取第一个覆盖该偏移的段
+        mark = next((m for m in es_marks if m[0] > off), None)
+        if mark is not None:
+            marks.append(mark)
+    if not marks:
+        return
+
+    # 同一序列必须只用一种时基：混用 RTP 时间戳与到达时间会让差值毫无意义。
+    # 只有全部关键帧都能定位到 RTP 时间戳时才用 RTP，否则整体退回到达时间。
+    if all(m[2] is not None for m in marks):
+        base = origin_rtp if origin_rtp is not None else es_marks[0][2]
+        if base is None:
+            base = marks[0][2]
+        seconds = [_wrap_delta(m[2], base) / rate for m in marks]
+    elif all(m[1] is not None for m in marks):
+        base = origin_arrival if origin_arrival is not None else es_marks[0][1]
+        if base is None:
+            base = marks[0][1]
+        seconds = [m[1] - base for m in marks]
+    else:
+        return
+
+    # 时间戳回绕或乱序可能算出负值；关键帧时间轴不应倒退，丢弃这类点。
+    if any(s < 0 for s in seconds):
+        return
+
+    video.keyframe_times = [round(s, 3) for s in seconds[:50]]
+    video.keyframe_gop_seconds = [
+        round(seconds[i + 1] - seconds[i], 3)
+        for i in range(len(seconds) - 1)
+    ][:50]
+    # RTP 时间戳比字节扫描得到的到达时间更准，允许覆盖先前的结果。
+    video.first_keyframe_offset = round(seconds[0], 3)
 
 
 def _pes_payload(seg: bytes) -> bytes:
