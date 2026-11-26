@@ -184,7 +184,8 @@ def _task_brief(db: Session, t: AnalysisTask) -> S.TaskBrief:
         packet_count=cf.packet_count if cf else None,
         duration=cf.duration if cf else None,
         session_count=s.get('session_count'),
-        diagnostic_count=sum((s.get('diagnostics') or {}).values()) or None,
+        diagnostic_count=(sum(s['diagnostics'].values())
+                          if isinstance(s.get('diagnostics'), dict) else None),
         error_message=t.error_message,
     )
 
@@ -383,6 +384,8 @@ def cancel_task(task_id: int, db: Session = Depends(get_db)):
 
 @router.delete('/{task_id}', status_code=204)
 def delete_task(task_id: int, db: Session = Depends(get_db)):
+    from ..services import retention
+
     task = db.get(AnalysisTask, task_id)
     if not task:
         raise HTTPException(404, '任务不存在')
@@ -390,14 +393,10 @@ def delete_task(task_id: int, db: Session = Depends(get_db)):
     with _run_lock:
         if task_id in _running:
             raise HTTPException(409, '任务正在分析中，请先取消再删除')
-    # 删除上传文件
-    for cf in task.files:
-        try:
-            os.remove(cf.stored_path)
-        except OSError:
-            pass
-    db.delete(task)
-    db.commit()
+        # 统一走保留策略的彻底删除：上传的抓包、rebuilt/<id> 预览与
+        # 数据库记录一起清理。只删数据库会让预览视频永久留在磁盘上。
+        if not retention.delete_task_completely(db, task_id):
+            raise HTTPException(404, '任务不存在')
     return None
 
 

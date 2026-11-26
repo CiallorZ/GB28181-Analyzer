@@ -1,7 +1,11 @@
 """User-controlled external tool paths."""
 from __future__ import annotations
 
+import ctypes
+import os
+import sys
 from pathlib import Path
+from threading import Lock
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -69,3 +73,25 @@ def reset_tools(_local=Depends(local_settings)):
     toolchain.clear_config()
     capture.refresh_tools()
     return toolchain.status()
+
+
+_picker = Lock()
+
+
+@router.post('/tools/pick')
+def pick_tool(request: Request, _local=Depends(local_settings)):
+    if (os.environ.get('GB_DESKTOP_CAPTURE') != '1' or not hasattr(sys, '_MEIPASS')
+            or not request.client or request.client.host != '127.0.0.1'):
+        raise HTTPException(403, '请在 Windows 桌面版选择工具，或手工输入路径')
+    if not _picker.acquire(blocking=False):
+        raise HTTPException(409, '文件选择器已打开')
+    try:
+        pick = ctypes.CDLL(str(Path(sys._MEIPASS) / 'gb28181_scan.dll')).gb_pick_executable
+        pick.argtypes = [ctypes.POINTER(ctypes.c_wchar), ctypes.c_uint32]
+        pick.restype = ctypes.c_int
+        path = ctypes.create_unicode_buffer(32768)
+        if pick(path, len(path)) < 0:
+            raise HTTPException(503, '无法打开 Windows 文件选择器')
+        return {'path': path.value or None}
+    finally:
+        _picker.release()

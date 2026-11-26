@@ -392,13 +392,21 @@ def link_media(sessions: list[SessionInfo], streams: list[dict]) -> None:
         # 关键约束：媒体首包必须落在会话生命周期内。
         # 若首包晚于 BYE，说明是"BYE 后残留媒体"或"另一轮会话的媒体"，
         # 不能算作本会话的首媒体耗时，否则会得出"首媒体耗时 > 会话时长"的荒谬结果。
-        if matched and s.start_time is not None:
+        #
+        # 只有 SSRC 精确匹配的流才参与耗时指标。端口/时间弱关联只能
+        # 说明"附近恰好有媒体"，不能证明它属于本会话；用弱关联流算出的
+        # 首包耗时、媒体时长会污染会话结论。
+        confirmed = [(1, streams[ti]) for ti in idxs if ti in exact_ids]
+        if idxs and not confirmed:
+            s.notes.append('仅按端口/时间弱关联到媒体流，未确认 SSRC 归属，'
+                           '不计算首媒体耗时与媒体时长')
+        if confirmed and s.start_time is not None:
             d = s.dialogs[0] if s.dialogs else None
             session_end = s.end_time
             if session_end is None and d is not None:
                 session_end = d.end_time
 
-            starts = [st.get('start_time') for _sc, st in matched
+            starts = [st.get('start_time') for _sc, st in confirmed
                       if st.get('start_time') is not None]
             if not starts:
                 continue
@@ -417,9 +425,25 @@ def link_media(sessions: list[SessionInfo], streams: list[dict]) -> None:
                 anchor = (d.ack_time if d.ack_time is not None else d.answer_time) if d else None
                 if anchor is not None and first_ts >= anchor:
                     s.signal_to_first_media = round(first_ts - anchor, 3)
-                ends = [st.get('end_time') for _sc, st in matched
+                ends = [st.get('end_time') for _sc, st in confirmed
                         if st.get('end_time') is not None and st.get('end_time') >= first_ts]
                 s.media_duration = round(max(ends) - first_ts, 3) if ends else None
+
+                # 首个可解码帧：关键帧偏移来自 PS/ES 分析，按 RTP 时间戳
+                # 换算成相对流起点的秒数。这是"从 INVITE 到第一个可解码帧"
+                # 的近似值；播放器实际显示时间仍无法从单点抓包得知。
+                #
+                # 必须用产生 first_ts 的那条流：首媒体耗时是按最早那条流算的，
+                # 若拿另一条流（例如另一路视频或音频旁路）的关键帧偏移相加，
+                # 两根时间轴对不上，结果没有意义。
+                for _sc, st in confirmed:
+                    if st.get('start_time') != first_ts:
+                        continue
+                    offset = st.get('keyframe_offset')
+                    if offset is not None:
+                        s.first_keyframe_latency = round(
+                            s.first_media_latency + offset, 3)
+                    break
             else:
                 # 媒体在会话窗口外，仍记录流但不给耗时指标
                 s.media_duration = None

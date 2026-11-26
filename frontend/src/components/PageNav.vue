@@ -33,10 +33,10 @@ const items = computed(() => {
 
 <template>
   <div class="pnav">
-    <BackButton :fallback="backTo || items.at(-2)?.to || '/'" />
 
     <div class="heading">
     <nav class="crumbs" aria-label="面包屑">
+      <BackButton :fallback="backTo || items.at(-2)?.to || '/'" />
       <template v-for="(c, i) in items" :key="i">
         <router-link v-if="c.to && i < items.length - 1" :to="c.to" class="crumb">
           {{ c.label }}
@@ -52,7 +52,7 @@ const items = computed(() => {
     </div>
     </div>
 
-    <span class="spacer"></span>
+
     <div class="acts">
       <slot name="actions" />
     </div>
@@ -62,7 +62,9 @@ const items = computed(() => {
 <style scoped>
 .pnav {
   display: flex; align-items: center; gap: 14px;
-  padding: 14px 0 22px;
+  padding: 8px 0 18px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
 }
 .crumbs {
@@ -77,7 +79,7 @@ a.crumb:hover { color: var(--text); text-decoration: none; }
 .crumb.cur { color: var(--text); font-weight: 500; }
 .sep { color: var(--text-4); font-size: 10px; }
 
-.heading { min-width: 0; }
+.heading { min-width: 0; flex: 1 1 250px; }
 .pnav-title { margin-top: 5px; }
 .pnav-title .t {
   font-family:var(--font-heading);
@@ -88,7 +90,11 @@ a.crumb:hover { color: var(--text); text-decoration: none; }
   font-size: 12px; color: var(--text-3);
   margin-top: 3px;
 }
-.spacer { flex: 1; }
+.acts:empty { display: none; }
 .acts { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 @media (max-width: 720px) { .acts { flex-basis: 100%; } .pnav { align-items: flex-start; } }
+.crumbs :deep(.back-button) { width:23px; height:23px; min-height:23px; background:transparent; border:0; color:var(--text-3); }
+.pnav-title { margin-top:8px; padding-inline-start:12px; border-inline-start:3px solid var(--brand); }
+.pnav .pnav-title .t { font-size:clamp(22px,2vw,29px); line-height:1.18; font-weight:700; }
+.pnav-title .s { margin-top:5px; }
 </style>

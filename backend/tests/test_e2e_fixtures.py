@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import func, select
 
+from app.api.diagnostics import get_packet
 from app.models.entities import (
     AnalysisTask, BusinessSession, CaptureFile, DiagnosticEvent, MediaMetric, MediaStream,
     PacketIndex, SipDialog, SipMessage, TaskStatus,
@@ -105,6 +106,14 @@ def test_udp_basic_end_to_end(db, tmp_path):
         DiagnosticEvent.task_id == task.id, DiagnosticEvent.rule_id == 'SDP-003'))
     assert mismatch.related_packet_ids == [invite.packet_id, answer.packet_id]
 
+    packet = db.scalar(select(PacketIndex).where(
+        PacketIndex.task_id == task.id, PacketIndex.packet_number == 1))
+    packet_detail = get_packet(packet.id, db)
+    ip_source = next(field for layer in packet_detail.layers for field in layer['fields']
+                     if field['name'] == 'Source Address' and field['value'] == '192.168.1.10')
+    assert ip_source['offset'] == 26 and ip_source['size'] == 4
+    assert bytes.fromhex(packet_detail.raw_hex)[26:30] == bytes([192, 168, 1, 10])
+
     # 分析本身不应动源文件（保留策略在 conftest 里已关掉）
     assert dst.exists()
 
@@ -147,6 +156,33 @@ def test_tcp_rfc4571_end_to_end(db, tmp_path):
     assert st.transport == 'TCP'
     assert st.packet_count >= 100
     assert st.seq_gap_count == 0
+
+
+def test_rtcp_sr_rr_end_to_end(db, tmp_path):
+    """真实 SR/RR 解析：RTT、对端丢包、抖动、两端时钟差都要落到媒体流上
+
+    样本刻意把 SR→RR 间隔和 DLSR 配好：RTT 应恰好 40ms；
+    抓包机墙钟比 SR 的 NTP 快 1 秒，时钟差应为 1.0s。
+    """
+    task, _dst = _make_task(db, tmp_path, 'rtcp-sr-rr.pcap')
+    analyzer.run_analysis(db, task.id)
+
+    db.expire_all()
+    t = db.get(AnalysisTask, task.id)
+    assert t.status == TaskStatus.COMPLETED, t.error_message
+
+    st = db.scalar(select(MediaStream).where(MediaStream.task_id == task.id))
+    assert st is not None
+    rtcp = (st.extra or {}).get('rtcp')
+    assert rtcp is not None, 'RTCP 汇总没有挂到媒体流上'
+    assert rtcp['sr_count'] == 1
+    assert rtcp['report_count'] == 1
+    assert rtcp['fraction_lost_latest'] == 25.0
+    assert rtcp['cumulative_lost_latest'] == 25
+    assert rtcp['rtt_ms_latest'] == pytest.approx(40.0, abs=0.01)
+    assert rtcp['sr_clock_offset_seconds'] == pytest.approx(1.0, abs=0.001)
+    # 1800 / 90000 * 1000 = 20.0ms
+    assert rtcp['peer_jitter_ms'] == pytest.approx(20.0, abs=0.01)
 
 
 def test_tcp_sip_ports_and_empty_packets(db, tmp_path):

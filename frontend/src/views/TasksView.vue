@@ -6,6 +6,7 @@ import PageNav from '../components/PageNav.vue'
 import InterfaceState from '../components/InterfaceState.vue'
 import { feedback } from '../stores/interface'
 import { useTaskStore } from '../stores/task'
+import { clearTask } from '../utils/taskCache'
 
 const router = useRouter()
 const route = useRoute()
@@ -87,6 +88,7 @@ async function openTask(t) {
 async function reanalyze(t) {
   try {
     await api.analyze(t.id)
+    clearTask(t.id)          // 旧版本结果不会再被命中，直接释放
     feedback('confirm')
     await load()
   } catch (e) { feedback('error'); err.value = e.message }
@@ -96,6 +98,7 @@ async function removeTask(t) {
   if (!confirm(`确定删除任务「${t.name}」？文件与分析结果都会删除。`)) return
   try {
     await api.deleteTask(t.id)
+    clearTask(t.id)
     if (store.currentTaskId === t.id) store.setCurrent(null)
     await load()
   } catch (e) { err.value = e.message }
@@ -164,6 +167,7 @@ onMounted(loadStorage)
             视频 {{ storage.usage.rebuilt_mb }} MB ·
             数据库 {{ storage.usage.db_mb }} MB
           </div>
+          <meter v-if="storage.policy.disk_budget_mb > 0" class="storage-meter" min="0" :max="storage.policy.disk_budget_mb" :value="storage.usage.total_mb" aria-label="存储预算使用量"></meter>
           <div class="sc-policy">
             保留最近 <b>{{ storage.policy.keep_tasks }}</b> 个任务 ·
             <b>{{ storage.policy.keep_days }}</b> 天 ·
@@ -292,4 +296,10 @@ onMounted(loadStorage)
   border-radius: var(--radius); padding: 12px 14px; font-size: 13px;
   color: var(--critical); margin-bottom: 14px;
 }
+ .task-list .tbl th { position:sticky; top:0; z-index:1; }
+.task-list .tbl td { height:36px; }
+.task-list .tbl th { white-space:nowrap; }
+.storage-meter { display:block; width:min(300px,100%); height:9px; margin:6px 0; }
+.storage-meter::-webkit-meter-bar { background:var(--line); border:0; }
+.storage-meter::-webkit-meter-optimum-value { background:var(--brand); border-radius:6px; }
 </style>

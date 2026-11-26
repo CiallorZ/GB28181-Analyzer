@@ -218,6 +218,15 @@ onUnmounted(() => {
           </div>
         </div>
         <div class="kpi">
+          <div class="kpi-label">首关键帧（估算）</div>
+          <div class="kpi-value" :class="session.first_keyframe_latency == null ? 'na' : ''"
+               title="按首个关键帧在流内的偏移估算，不是播放器实际显示时间">
+            {{ session.first_keyframe_latency != null
+              ? fmt(session.first_keyframe_latency, 3) : '无法计算' }}
+            <span v-if="session.first_keyframe_latency != null" class="kpi-unit">s</span>
+          </div>
+        </div>
+        <div class="kpi">
           <div class="kpi-label">结束原因</div>
           <div class="kpi-value" style="font-size:14px" :class="session.end_reason === 'normal' ? 'ok' : 'warning'">
             {{ { normal: '正常', abnormal: '异常', capture_ended: '抓包结束', unknown: '未知' }[session.end_reason] }}
@@ -305,7 +314,7 @@ onUnmounted(() => {
           <input v-model="filterCallId" class="mini-input" placeholder="Call-ID 过滤" />
           <button class="btn-mini" @click="downloadSvg">导出 SVG</button>
         </div>
-        <div class="card-body timeline-body">
+        <div v-panel-change="filterMethod" class="card-body timeline-body">
           <SipLadder ref="ladder" :messages="filteredSip" @select="selectMsg" />
         </div>
       </div>
@@ -577,4 +586,6 @@ onUnmounted(() => {
   padding: 14px 16px; font-size: 13px; color: var(--critical);
   margin-bottom: 16px;
 }
+ .sdp-block { background:var(--surface-2); border:1px solid var(--line); border-radius:var(--radius); padding:var(--space-3); }
+.sdp-grid b { overflow-wrap:anywhere; }
 </style>

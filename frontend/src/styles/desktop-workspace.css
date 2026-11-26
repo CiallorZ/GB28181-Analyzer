@@ -1,0 +1,94 @@
+body { background: var(--bg); }
+.route-surface > .page,
+.route-surface > .packets-page {
+  padding-inline: clamp(12px, 2vw, 28px);
+}
+.main .page h1 { font-size: 24px; line-height: 32px; font-weight: 600; }
+.main .sec { border-radius: var(--radius); }
+.main .tbl { font-size: 13px; font-variant-numeric: tabular-nums; }
+.main .tbl th { background: var(--surface-2); }
+.main .tbl tbody tr:nth-child(even):not(.active):not(.selected):not(:hover) {
+  background-color: var(--bg-table-stripe);
+}
+.main input:not([type="checkbox"], [type="radio"], [type="range"]),
+.main select,
+.main textarea { border-radius: var(--radius-sm); }
+/* Keep toolbars compact while giving primary and icon actions a stable target. */
+.btn { min-height: var(--control-height); }
+.btn.sm, .btn-mini { min-height: var(--control-height-sm); }
+.btn.xs { min-height: 24px; }
+.btn.lg { min-height: 40px; }
+.btn.icon { aspect-ratio: 1; }
+:is(.btn, .btn-mini, .ai-focus, .consult-action, .nav-setting):focus-visible,
+:where(a, button, input, textarea, select, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+@media (pointer: coarse) {
+  .btn:not(.xs), .btn-mini { min-height: 36px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .app :is(.btn,.upload-button,.sample-button,.banner-ai,.ai-focus,.nav-setting) {
+    transition: translate 140ms var(--ease), box-shadow 160ms var(--ease), background-color 160ms var(--ease), border-color 160ms var(--ease);
+  }
+  @media (hover:hover) {
+    .app :is(.btn,.upload-button,.sample-button,.banner-ai,.ai-focus):enabled:hover {
+      translate:0 -1px; box-shadow:0 3px 9px rgb(0 0 0 / 14%);
+    }
+  }
+  .app :is(.btn,.upload-button,.sample-button,.banner-ai,.ai-focus):enabled:active {
+    translate:0 1px; box-shadow:none;
+  }
+}
+
+/* The content canvas, instrument panels and reading surfaces share one elevation scale. */
+.app .main { background:radial-gradient(ellipse 75% 350px at 95% 0,var(--canvas-glow),transparent),var(--bg); }
+.route-surface :is(.card,.sec,.instrument,.pane,.panel,.storage-card) { border-radius:var(--radius); box-shadow:var(--panel-shadow); }
+.route-surface :is(.card-head,.pane-head,.sec-head,.side-head,.instrument > header) {
+  background:linear-gradient(105deg,var(--surface-2),var(--surface)); font-weight:650;
+}
+.route-surface :is(.kpi,.diagnostic-overview > div) { border-radius:var(--radius); box-shadow:var(--panel-shadow); }
+.route-surface :is(.kpi-value,.diagnostic-overview b) { font-variant-numeric:tabular-nums; letter-spacing:-.035em; }
+.route-surface :is(.tbl,.pkt-tbl) th { font-size:12px; color:var(--text-2); font-weight:650; }
+.route-surface :is(.tbl,.pkt-tbl) td { border-bottom-color:color-mix(in srgb,var(--line) 75%,transparent); }
+.route-surface :is(.pkt-tbl tr.active,.tbl tr.selected) > td:first-child { box-shadow:inset 3px 0 var(--brand); }
+@media(prefers-reduced-motion:no-preference) {
+  .route-surface :is(.tbl,.pkt-tbl) tr,.route-surface :is(.sess,.settings-tab,.spy-btn) { transition:background-color 120ms ease,color 120ms ease; }
+  .route-surface .plot polyline { stroke-dasharray:1; stroke-dashoffset:0; animation:volume-trace 420ms var(--ease-out) backwards; }
+  @keyframes volume-trace { from {stroke-dashoffset:1} to {stroke-dashoffset:0} }
+}
+
+/* Project-owned Swiss preset, using the same semantic roles as goodui blocks. */
+:root[data-material="swiss"] {
+  --font-sans:"goodui Sans",var(--font-cjk);
+  --font-heading:"goodui Display",var(--font-cjk);
+  --radius-xs:4px; --radius-sm:6px; --radius:9px; --radius-lg:12px; --radius-xl:16px;
+  --primary:var(--brand); --primary-foreground:white;
+  --card:var(--surface); --card-foreground:var(--text);
+  --muted:var(--surface-2); --muted-foreground:var(--text-3);
+  --panel-shadow:0 1px 2px color-mix(in srgb,var(--text) 5%,transparent);
+}
+:root[data-material="swiss"] .app .main { background:var(--bg); }
+:root[data-material="swiss"] .sidebar { background:var(--surface); }
+:root[data-material="swiss"] :is(.card,.sec,.panel,.pane,.instrument,.ai-drawer) { color:var(--card-foreground); }
+:root[data-material="swiss"] .route-surface :is(.card-head,.pane-head,.sec-head,.instrument > header) {
+  background:var(--card); border-bottom:1px solid var(--line); font-family:var(--font-heading); font-weight:650;
+}
+:root[data-material="swiss"] .route-surface :is(.tbl,.pkt-tbl) th { background:var(--muted); color:var(--muted-foreground); }
+:root[data-material="swiss"] :is(.btn.primary,.ai-run .btn.primary,.pv-acts .btn.primary) {
+  background:var(--primary); border-color:var(--primary); color:var(--primary-foreground); box-shadow:inset 0 1px rgb(255 255 255 / 12%);
+}
+:root[data-material="swiss"] .btn.primary:enabled:hover { background:var(--brand-hover); }
+:root[data-material="swiss"] .pnav-title { border:0; padding:0; }
+:root[data-material="swiss"] .pnav-title .t { font-family:var(--font-heading); letter-spacing:-.035em; }
+:root[data-material="swiss"] .capture-home .mast { background:var(--card); border:1px solid var(--line); border-top:3px solid var(--primary); }
+:root[data-material="swiss"] .capture-home .mast::before { background-size:auto 110%; }
+:root[data-material="swiss"] .metric-card { background:var(--muted); }
+:root[data-material="swiss"] .metric-card header svg { box-sizing:content-box; padding:5px; background:var(--card); border:1px solid var(--line); border-radius:6px; }
+:root[data-material="swiss"] .badge { font-weight:600; border-radius:5px; }
+:root[data-material="swiss"] .ai-head { background:var(--card); border-top:3px solid var(--primary); }
+:root[data-material="swiss"] .ai-steps { background:var(--muted); }

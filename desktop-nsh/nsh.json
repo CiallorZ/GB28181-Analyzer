@@ -1,0 +1,19 @@
+{
+  "name": "GB28181 Analyzer",
+  "id": "dev.gb28181.analyzer",
+  "version": "1.4.0",
+  "build": 1,
+  "capabilities": {
+    "windows": true,
+    "application": true,
+    "webview": {
+      "hosts": [],
+      "runtimeOrigin": true
+    },
+    "process": {
+      "env": [
+        "GB28181_ENGINE_PORT"
+      ]
+    }
+  }
+}

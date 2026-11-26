@@ -7,10 +7,11 @@
 
 export const AI_STEPS = ['选择专家', '确认发送', '研判报告']
 
-export function resolvePhase({ view, report, previewOpen }) {
+export function resolvePhase({ view, report, previewOpen, running }) {
   if (view === 'config') return 'config'
-  if (report) return 'result'
+  if (running) return 'result'
   if (previewOpen) return 'preview'
+  if (report) return 'result'
   return 'choose'
 }
 

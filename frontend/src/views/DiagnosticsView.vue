@@ -2,6 +2,8 @@
 import { ref, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api/client'
+import AiFocusButton from '../components/AiFocusButton.vue'
+import MetricCard from '../components/MetricCard.vue'
 import PageNav from '../components/PageNav.vue'
 import { useTaskStore } from '../stores/task'
 
@@ -78,6 +80,7 @@ const groups = computed(() => {
   return result
 })
 
+const highlighted = computed(() => sorted.value[0])
 const firstRule = computed(() => groups.value.keys().next().value ?? null)
 
 function topSeverity(events) {
@@ -100,10 +103,11 @@ watch([() => store.currentTaskId, sevFilter, ruleFilter], () => load(), { immedi
 <template>
   <div class="page">
     <PageNav
-      title="智能故障诊断"
+      title="分析结论"
       :sub="`任务 #${store.currentTaskId || '未选择'} · ${loading && !page ? '正在读取诊断' : err && !page ? '诊断读取失败' : `共 ${total} 条诊断`}`"
-      :crumbs="[{label:'工作台', to:'/'}, {label:'智能故障诊断'}]">
+      :crumbs="[{label:'工作台', to:'/'}, {label:'分析结论'}]">
       <template #actions>
+        <AiFocusButton focus="field" label="DeepSeek · 生成排障步骤" />
         <select aria-label="诊断等级" v-model="sevFilter" class="inp sm">
           <option value="">全部等级</option>
           <option value="critical">严重</option>
@@ -118,6 +122,12 @@ watch([() => store.currentTaskId, sevFilter, ruleFilter], () => load(), { immedi
       </template>
     </PageNav>
 
+    <section v-if="store.task?.status === 'completed'" class="diagnostic-overview" aria-label="任务汇总">
+      <MetricCard label="报文数" icon="file" :value="store.task.summary?.packet_count" />
+      <MetricCard label="业务会话" icon="signal" :value="store.task.summary?.session_count" />
+      <MetricCard label="媒体流" icon="wave" :value="store.task.summary?.total_streams" />
+      <MetricCard label="诊断事件" icon="warning" :value="ruleStats?.total" />
+    </section>
     <div v-if="err" class="err-box" role="alert">{{ err }} <button class="btn" @click="load(page > 0)">重试</button></div>
 
     <div v-if="!store.currentTaskId" class="card">
@@ -128,6 +138,11 @@ watch([() => store.currentTaskId, sevFilter, ruleFilter], () => load(), { immedi
     </div>
 
     <template v-else>
+      <section v-if="highlighted" v-panel-change="highlighted.id" class="finding" :class="highlighted.severity">
+        <div><span>{{ severityLabel[highlighted.severity] }} · 当前结果优先排查</span><h2>{{ highlighted.title }}</h2><p>{{ highlighted.description }}</p></div>
+        <button v-if="highlighted.related_packet_ids?.length" class="btn" @click="goPacket(store.currentTaskId, highlighted.related_packet_ids[0])">查看报文 #{{ highlighted.related_packet_ids[0] }}</button>
+      </section>
+      <div class="findings-layout">
       <!-- 规则命中统计 -->
       <div v-if="ruleStats && ruleStats.total" class="card mb-16">
         <div class="card-head">规则命中统计</div>
@@ -210,6 +225,14 @@ watch([() => store.currentTaskId, sevFilter, ruleFilter], () => load(), { immedi
           </div>
         </details>
       </div>
+      <aside v-if="highlighted" class="reason-panel card">
+        <div class="card-head">根因分析</div><div class="card-body">
+          <strong>{{ EV_LABEL[highlighted.evidence_level] || '待核实' }} · {{ highlighted.rule_id }}</strong>
+          <h3>可能原因</h3><ul v-if="highlighted.possible_causes?.length"><li v-for="cause in highlighted.possible_causes" :key="cause">{{ cause }}</li></ul><p v-else>该规则未提供原因说明。</p>
+          <h3>处置建议</h3><ul v-if="highlighted.recommendations?.length"><li v-for="action in highlighted.recommendations" :key="action">{{ action }}</li></ul><p v-else>请结合关联报文核实。</p>
+        </div>
+      </aside>
+      </div>
       <div v-if="loading" class="empty" role="status">正在读取诊断…</div>
       <button v-else-if="!err && items.length < total" type="button" class="btn" @click="load(true)">
         加载更多（{{ items.length }} / {{ total }}）
@@ -225,6 +248,16 @@ watch([() => store.currentTaskId, sevFilter, ruleFilter], () => load(), { immedi
 </template>
 
 <style scoped>
+.finding { --tone:var(--info); display:flex; align-items:center; justify-content:space-between; gap:15px; flex-wrap:wrap; padding:16px; margin-bottom:14px; border-radius:var(--radius); border:1px solid color-mix(in srgb,var(--tone) 30%,var(--line)); border-left:3px solid var(--tone); background:color-mix(in srgb,var(--tone) 8%,var(--surface)); }
+.finding.critical { --tone:var(--critical); }.finding.warning { --tone:var(--warning); }
+.finding span { color:var(--tone); font-size:12px; font-weight:600; }
+.finding h2 { font-size:17px; margin:4px 0; }.finding p,.reason-panel { color:var(--text-2); font-size:13px; }
+.findings-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(210px,28%); gap:12px; align-items:start; }
+.findings-layout > .mb-16 { grid-column:1 / -1; margin-bottom:0; }
+.reason-panel h3 { font-size:13px; margin:14px 0 5px; color:var(--text); }
+.reason-panel ul { padding-left:16px; list-style:disc; }.reason-panel li { margin:5px 0; }
+@media(max-width:980px){.findings-layout{grid-template-columns:1fr}}
+
 .stat-grid {
   display: flex; flex-wrap: wrap;
   gap: 0 22px;
@@ -314,4 +347,5 @@ watch([() => store.currentTaskId, sevFilter, ruleFilter], () => load(), { immedi
   border-radius: 0; padding: 10px 12px; font-size: 12.5px;
   color: var(--critical); margin-bottom: 14px;
 }
+.diagnostic-overview { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:var(--space-3); margin-bottom:var(--space-4); }
 </style>

@@ -90,34 +90,27 @@ def _environment_candidates(name: str) -> list[tuple[str, str]]:
     return out
 
 
+def _resolve_tool(name: str, configured: str | None) -> tuple[str | None, str]:
+    manual = _valid_file(configured)
+    if manual:
+        return manual, 'manual'
+    for path, source in _environment_candidates(name):
+        if Path(path).is_file():
+            return path, source
+    found = shutil.which(name)
+    if found:
+        return found, 'path'
+    for path in CANDIDATES[name]:
+        if Path(path).is_file():
+            return path, 'auto'
+    return None, 'missing'
+
+
 def find_tool(name: str) -> str | None:
     if name not in TOOL_NAMES:
         return None
-    configured = _valid_file(load_config().get(name))
-    if configured:
-        return configured
-    for path, _source in _environment_candidates(name):
-        if Path(path).is_file():
-            return path
-    found = shutil.which(name)
-    if found:
-        return found
-    for path in CANDIDATES[name]:
-        if Path(path).is_file():
-            return path
-    return None
-
-
-def tool_source(name: str, path: str | None) -> str:
-    if not path:
-        return 'missing'
-    if path == _valid_file(load_config().get(name)):
-        return 'manual'
-    if any(path == candidate for candidate, _source in _environment_candidates(name)):
-        return 'environment'
-    if path == shutil.which(name):
-        return 'path'
-    return 'auto'
+    path, _ = _resolve_tool(name, load_config().get(name))
+    return path
 
 
 PROBE_ARGS = {
@@ -160,15 +153,15 @@ def status() -> dict:
     configured = load_config()
     tools = {}
     for name in TOOL_NAMES:
-        path = find_tool(name)
         configured_path = configured.get(name)
+        path, source = _resolve_tool(name, configured_path)
         tools[name] = {
             'path': path,
-            'source': tool_source(name, path),
+            'source': source,
             'available': bool(path),
             'configured': configured_path,
             'configured_missing': bool(
-                configured_path and not _valid_file(configured_path)
+                configured_path and source != 'manual'
             ),
         }
     return {'config_path': str(CONFIG_PATH), 'tools': tools}

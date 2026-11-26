@@ -12,7 +12,7 @@ def test_tcp_segments_split_by_direction(monkeypatch):
         ['1', '3002', '1.300', '10.0.0.2', '40000', '10.0.0.1', '5060', '0011'],
     ]
     monkeypatch.setattr(capture, 'TSHARK', '/bin/true')
-    monkeypatch.setattr(capture, 'extract_fields', lambda *a, **k: rows)
+    monkeypatch.setattr(capture, 'iter_fields', lambda *a, **k: iter(rows))
 
     out = capture.dump_tcp_segments('ignored.pcap')
 
@@ -35,6 +35,6 @@ def test_tcp_segments_skips_empty_and_bad_rows(monkeypatch):
         ['2', '3', '0.2', 'a', '1', 'b', '2', 'zz'],
     ]
     monkeypatch.setattr(capture, 'TSHARK', '/bin/true')
-    monkeypatch.setattr(capture, 'extract_fields', lambda *a, **k: rows)
+    monkeypatch.setattr(capture, 'iter_fields', lambda *a, **k: iter(rows))
 
     assert capture.dump_tcp_segments('ignored.pcap') == {}

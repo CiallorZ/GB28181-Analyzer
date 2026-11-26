@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 import os
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, insert, select, update
 from sqlalchemy.orm import Session
 
 from ..core import analysis_control
@@ -33,10 +33,20 @@ from ..models.entities import (
     MediaStream, PacketIndex, SipDialog, SipMessage, TaskStatus,
     BusinessSession, Device,
 )
-from ..parsers import capture, rtp_analyzer, session_builder, sip_parser
+from ..parsers import (capture, rtcp_analyzer, rtp_analyzer, session_builder,
+                       sip_parser)
 from . import diagnosis as diag_engine
 
 log = logging.getLogger('gb28181.analyzer')
+
+# 少于这个包数的流仍然入库（媒体存在性是事实），但不尝试重建预览：
+# 1-4 个包通常构不成可解码画面，失败只会制造 MED-008 噪声。
+MIN_REBUILD_PACKETS = 5
+
+
+def should_rebuild(pkts) -> bool:
+    """短流仍记录媒体存在性，但不值得启动 FFmpeg 重建。"""
+    return len(pkts) >= MIN_REBUILD_PACKETS
 
 
 def _update_active(db, task_id, **values):
@@ -160,7 +170,8 @@ def _run(db: Session, task: AnalysisTask):
     # ---------------- 1. 文件信息 ----------------
     _set_progress(db, task, '读取文件信息', 5)
     cf = files[0]
-    info = capture.inspect_file(cf.stored_path)
+    task_id, file_id, path = task.id, cf.id, cf.stored_path
+    info = capture.inspect_file(path)
     cf.file_format = info.file_format
     cf.checksum = info.checksum or cf.checksum
     cf.packet_count = info.packet_count
@@ -174,8 +185,6 @@ def _run(db: Session, task: AnalysisTask):
     cf.warnings = info.warnings
     db.commit()
 
-    path = cf.stored_path
-
     # ---------------- 2. 报文索引 ----------------
     _set_progress(db, task, '建立报文索引', 15)
     # 只保留聚合量。之前把所有报文 dict 攒在列表里，百万级抓包时
@@ -184,41 +193,48 @@ def _run(db: Session, task: AnalysisTask):
     endpoints: dict = {}
     ip_addresses = set()
     transport_counts = {'TCP': 0, 'UDP': 0}
+    sip_rows: list = []      # 同一次扫描顺带取到的 SIP 字段，交给第 3 步解析
     batch = []
-    for p in capture.iter_packets(path):
+    for p in capture.iter_packets(path, include_sip=True):
         stats['count'] += 1
-        for address in (p.get('src_ip'), p.get('dst_ip')):
+        sip = p.pop('sip', None)
+        if sip:
+            sip_rows.append(sip)
+        src_ip, dst_ip, transport = p['src_ip'], p['dst_ip'], p['transport']
+        for address in (src_ip, dst_ip):
             if address:
                 ip_addresses.add(address)
-        if p.get('transport') in transport_counts:
-            transport_counts[p['transport']] += 1
+        if transport in transport_counts:
+            transport_counts[transport] += 1
         ts = p.get('ts')
         if ts is not None:
             stats['first_ts'] = ts if stats['first_ts'] is None else min(stats['first_ts'], ts)
             stats['last_ts'] = ts if stats['last_ts'] is None else max(stats['last_ts'], ts)
         if not stats['has_rtp'] and 'rtp' in (p.get('protocols') or '').lower():
             stats['has_rtp'] = True
-        key = (p['src_ip'], p['src_port'])
-        ep = endpoints.setdefault(key, {'ip': p['src_ip'], 'port': p['src_port'],
-                                        'count': 0, 'bytes': 0})
+        key = (src_ip, p['src_port'])
+        ep = endpoints.get(key)
+        if ep is None:
+            ep = endpoints[key] = {'ip': src_ip, 'port': p['src_port'], 'count': 0, 'bytes': 0}
         ep['count'] += 1
         ep['bytes'] += p['length']
 
-        batch.append(PacketIndex(
-            task_id=task.id, file_id=cf.id,
-            packet_number=p['number'], timestamp=p['ts'],
-            source_ip=p['src_ip'], destination_ip=p['dst_ip'],
-            source_port=p['src_port'], destination_port=p['dst_port'],
-            transport=p['transport'], protocol=_top_protocol(p['protocols']),
-            length=p['length'], summary=_packet_summary(p),
-        ))
+        batch.append({
+            'task_id': task_id, 'file_id': file_id,
+            'packet_number': p['number'], 'timestamp': p['ts'],
+            'source_ip': src_ip, 'destination_ip': dst_ip,
+            'source_port': p['src_port'], 'destination_port': p['dst_port'],
+            'transport': transport, 'protocol': _top_protocol(p['protocols']),
+            'length': p['length'], 'summary': _packet_summary(p),
+        })
         if len(batch) >= 2000:
             analysis_control.checkpoint()
-            db.bulk_save_objects(batch)
+            db.execute(insert(PacketIndex), batch)
             db.commit()
             batch.clear()
     if batch:
-        db.bulk_save_objects(batch)
+        analysis_control.checkpoint()
+        db.execute(insert(PacketIndex), batch)
         db.commit()
 
     # 端点入库
@@ -245,7 +261,7 @@ def _run(db: Session, task: AnalysisTask):
 
     # ---------------- 3. SIP 消息 ----------------
     _set_progress(db, task, '解析 SIP 信令', 30)
-    sip_msgs = _load_sip(db, task, path)
+    sip_msgs = _load_sip(db, task, path, rows_raw=sip_rows)
 
     # ---------------- 4. 会话重建 ----------------
     _set_progress(db, task, '重建点播会话', 45)
@@ -364,6 +380,7 @@ def _run(db: Session, task: AnalysisTask):
                      'start_time': r.start_time, 'end_time': r.end_time,
                      'has_video': r.has_video, 'frame_count': r.frame_count,
                      'transport': r.transport, 'src_ip': r.source_ip,
+                     'keyframe_offset': _keyframe_offset(r),
                      'link_mode': None}
                     for r in streams_raw]
     session_builder.link_media(sessions, stream_dicts)
@@ -379,6 +396,7 @@ def _run(db: Session, task: AnalysisTask):
         row.media_status = s.media_status
         row.first_media_latency = s.first_media_latency
         row.signal_to_first_media = s.signal_to_first_media
+        row.first_keyframe_latency = s.first_keyframe_latency
         row.media_duration = s.media_duration
         row.media_stream_count = len(s.media_stream_keys)
 
@@ -454,18 +472,24 @@ def _run(db: Session, task: AnalysisTask):
 # ===============================================================
 # 子步骤
 # ===============================================================
-def _load_sip(db: Session, task: AnalysisTask, path: str) -> list[dict]:
-    """抽取并解析所有 SIP 消息，返回 [{info, row}]"""
-    rows_raw = capture.extract_fields(path, [
-        'frame.number', 'frame.time_relative',
-        # SIP 既可能走 UDP 5060，也可能走 TCP 5060（国标 2022 很常见），
-        # 只取 udp.* 会让 TCP 信令的端口全为空，端点与会话方向随之残缺。
-        'ip.src', 'udp.srcport', 'tcp.srcport',
-        'ip.dst', 'udp.dstport', 'tcp.dstport',
-        'sip.CSeq', 'sip.Status-Code',
-        'sip.Request-Line', 'sip.Status-Line',
-        'sip.msg_hdr', 'sip.msg_body',
-    ], 'sip || tcp.port==5060')
+def _load_sip(db: Session, task: AnalysisTask, path: str,
+              rows_raw: list | None = None) -> list[dict]:
+    """抽取并解析所有 SIP 消息，返回 [{info, row}]
+
+    rows_raw 由报文索引扫描顺带提供（capture.iter_packets(include_sip=True)），
+    传入时不再单独跑一次 tshark；为 None 时回退到独立扫描，便于单独调用。
+    """
+    if rows_raw is None:
+        rows_raw = capture.extract_fields(path, [
+            'frame.number', 'frame.time_relative',
+            # SIP 既可能走 UDP 5060，也可能走 TCP 5060（国标 2022 很常见），
+            # 只取 udp.* 会让 TCP 信令的端口全为空，端点与会话方向随之残缺。
+            'ip.src', 'udp.srcport', 'tcp.srcport',
+            'ip.dst', 'udp.dstport', 'tcp.dstport',
+            'sip.CSeq', 'sip.Status-Code',
+            'sip.Request-Line', 'sip.Status-Line',
+            'sip.msg_hdr', 'sip.msg_body',
+        ], 'sip || tcp.port==5060')
 
     out = []
     rows = []          # 待批量插入的 ORM 对象
@@ -566,15 +590,23 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
 
     # ---- UDP 承载 ----
     try:
-        udp_pkts = capture.extract_udp_rtp(path)
+        udp_pkts, udp_rtcp = capture.extract_udp_rtp_and_rtcp(path)
     except capture.CaptureError:
-        udp_pkts = []
+        udp_pkts, udp_rtcp = [], []
+
+    rtcp_events = [{'arrival': r['ts'], 'payload': r['payload'],
+                    'source_ip': r.get('src_ip'), 'epoch': r.get('epoch')}
+                   for r in udp_rtcp]
 
     if udp_pkts:
         # 逐包构造 RtpPacket
         parsed = []
         for p in udp_pkts:
             payload = p['payload']
+            # payload_size 指 RTP 载荷（不含 12 字节 RTP 头），与 TCP 路径
+            # 保持一致；size 才是整包长度。载荷被预算截断时只保留了 RTP 头，
+            # 但 payload_size 仍是真实整包长度，减掉头长即为真实载荷长度。
+            total = p.get('payload_size') or len(payload)
             parsed.append(({
                 'src_ip': p['src_ip'], 'src_port': p['src_port'],
                 'dst_ip': p['dst_ip'], 'dst_port': p['dst_port'],
@@ -585,8 +617,10 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
                 payload_type=payload[1] & 0x7f,
                 marker=bool((payload[1] >> 7) & 1),
                 arrival=p['ts'],
-                size=len(payload),
+                size=total,
                 payload=payload[12:],
+                payload_size=max(0, total - 12),
+                payload_truncated=bool(p.get('payload_truncated')),
                 packet_number=p['frame'],
             )))
 
@@ -598,7 +632,7 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
 
         for key, items in groups.items():
             pkts = [p for _m, p in items]
-            if len(pkts) < 2:
+            if not pkts:
                 continue
             meta = items[0][0]
             st = rtp_analyzer.analyze_stream(pkts, transport='UDP')
@@ -613,20 +647,24 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
         tcp_streams = {}
 
     tcp_limits = []
+    # 预算耗尽后，之后每个 TCP 方向都会被标记 truncated。逐个方向各报一条
+    # 会让诊断列表塞满几乎相同的 CAP-001，把真正有信息量的一条淹没。
+    # 这里合并成一条汇总告警。
+    budget_hit = []
     for sid, entry in tcp_streams.items():
         segs = entry.get('segs') or {}
         meta = entry.get('meta') or {}
+        if entry.get('truncated'):
+            budget_hit.append(meta.get('stream_id') or sid)
         if len(segs) < 3:
             continue
         buf = rtp_analyzer.reassemble_tcp(segs)
         if len(buf) < 100:
             continue
-        got = rtp_analyzer.parse_rfc4571_ex(buf)
+        got = rtp_analyzer.parse_rfc4571_streams(buf)
         if not got:
             continue
-        _offset, pkts, tcp_stats = got
-        if len(pkts) < 3:
-            continue
+        _offset, ssrc_groups, tcp_stats = got
         if tcp_stats.get('truncated'):
             tcp_limits.append({
                 'code': 'tcp_frame_truncated',
@@ -635,31 +673,53 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
                            '该帧未计入媒体统计' % (meta.get('stream_id') or sid),
             })
 
-        # RFC4571 里没有逐包时间，用该方向负载段的到达时间近似：
-        # 按包序号等比分配到 t0..t1 窗口内
-        t0 = meta.get('ts') or 0.0
-        first, last = entry.get('t0'), entry.get('t1')
-        if first is not None and last is not None and len(pkts) > 1 and last > first:
-            for i, p in enumerate(pkts):
-                p.arrival = first + (last - first) * i / (len(pkts) - 1)
-        else:
-            for i, p in enumerate(pkts):
-                p.arrival = t0 + i * 0.001
+        # TCP 连接里交织的 RTCP：按它在缓冲区中的相对位置映射到该方向的
+        # t0..t1 时间窗。只有时间近似，没有逐帧时间戳——用它算出的 RTT
+        # 只能标注为估算值。
+        tcp_first, tcp_last = entry.get('t0'), entry.get('t1')
+        for pos, payload in tcp_stats.get('rtcp') or []:
+            arrival = (tcp_first + (tcp_last - tcp_first) * pos
+                       if tcp_first is not None and tcp_last is not None
+                       else (meta.get('ts') or 0.0))
+            rtcp_events.append({'arrival': arrival, 'payload': payload,
+                                'source_ip': meta.get('src_ip'),
+                                'arrival_estimated': True})
 
-        key = (pkts[0].ssrc, meta.get('src_ip'), meta.get('src_port'),
-               meta.get('dst_ip'), meta.get('dst_port'))
-        st = rtp_analyzer.analyze_stream(pkts, transport='TCP')
-        ps = _run_ps_analysis(pkts, st)
-        tag = 'tcp%d' % len(pending)
-        pending.append((tag, pkts, st, key, 'TCP', meta, ps))
+        # 同一 TCP 连接可能承载多路媒体（共享端口），逐 SSRC 建流。
+        for _ssrc, pkts in ssrc_groups.items():
+            # RFC4571 里没有逐包时间，用该方向负载段的到达时间近似：
+            # 按包序号等比分配到 t0..t1 窗口内
+            t0 = meta.get('ts') or 0.0
+            first, last = entry.get('t0'), entry.get('t1')
+            if first is not None and last is not None and len(pkts) > 1 and last > first:
+                for i, p in enumerate(pkts):
+                    p.arrival = first + (last - first) * i / (len(pkts) - 1)
+            else:
+                for i, p in enumerate(pkts):
+                    p.arrival = t0 + i * 0.001
+
+            key = (pkts[0].ssrc, meta.get('src_ip'), meta.get('src_port'),
+                   meta.get('dst_ip'), meta.get('dst_port'))
+            st = rtp_analyzer.analyze_stream(pkts, transport='TCP')
+            ps = _run_ps_analysis(pkts, st)
+            tag = 'tcp%d' % len(pending)
+            pending.append((tag, pkts, st, key, 'TCP', meta, ps))
 
     # ---- 并行重建所有流（利用多核，显著缩短总耗时）----
+    # RTCP 是独立于 RTP 的接收端证据；解析失败不能影响主链路。
+    try:
+        rtcp_summary = rtcp_analyzer.summarize(rtcp_events)
+    except Exception:
+        log.exception('RTCP 解析失败（不影响 RTP 统计）')
+        rtcp_summary = {}
+
     if pending:
         try:
             from ..services import rebuild as rb_mod
             out_dir = os.path.join(settings.DATA_DIR, 'rebuilt', str(task.id))
             rb_tasks = [(tag, pkts, st.duration)
-                        for tag, pkts, st, _k, _tr, _m, _ps in pending]
+                        for tag, pkts, st, _k, _tr, _m, _ps in pending
+                        if should_rebuild(pkts)]
             workers = settings.REBUILD_WORKERS or max(
                 1, min(4, (os.cpu_count() or 2) // 2))
             rb_map = rb_mod.rebuild_streams_parallel(rb_tasks, out_dir,
@@ -673,10 +733,23 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
         for tag, pkts, st, key, transport, meta, ps in pending:
             analysis_control.checkpoint()
             row = _save_stream(db, task, st, key, transport, meta, ps,
-                               rb_map.get(tag))
+                               rb_map.get(tag),
+                               rtcp=_rtcp_for_stream(rtcp_summary, st, key))
             streams.append(row)
 
     db.commit()
+    if budget_hit:
+        if len(budget_hit) == 1:
+            message = ('TCP 流 %s 的负载超过分析内存预算，仅分析了前一部分数据'
+                       % budget_hit[0])
+        else:
+            message = ('%d 个 TCP 方向的负载超过分析内存预算，仅分析了前一部分'
+                       '数据（%s）' % (len(budget_hit), '、'.join(
+                           str(x) for x in budget_hit[:5])
+                           + (' 等' if len(budget_hit) > 5 else '')))
+        tcp_limits.append({'code': 'tcp_payload_budget', 'level': 'warning',
+                           'message': message})
+
     return streams, tcp_limits
 
 
@@ -687,9 +760,9 @@ def _run_ps_analysis(pkts, st):
     """
     try:
         from ..parsers import ps_parser
-        from .rebuild import sample_timed_payloads
-        pairs, st.ps_sampled = sample_timed_payloads(pkts)
-        payloads = [payload for payload, _arrival in pairs]
+        from .rebuild import sample_timed_packets
+        sampled, st.ps_sampled = sample_timed_packets(pkts)
+        payloads = [p.payload for p in sampled]
         if not payloads:
             return None
         # 快速判断：任一包里出现 PS pack 起始码就认为需要解析
@@ -698,11 +771,13 @@ def _run_ps_analysis(pkts, st):
                        for p in payloads[:20])
         if not looks_ps:
             return None
-        start = pairs[0][1]
-        times = [arrival - start for _payload, arrival in pairs]
+        start = sampled[0].arrival
+        times = [p.arrival - start for p in sampled]
+        rtp_ts = [p.timestamp for p in sampled]
         if st.ps_sampled:
             st.notes.append('编码分析取样自流开头有界窗口（60 秒或 256 MiB）')
-        return ps_parser.analyze_ps(payloads, times)
+        return ps_parser.analyze_ps(payloads, times, rtp_ts,
+                                    clock_rate=st.clock_rate)
     except Exception:
         # PS 分析失败不能影响主流程
         log.exception('PS/ES 分析失败（不影响主流程）')
@@ -760,10 +835,18 @@ def _source_media(ps, rb) -> dict:
 
 
 def _save_stream(db: Session, task: AnalysisTask, st, key, transport,
-                 meta: dict | None = None, ps=None, rb=None) -> MediaStream:
+                 meta: dict | None = None, ps=None, rb=None,
+                 rtcp: dict | None = None) -> MediaStream:
     ssrc, sip_, sport, dip, dport = key
     meta = meta or {}
     source = _source_media(ps, rb)
+
+    if rtcp and rtcp.get('peer_jitter_raw') is not None and st.clock_rate:
+        # RTCP 抖动以 RTP 时间戳单位上报，换算成毫秒便于与本地 RFC3550
+        # 抖动对照。时钟率缺失时保留原始值，不猜。
+        rtcp = {**rtcp,
+                'peer_jitter_ms': round(
+                    rtcp['peer_jitter_raw'] * 1000 / st.clock_rate, 3)}
 
     def _int(v):
         try:
@@ -807,6 +890,7 @@ def _save_stream(db: Session, task: AnalysisTask, st, key, transport,
                'ps_sampled': st.ps_sampled,
                'ts_anomalies': st.ts_anomalies[:10],
                'seq_gap_events': st.seq_gap_events[:50],
+               'rtcp': rtcp,
                'ps': ps.to_dict() if ps else None,
                'rebuild': {
                    'ok': bool(rb and rb.ok),
@@ -883,6 +967,33 @@ def _load_devices(db: Session, task: AnalysisTask, sip_msgs: list[dict]):
     db.commit()
 
 
+def _rtcp_for_stream(rtcp_summary: dict, st, key) -> dict | None:
+    """把 RTCP 汇总挂到对应的媒体流上
+
+    RTCP 只按 SSRC 索引，而 SSRC 由设备自行生成，不同设备完全可能重复。
+    同一 SSRC 出现多个发送方地址时，只有本流的源地址在其中才认领；
+    认不出归属就不挂，避免把别的设备的接收报告算到这条流上。
+    """
+    if st.ssrc is None:
+        return None
+    item = rtcp_summary.get(st.ssrc)
+    if not item:
+        return None
+    sources = item.get('source_ips') or []
+    src_ip = key[1] if key else None
+    if sources and src_ip and src_ip not in sources:
+        return None
+    return item
+
+
+def _keyframe_offset(stream: MediaStream) -> float | None:
+    """首个关键帧相对流起点的秒数（来自 PS/ES 分析，可能为 None）"""
+    ps = (stream.extra or {}).get('ps') or {}
+    video = ps.get('video') or {}
+    value = video.get('first_keyframe_offset')
+    return value if isinstance(value, (int, float)) else None
+
+
 def _session_dict(s, sid) -> dict:
     return {
         'id': sid,
@@ -891,6 +1002,7 @@ def _session_dict(s, sid) -> dict:
         'signal_status': s.signal_status,
         'final_code': s.final_code,
         'media_status': s.media_status,
+        'link_mode': s.link_mode,
         'end_reason': s.end_reason,
         'start_time': s.start_time,
         'end_time': s.end_time,
@@ -902,6 +1014,7 @@ def _session_dict(s, sid) -> dict:
         'subject_packet': s.subject_packet,
         'sdp_ssrc_packet': s.sdp_ssrc_packet,
         'first_media_latency': s.first_media_latency,
+        'first_keyframe_latency': s.first_keyframe_latency,
         'call_ids': s.call_ids,
     }
 
@@ -929,6 +1042,9 @@ def _stream_dict(r: MediaStream) -> dict:
         'source_port': r.source_port, 'destination_port': r.destination_port,
         'source_ip': r.source_ip, 'destination_ip': r.destination_ip,
         'link_mode': (r.extra or {}).get('link_mode'),
+        'rtcp': (r.extra or {}).get('rtcp'),
+        'ps': (r.extra or {}).get('ps'),
+        'ps_sampled': (r.extra or {}).get('ps_sampled'),
     }
 
 
@@ -1010,6 +1126,8 @@ def _build_summary(task, session_rows, streams, diagnostics, stats,
 
     latencies = [s.first_media_latency for s in sessions
                  if s.first_media_latency is not None]
+    keyframe_latencies = [s.first_keyframe_latency for s in sessions
+                          if s.first_keyframe_latency is not None]
     jitters = [r.jitter_avg for r in streams if r.jitter_avg is not None]
 
     sev_count = {'critical': 0, 'warning': 0, 'info': 0, 'unknown': 0}
@@ -1028,6 +1146,9 @@ def _build_summary(task, session_rows, streams, diagnostics, stats,
         'total_streams': len(streams),
         'avg_first_media_latency': (round(sum(latencies) / len(latencies), 3)
                                     if latencies else None),
+        'avg_first_keyframe_latency': (
+            round(sum(keyframe_latencies) / len(keyframe_latencies), 3)
+            if keyframe_latencies else None),
         'avg_jitter_ms': (round(sum(jitters) / len(jitters), 2)
                           if jitters else None),
         'diagnostics': sev_count,

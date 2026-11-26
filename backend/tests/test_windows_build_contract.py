@@ -4,23 +4,19 @@ from pathlib import Path
 def test_windows_build_reports_missing_rust_toolchain():
     script = (Path(__file__).resolve().parents[2] / 'scripts' / 'build-windows.ps1').read_text(encoding='utf-8')
     assert 'Get-Command cargo' in script
-    assert 'Tauri desktop build needs Rust' in script
+    assert 'Native Shell desktop build needs Rust' in script
     assert '--locked' in script
-    main = (Path(__file__).resolve().parents[2] / 'desktop' / 'src' / 'main.rs').read_text(encoding='utf-8')
-    assert 'set_analysis_busy' in main
-    assert 'pick_executable' in main
-    assert 'generate_handler![set_analysis_busy, pick_executable]' in main
+    assert 'gb28181_scan.dll' in script
 
 
 def test_desktop_close_has_bounded_exit():
-    # WebView2 卸载卡住时，关窗必须仍能在有限时间内结束进程
-    main = (Path(__file__).resolve().parents[2] / 'desktop' / 'src' / 'main.rs').read_text(encoding='utf-8')
-    assert 'CloseRequested' in main
-    assert 'std::process::exit(0)' in main
-    assert 'Duration::from_secs(6)' in main
-
-    assert 'CloseRequested' in main
-    assert 'prevent_close' in main
+    root = Path(__file__).resolve().parents[2]
+    main = (root / 'desktop/src/main.rs').read_text(encoding='utf-8')
+    shell = (root / 'desktop-nsh/App.tsx').read_text(encoding='utf-8')
+    assert 'onClosePress={requestClose}' in shell
+    assert 'drop(child.stdin.take())' in main
+    assert 'JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE' in main
+    assert 'child.try_wait()' in main
 
 
 def test_offline_build_includes_dumpcap_and_real_versions():

@@ -71,6 +71,8 @@ RULES = {
     'MED-006': '媒体码率异常下降',
     'MED-007': 'BYE 后仍有媒体传输',
     'MED-008': '抓到 RTP 但无法解码',
+    'MED-009': 'RTCP 报告对端丢包偏高',
+    'MED-010': '关键帧间隔异常',
     'CAP-001': '抓包不完整',
 }
 
@@ -447,6 +449,10 @@ def _check_media(sessions: list, streams: list, by_session: dict) -> list[Diagno
         st_id = st.get('id') or id(st)
 
         # MED-002 序号缺口
+        # RTCP 接收报告是接收端自己统计的丢包，证据强度高于本端按序号
+        # 缺口推断。两者都存在时以 RTCP 为准，并明确写出差异。
+        rtcp = st.get('rtcp') or {}
+        peer_loss = rtcp.get('fraction_lost_latest')
         gap_pkts = st.get('seq_gap_packets') or 0
         total = st.get('packet_count') or 0
         if gap_pkts > 0 and total > 0:
@@ -465,6 +471,21 @@ def _check_media(sessions: list, streams: list, by_session: dict) -> list[Diagno
                         '（占比 %.2f%%，总包 %d）。'
                         % (st.get('ssrc') or 0, st.get('seq_gap_count') or 0,
                            gap_pkts, ratio * 100, total))
+            if peer_loss is not None:
+                peer_avg = rtcp.get('fraction_lost_avg')
+                desc += (' 对端 RTCP 接收报告最近一次区间丢包率为 %.2f%%'
+                         '（累计丢失 %s 包），可作为交叉验证。'
+                         % (peer_loss, rtcp.get('cumulative_lost_latest')))
+                # 只有"最近一次"和"各区间平均"都接近零，才能说对端几乎不丢包。
+                # 单看最近一次会被"最后一个区间恰好没丢"骗过去，从而把持续
+                # 存在的对端丢包误判成抓包点问题。
+                quiet = peer_loss <= 0.01 and (peer_avg is None or peer_avg <= 0.01)
+                if quiet and ev != INSUFFICIENT:
+                    # 对端报告几乎不丢包，本端缺口更可能来自抓包点。
+                    # 只降不升：TCP 流本来就是 INSUFFICIENT，不能因为这条
+                    # 交叉证据反而把等级抬上去。
+                    ev = SUSPECTED
+                    desc += ' 对端报告的丢包接近零，本端缺口更可能来自抓包点而非链路。'
             out.append(Diagnostic(
                 rule_id='MED-002',
                 severity=sev, evidence_level=ev,
@@ -483,6 +504,9 @@ def _check_media(sessions: list, streams: list, by_session: dict) -> list[Diagno
                     'transport': st.get('transport'),
                     'loss_confidence': st.get('loss_confidence'),
                     'first_gaps': (st.get('seq_gap_events') or [])[:5],
+                    'rtcp_fraction_lost': peer_loss,
+                    'rtcp_cumulative_lost': rtcp.get('cumulative_lost_latest'),
+                    'rtcp_rtt_ms': rtcp.get('rtt_ms_latest'),
                 },
                 possible_causes=(['抓包点丢包或抓包缓冲区不足'] if is_tcp else
                                  ['网络丢包', '设备发送抖动', '抓包缓冲区不足']),
@@ -491,20 +515,61 @@ def _check_media(sessions: list, streams: list, by_session: dict) -> list[Diagno
                                  '在发送端与接收端同时抓包对比'],
             ))
 
+        # MED-009 对端 RTCP 报告丢包偏高
+        # 抓包点在本端时，序号缺口只能证明"本端没收到"；对端 RTCP 报告的
+        # 丢包才能区分"链路丢"与"抓包点之后丢"。
+        peer_avg = rtcp.get('fraction_lost_avg')
+        if peer_avg is not None and peer_avg > 1.0 and not gap_pkts:
+            out.append(Diagnostic(
+                rule_id='MED-009',
+                severity=WARNING if peer_avg < 5 else CRITICAL,
+                evidence_level=CONFIRMED,
+                title='对端 RTCP 报告丢包，但本端未见序号缺口',
+                description=('流 SSRC=%08x 的接收端在 RTCP 中报告平均区间丢包率'
+                             ' %.2f%%（共 %d 份报告，累计丢失 %s 包），'
+                             '而本抓包点未观察到序号缺口。'
+                             '丢包很可能发生在抓包点之后的链路或接收端。'
+                             % (st.get('ssrc') or 0, peer_avg,
+                                rtcp.get('report_count') or 0,
+                                rtcp.get('cumulative_lost_latest'))),
+                session_id=sid, stream_id=st_id, device_id=dev,
+                timestamp=st.get('start_time'),
+                evidence={'fraction_lost_avg': peer_avg,
+                          'fraction_lost_latest': rtcp.get('fraction_lost_latest'),
+                          'cumulative_lost': rtcp.get('cumulative_lost_latest'),
+                          'report_count': rtcp.get('report_count'),
+                          'rtt_ms': rtcp.get('rtt_ms_latest'),
+                          'local_gap_packets': gap_pkts},
+                possible_causes=['抓包点之后的下游链路拥塞',
+                                 '接收端处理不过来导致丢包',
+                                 '接收端统计口径包含非本流数据'],
+                recommendations=['在接收端侧补抓包确认丢包位置',
+                                 '核对 RTCP 报告对象 SSRC 是否与媒体流一致',
+                                 '检查下游链路带宽与队列配置'],
+            ))
+
         # MED-003 抖动异常
         j = st.get('jitter_avg')
+        peer_jitter = rtcp.get('peer_jitter_ms')
         if j is not None and j > 50:      # 50ms
+            desc = ('流 SSRC=%08x 平均抖动 %.1fms，峰值 %.1fms，'
+                    '可能影响播放流畅度。'
+                    % (st.get('ssrc') or 0, j, st.get('jitter_max') or 0))
+            if peer_jitter is not None:
+                desc += (' 对端 RTCP 报告的抖动为 %.1fms，%s。'
+                         % (peer_jitter,
+                            '与本端一致' if abs(peer_jitter - j) <= max(5, j * 0.5)
+                            else '与本端差异较大，抖动可能发生在抓包点之后'))
             out.append(Diagnostic(
                 rule_id='MED-003',
                 severity=WARNING if j < 200 else CRITICAL,
                 evidence_level=CONFIRMED,
                 title='RTP 抖动偏高',
-                description=('流 SSRC=%08x 平均抖动 %.1fms，峰值 %.1fms，'
-                             '可能影响播放流畅度。'
-                             % (st.get('ssrc') or 0, j, st.get('jitter_max') or 0)),
+                description=desc,
                 session_id=sid, stream_id=st_id, device_id=dev,
                 timestamp=st.get('start_time'),
-                evidence={'jitter_avg_ms': j, 'jitter_max_ms': st.get('jitter_max')},
+                evidence={'jitter_avg_ms': j, 'jitter_max_ms': st.get('jitter_max'),
+                          'rtcp_jitter_ms': peer_jitter},
                 possible_causes=['网络拥塞', '链路带宽不足', '设备输出不稳定'],
                 recommendations=['检查链路带宽与 QoS 配置',
                                  '观察抖动是否与丢包同时出现'],
@@ -560,8 +625,55 @@ def _check_media(sessions: list, streams: list, by_session: dict) -> list[Diagno
                                      '确认音视频是否共用 SSRC'],
                 ))
 
-        # 仅在实际重建失败时报告；错误也可能来自工具环境或超时。
-        if st.get('rebuild_error'):
+        # MED-010 关键帧间隔异常
+        # 关键帧间隔由 PS/ES 分析与 RTP 时间戳换算得到，只覆盖取样窗口。
+        # 这里的"首帧"是首个可解码帧的近似位置，不是播放器显示时间。
+        ps = st.get('ps') or {}
+        video = ps.get('video') or {}
+        gops = [g for g in (video.get('keyframe_gop_seconds') or [])
+                if isinstance(g, (int, float))]
+        if len(gops) >= 2 and st.get('has_video', True):
+            avg = sum(gops) / len(gops)
+            mx = max(gops)
+            # 用中位数判断"波动"：平均值会被单个长间隔拉高，反而掩盖异常。
+            typical = median(gops)
+            unstable = mx > max(typical * 2, typical + 3)
+            too_long = avg > 10
+            if too_long or unstable:
+                first = video.get('first_keyframe_offset')
+                desc = ('流 SSRC=%08x 的关键帧间隔平均 %.2f 秒，最大 %.2f 秒'
+                        '（共 %d 个间隔，取样窗口内）。'
+                        % (st.get('ssrc') or 0, avg, mx, len(gops)))
+                if too_long:
+                    desc += ' GOP 偏长，点播起播和随机定位会更慢。'
+                if unstable:
+                    desc += ' 间隔波动明显，可能出现解码卡顿。'
+                if first is not None:
+                    desc += ' 首个关键帧约在流起点后 %.2f 秒。' % first
+                out.append(Diagnostic(
+                    rule_id='MED-010',
+                    severity=WARNING,
+                    evidence_level=CONFIRMED,
+                    title='关键帧间隔异常',
+                    description=desc,
+                    session_id=sid, stream_id=st_id, device_id=dev,
+                    timestamp=st.get('start_time'),
+                    evidence={'gop_avg_seconds': round(avg, 3),
+                              'gop_max_seconds': round(mx, 3),
+                              'gop_samples': gops[:20],
+                              'first_keyframe_offset': first,
+                              'sampled': bool(st.get('ps_sampled'))},
+                    possible_causes=['编码器 GOP 配置过长',
+                                     '码率控制策略导致关键帧间隔波动',
+                                     '设备侧动态调整 I 帧间隔'],
+                    recommendations=['核对编码器 GOP / I 帧间隔配置',
+                                     '若关注起播速度，可要求设备缩短 GOP',
+                                     '关键帧时间只覆盖取样窗口，长流需结合完整抓包确认'],
+                ))
+
+        # 仅在实际重建失败且确实观察到视频时报告。
+        # 纯音频/RTCP/非视频载荷没有视频可重建，失败不是"视频无法解码"。
+        if st.get('rebuild_error') and st.get('has_video', True):
             out.append(Diagnostic(
                 rule_id='MED-008',
                 severity=WARNING,

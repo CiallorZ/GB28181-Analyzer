@@ -209,10 +209,10 @@
   align-items:center;
   gap:6px;
   color:var(--text);
-  border-color:color-mix(in srgb,#4D6BFE 46%,var(--line));
-  background:color-mix(in srgb,#4D6BFE 14%,var(--surface));
+  border-color:var(--ds-line);
+  background:var(--ds-soft);
 }
-.finding .finding-ai:hover { border-color:#4D6BFE; }
+.finding .finding-ai:hover { border-color:var(--ds-lt); }
 .finding-ai img { width:16px; height:16px; }
 @media (max-width:600px) {
   .finding { display:grid; grid-template-columns:auto minmax(0,1fr); align-items:start; }
@@ -673,3 +673,13 @@
 .readings strong {
   color: var(--text);
 }
+
+.station .assist .consult-shortcuts { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+.station .assist .consult-shortcuts button {
+  padding:4px 7px;
+  border:1px solid var(--ds-line);
+  border-radius:var(--radius-sm);
+  background:var(--ds-soft);
+  color:var(--ds-lt);
+}
+.station .assist .consult-note { display:block; margin-top:8px; color:var(--text-3); }

@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -103,3 +104,4 @@ if __name__ == '__main__':
         finally:
             from app.core.db import engine
             engine.dispose()
+            logging.shutdown()

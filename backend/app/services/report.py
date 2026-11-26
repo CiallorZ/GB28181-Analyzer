@@ -94,6 +94,8 @@ def build_markdown(task, file, sessions, streams, diagnostics) -> str:
     add('| 异常事件 | %s 严重 · %s 警告 · %s 提示 |'
         % (diag.get('critical', 0), diag.get('warning', 0), diag.get('info', 0)))
     add('| 首媒体包耗时 | %s |' % _sec(summary.get('avg_first_media_latency')))
+    add('| 首关键帧耗时（估算） | %s |'
+        % _sec(summary.get('avg_first_keyframe_latency')))
     add('| RTP 平均抖动 | %s ms |' % _num(summary.get('avg_jitter_ms'), 2))
     add('')
 
@@ -115,16 +117,45 @@ def build_markdown(task, file, sessions, streams, diagnostics) -> str:
     add('## 三、媒体流')
     add('')
     if streams:
-        add('| SSRC | 传输 | 包数 | 码率 | 抖动 | 丢包段 | 编码 | 分辨率 |')
-        add('|---|---|---|---|---|---|---|---|')
+        add('| SSRC | 传输 | 包数 | 码率 | 抖动 | 丢包段 | 对端丢包 | RTT | 编码 | 分辨率 |')
+        add('|---|---|---|---|---|---|---|---|---|---|')
         for st in streams:
             ssrc = '%08x' % st.ssrc if st.ssrc else '—'
             res = ('%d×%d' % (st.width, st.height)
                    if st.width and st.height else '—')
-            add('| %s | %s | %d | %s kbps | %s ms | %d | %s | %s |' % (
+            rtcp = (st.extra or {}).get('rtcp') or {}
+            peer_loss = rtcp.get('fraction_lost_latest')
+            add('| %s | %s | %d | %s kbps | %s ms | %d | %s | %s | %s | %s |' % (
                 ssrc, st.transport, st.packet_count,
                 _num(st.avg_bitrate, 1), _num(st.jitter_avg, 2),
-                st.seq_gap_count, _cell(st.codec), res))
+                st.seq_gap_count,
+                '—' if peer_loss is None else '%.2f%%' % peer_loss,
+                '—' if rtcp.get('rtt_ms_latest') is None
+                else '%.1f ms%s' % (rtcp['rtt_ms_latest'],
+                                    '（估算）' if rtcp.get('rtt_estimated') else ''),
+                _cell(st.codec), res))
+        if any((st.extra or {}).get('rtcp') for st in streams):
+            add('')
+            add('「对端丢包 / RTT」来自 RTCP 接收报告，是本端之外的第二视角；'
+                '抓包中未观察到 RTCP 的流显示为 —，不代表对端没有统计。')
+            if any(((st.extra or {}).get('rtcp') or {}).get('rtt_estimated')
+                   for st in streams):
+                add('')
+                add('标「估算」的 RTT 来自 TCP 承载：TCP 没有逐帧时间戳，'
+                    'SR/RR 的到达时间由时间窗插值得到，只能作为估算值参考。')
+            offsets = [(st, (st.extra or {}).get('rtcp') or {})
+                       for st in streams
+                       if ((st.extra or {}).get('rtcp') or {}
+                           ).get('sr_clock_offset_seconds') is not None]
+            if offsets:
+                add('')
+                add('**两端时钟差**（抓包机墙钟 − SR 中的 NTP，含单向传输时延，'
+                    '不是 RTT）：')
+                add('')
+                for st, rtcp in offsets:
+                    add('- SSRC %s：%.3f s' % (
+                        '%08x' % st.ssrc if st.ssrc else '—',
+                        rtcp['sr_clock_offset_seconds']))
     else:
         add('未识别到 RTP 媒体流。')
     add('')

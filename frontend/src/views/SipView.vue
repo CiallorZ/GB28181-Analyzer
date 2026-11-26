@@ -4,12 +4,15 @@ import { useRouter } from 'vue-router'
 import { api } from '../api/client'
 import { useTaskStore } from '../stores/task'
 import SipLadder from '../components/SipLadder.vue'
+import PaneDivider from '../components/PaneDivider.vue'
+import AiFocusButton from '../components/AiFocusButton.vue'
 import PageNav from '../components/PageNav.vue'
 import { inviteLatency } from '../utils/sipPhases'
 
 const router = useRouter()
 const store = useTaskStore()
 
+const sessionWidth = ref(228)
 const sessions = ref([])
 const sessionTotal = ref(0)
 const sessionPage = ref(0)
@@ -125,6 +128,7 @@ onMounted(loadSessions)
       :sub="`任务 #${store.currentTaskId || '未选择'} · ${sip.length} 条消息 · ${sessionTotal} 个会话`"
       :crumbs="[{label:'工作台', to:'/'}, {label:'SIP 信令分析'}]">
       <template #actions>
+        <AiFocusButton focus="sip" label="DeepSeek · 核对信令" />
         <select v-model="filterMethod" class="inp sm" style="width:132px">
           <option value="">全部方法</option>
           <option v-for="m in methods" :key="m" :value="m">{{ m }}</option>
@@ -143,7 +147,7 @@ onMounted(loadSessions)
       </div>
     </div>
 
-    <div v-else class="layout">
+    <div v-else class="layout" :style="{ '--session-width': sessionWidth + 'px' }">
       <!-- 会话列表 -->
       <aside class="side">
         <div class="side-head">
@@ -177,6 +181,7 @@ onMounted(loadSessions)
         </div>
       </aside>
 
+      <PaneDivider v-model="sessionWidth" class="sip-divider" label="调整会话列表宽度" :min="170" :max="330" />
       <!-- 主区 -->
       <div class="col" style="gap:16px;min-width:0">
         <!-- 阶段条 -->
@@ -225,18 +230,18 @@ onMounted(loadSessions)
         </div>
 
         <!-- 消息详情 -->
-        <div class="sec" v-if="selectedMsg">
+        <div v-panel-change="selectedMsg?.id" class="sec sip-message-panel">
           <div class="sec-head">
             <span class="sec-num"><AppIcon name="file" /></span>
             <span class="sec-title">消息详情</span>
-            <span class="sec-sub">#{{ selectedMsg.packet_id }}</span>
+            <span v-if="selectedMsg" class="sec-sub">#{{ selectedMsg.packet_id }}</span>
             <span class="spacer"></span>
-            <button class="btn-mini" @click="goPacket(selectedMsg.packet_id)">
+            <button v-if="selectedMsg" class="btn-mini" @click="goPacket(selectedMsg.packet_id)">
               查看原始报文 <AppIcon name="forward" />
             </button>
-            <button class="btn-mini" @click="selectedMsg = null">关闭</button>
+            <button v-if="selectedMsg" class="btn-mini" @click="selectedMsg = null">清除选择</button>
           </div>
-          <div class="sec-body">
+          <div v-if="selectedMsg" class="sec-body">
             <div class="msg-grid">
               <div><span>方法 / 响应</span>
                 <b class="mono">{{ selectedMsg.method || selectedMsg.status_code }}</b></div>
@@ -283,6 +288,7 @@ onMounted(loadSessions)
               <pre class="body-pre">{{ selectedMsg.body_preview }}</pre>
             </div>
           </div>
+          <div v-else class="empty">从时序图或消息表选择一条消息。</div>
         </div>
 
         <!-- 消息表 -->
@@ -332,11 +338,15 @@ onMounted(loadSessions)
 <style scoped>
 .layout {
   display: grid;
-  grid-template-columns: 232px 1fr;
-  gap: 16px;
+  grid-template-columns: var(--session-width) 16px minmax(0, 1fr);
+  column-gap: 0;
   align-items: start;
 }
-@media (max-width: 1200px) { .layout { grid-template-columns: 1fr; } }
+.sip-divider { align-self:stretch; }
+@media (max-width: 860px) {
+  .layout { grid-template-columns: 1fr; row-gap:16px; }
+  .sip-divider { display:none; }
+}
 
 .side {
   background: var(--surface);
@@ -472,5 +482,14 @@ onMounted(loadSessions)
   color: var(--text-2); max-height: 280px;
   overflow: auto; white-space: pre-wrap;
   word-break: break-all; line-height: 1.7;
+}
+@media (min-width: 1300px) {
+  .layout > .col { display:grid; grid-template-columns:minmax(0, 1.5fr) minmax(245px, 1fr); align-items:start; }
+  .layout > .col > .sec { grid-column:1; min-width:0; }
+  .layout > .col > .sip-message-panel {
+    grid-column:2; grid-row:1 / span 3;
+    max-height:calc(100dvh - var(--app-header-height) - 170px);
+    overflow:auto;
+  }
 }
 </style>

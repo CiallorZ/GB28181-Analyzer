@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import binascii
 import os
+from xml.etree import ElementTree
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import FiniteFloat
@@ -125,57 +126,71 @@ def get_packet(packet_id: int, db: Session = Depends(get_db)):
     task = db.get(AnalysisTask, row.task_id)
     if task and task.files:
         path = task.files[0].stored_path
-        raw = capture.extract_raw_packet(path, row.packet_number)
+        try:
+            raw = capture.extract_raw_packet(path, row.packet_number)
+        except capture.CaptureError as exc:
+            raise HTTPException(503, f"无法读取报文字节：{exc}。请在系统设置中检查 TShark。") from exc
         if raw:
             detail.raw_hex = binascii.hexlify(raw).decode()
-        layers = _build_layers(path, row.packet_number)
+        layers = _build_layers(path, row.packet_number, raw)
         detail.layers = layers
     return detail
 
 
-def _build_layers(path: str, number: int) -> list[dict]:
-    """用 tshark -V 生成协议树（M12 第二栏）
-
-    注意：只提取关键行，避免返回上万行文本。
-    """
+def _build_layers(path: str, number: int, raw: bytes | None = None) -> list[dict]:
+    """Use TShark's declared positions and verify them against the captured bytes."""
     import subprocess
     if not capture.TSHARK:
         return []
     try:
-        r = subprocess.run(
-            [capture.TSHARK, '-r', path, '-Y', 'frame.number==%d' % number, '-V'],
+        result = subprocess.run(
+            [capture.TSHARK, '-r', path, '-Y', f'frame.number=={number}', '-T', 'pdml'],
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
-            capture_output=True, text=True, errors='replace', timeout=60)
-    except Exception:
+            capture_output=True, timeout=60, check=True)
+        packet = ElementTree.fromstring(result.stdout).find('packet')
+    except (OSError, subprocess.SubprocessError, ElementTree.ParseError):
         return []
-    if r.returncode != 0:
+    if packet is None:
         return []
 
     layers = []
-    cur = None
-    for line in r.stdout.splitlines():
-        if not line.strip():
+    for proto in packet.findall('proto'):
+        if proto.get('name') == 'geninfo':
             continue
-        indent = len(line) - len(line.lstrip())
-        text = line.strip()
-        if indent == 0 and not text.startswith('['):
-            # 新的协议层
-            if cur:
-                layers.append(cur)
-            cur = {'name': text, 'fields': []}
-        elif cur is not None and ':' in text:
-            k, v = text.split(':', 1)
-            cur['fields'].append({
-                'name': k.strip(),
-                'value': v.strip()[:300],
-                'indent': indent,
-            })
-    if cur:
-        layers.append(cur)
-    # 限制规模
-    for L in layers:
-        L['fields'] = L['fields'][:80]
-    return layers[:20]
+        fields = []
+        for node in proto.iter('field'):
+            if node.get('hide') == 'yes':
+                continue
+            label = node.get('showname') or node.get('show') or node.get('name')
+            if not label:
+                continue
+            name, _, value = label.partition(': ')
+            field = {'name': name, 'value': value[:300], 'indent': 2}
+            span = _verified_field_span(node, raw)
+            if span:
+                field['offset'], field['size'] = span
+            fields.append(field)
+            if len(fields) == 80:
+                break
+        layers.append({'name': proto.get('showname') or proto.get('name', ''), 'fields': fields})
+        if len(layers) == 20:
+            break
+    return layers
+
+
+def _verified_field_span(node: ElementTree.Element, raw: bytes | None) -> tuple[int, int] | None:
+    if not raw:
+        return None
+    try:
+        offset = int(node.get('pos', ''))
+        size = int(node.get('size', ''))
+        value = bytes.fromhex(node.get('unmaskedvalue') or node.get('value', ''))
+    except ValueError:
+        return None
+    if offset >= 0 and 0 < size == len(value) and raw[offset:offset + size] == value:
+        return offset, size
+    return None
+
 
 # ---------------------------------------------------------------
 # M08-04 媒体文件服务

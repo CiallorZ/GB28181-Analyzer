@@ -14,6 +14,7 @@ import { chartPalette } from '../utils/chartTheme'
 import { bindChartResize } from '../utils/chartResize'
 import { api } from '../api/client'
 import { useTaskStore } from '../stores/task'
+import { cachedLoad, cacheKey, clearTask, taskRevision } from '../utils/taskCache'
 import VideoPlayer from '../components/VideoPlayer.vue'
 import AiSummarySection from '../components/AiSummarySection.vue'
 import CaptureIntake from '../components/CaptureIntake.vue'
@@ -136,13 +137,20 @@ async function loadAll() {
     if (stale()) return
     task.value = current
     if (current.status !== 'completed') return
+    // 已完成任务的同一版本结果可以直接复用：在 /media、/sip 之间来回
+    // 切换时不必把 6 个接口重取一遍。重新分析会更新 completed_at，
+    // 版本号随之改变，旧缓存自然失效。
+    const rev = taskRevision(current)
+    const key = name => cacheKey(tid, rev, name)
     const [ov, ss, dg, pk, media, stats] = await Promise.all([
-      api.overview(tid),
-      api.sessions(tid, { page_size: 30 }),
-      api.diagnostics(tid, { page_size: 40 }),
-      api.packets(tid, { page_size: 8 }),
-      api.taskMedia(tid),
-      api.taskMediaStats(tid).catch(() => null)
+      cachedLoad(key('overview'), () => api.overview(tid)),
+      cachedLoad(key('sessions'), () => api.sessions(tid, { page_size: 30 })),
+      cachedLoad(key('diagnostics'), () => api.diagnostics(tid, { page_size: 40 })),
+      cachedLoad(key('packets'), () => api.packets(tid, { page_size: 8 })),
+      cachedLoad(key('media'), () => api.taskMedia(tid)),
+      // 统计是可选的：失败时降级为 null，但不要把 null 缓存下来，
+      // 否则一次瞬时失败会让整个任务版本都看不到统计。
+      cachedLoad(key('media-stats'), () => api.taskMediaStats(tid)).catch(() => null)
     ])
     if (stale()) return
     overview.value = ov
@@ -162,7 +170,8 @@ async function loadAll() {
     if (ids.length) {
       metricsPending.value = true
       try {
-        const result = await api.taskMetrics(tid, ids)
+        const result = await cachedLoad(key('metrics:' + ids.join(',')),
+          () => api.taskMetrics(tid, ids))
         if (stale()) return
         metrics.value = Object.fromEntries(result.items.map(item => [item.stream_id, item]))
         renderMediaCharts()
@@ -213,7 +222,7 @@ function renderCharts() {
         }
       },
       data: biz,
-      color: [C.ds, C.info, C.dim, C.ok, '#A371F7', C.warn]
+      color: [C.ds, C.info, C.dim, C.ok, C.ai, C.warn]
     }]
   }))
 
@@ -276,7 +285,7 @@ function renderMediaCharts() {
   if (!streams.value.length) return
   const t = themeColors()
   /* --- 4. 码率趋势 --- */
-  const PALETTE = [C.brand, C.info, C.ok, C.warn, '#9b59f0', C.ds]
+  const PALETTE = [C.brand, C.info, C.ok, C.warn, C.ai, C.ds]
   const trendStreams = streams.value.slice(0, TREND_LIMIT)
   const streamLabel = st => `#${st.id}${st.ssrc == null ? '' : ' · 0x' + st.ssrc.toString(16)}`
   const brSeries = trendStreams.map((st, i) => {
@@ -409,6 +418,9 @@ function startPoll() {
         stopPoll()
         if (task.value.status === 'completed') {
           feedback('success')
+          // 重新分析会更新 completed_at，缓存版本号随之改变；
+          // 这里显式清一次，避免旧版本条目长期占着 LRU 名额。
+          clearTask(tid)
           await loadAll()
         } else if (task.value.status === 'failed') {
           feedback('error')
@@ -454,6 +466,9 @@ async function reanalyze() {
     await api.analyze(tid)
     if (tid !== store.currentTaskId) return
     startFailure.value = null
+    // 重新分析的结果会覆盖旧结果；缓存按 completed_at 分版本，
+    // 但旧版本条目不会再被命中，这里直接清掉避免占位。
+    clearTask(tid)
     const updated = await store.loadTask(tid)
     if (tid !== store.currentTaskId) return
     task.value = updated
@@ -733,7 +748,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
                     stroke-linecap="round"
                     :stroke-dasharray="`${264 * (busyPct || task.progress) / 100} 264`"
                     transform="rotate(-90 50 50)"
-                    style="transition:stroke-dasharray .5s var(--ease)"/>
+                    style="transition:stroke-dasharray var(--dur-lg) var(--ease-out)"/>
           </svg>
           <div class="an-pct">{{ busyPct || task.progress }}<span>%</span></div>
         </div>
@@ -1163,6 +1178,25 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
                   <div><i>缺口</i><b :class="st.seq_gap_packets ? 'text-critical' : ''">
                     {{ st.seq_gap_packets }}</b></div>
                 </div>
+                <div v-if="st.extra?.rtcp" class="sc-rtcp"
+                     title="来自对端 RTCP 接收报告，证据强于本端按序号缺口推断">
+                  <span>对端报告</span>
+                  <b :class="st.extra.rtcp.fraction_lost_latest > 1 ? 'text-warning' : ''">
+                    丢包 {{ st.extra.rtcp.fraction_lost_latest != null
+                      ? fmt(st.extra.rtcp.fraction_lost_latest, 2) + '%' : '—' }}
+                  </b>
+                  <b v-if="st.extra.rtcp.rtt_ms_latest != null"
+                     :title="st.extra.rtcp.rtt_estimated ? 'TCP 承载没有逐帧时间戳，到达时间由时间窗插值，RTT 仅为估算值' : ''">
+                    RTT {{ fmt(st.extra.rtcp.rtt_ms_latest, 1) }}ms{{ st.extra.rtcp.rtt_estimated ? '（估算）' : '' }}
+                  </b>
+                  <b v-if="st.extra.rtcp.peer_jitter_ms != null">
+                    抖动 {{ fmt(st.extra.rtcp.peer_jitter_ms, 1) }}ms
+                  </b>
+                  <b v-if="st.extra.rtcp.sr_clock_offset_seconds != null"
+                     title="抓包机墙钟与 SR 中 NTP 的差值，含单向传输时延；只能说明两端时间差多少，不是 RTT">
+                    时钟差 {{ fmt(st.extra.rtcp.sr_clock_offset_seconds, 2) }}s
+                  </b>
+                </div>
                 <div class="sc-bar">
                   <div class="sb-track">
                     <div class="sb-fill"
@@ -1435,16 +1469,15 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
   transition: color var(--dur) var(--ease);
   padding: 3px 0;
 }
-.an-step .as-txt { transition: all var(--dur) var(--ease); }
+.an-step .as-txt { transition: opacity var(--dur) var(--ease); }
 .an-step.done .as-txt { opacity: .8; }
 .an-step.now .as-txt {
   font-weight: 600;
-  transform: translateX(2px);
 }
 .as-dot {
   width: 6px; height: 6px; border-radius: 50%;
   background: var(--line-strong); flex: none;
-  transition: all .3s;
+  transition: background-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
 .an-step.done { color: var(--text-2); }
 .an-step.done .as-dot { background: var(--ok); }
@@ -1480,7 +1513,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
   font-size: 12.5px;
   font-family: inherit;
   cursor: pointer;
-  transition: all var(--dur) var(--ease);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
   position: relative;
 }
 .spy-btn:hover { color: var(--text); background: var(--surface); }
@@ -1654,6 +1687,13 @@ section.rise:nth-of-type(7) { animation-delay: .30s; }
   color: var(--text); font-variant-numeric: tabular-nums;
 }
 .sc-metrics b span { font-size: 9.5px; color: var(--text-4); font-weight: 400; margin-left: 1px; }
+.sc-rtcp {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
+  margin-top: 10px; padding-top: 8px;
+  border-top: 1px dashed var(--line-2);
+  font-size: 10.5px; color: var(--text-4);
+}
+.sc-rtcp b { font-weight: 600; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .sc-bar { margin-top: 12px; }
 .sb-track {
   height: 3px; background: var(--surface-4);

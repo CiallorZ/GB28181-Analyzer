@@ -11,14 +11,19 @@ import { api } from '../api/client'
 const props = defineProps({
   taskId: { type: Number, required: true },
   expert: { type: String, default: '综合研判' },
-  expertKey: { type: String, default: 'general' }
+  connected: { type: Boolean, default: false },
+  modelEndpoint: { type: String, default: '' }
 })
-const emit = defineEmits(['cancel', 'confirm'])
+const emit = defineEmits(['cancel', 'confirm', 'configure'])
 
 const preview = ref(null)
 const error = ref('')
 const expanded = ref(false)
 
+const recipient = computed(() => {
+  try { return new URL(props.modelEndpoint).host }
+  catch { return '' }
+})
 const lines = computed(() => (preview.value?.context || '').split('\n').length)
 const truncated = computed(() => {
   const text = preview.value?.context || ''
@@ -39,7 +44,7 @@ onMounted(async () => {
   <section class="pv" aria-labelledby="ai-preview-title">
     <header class="pv-head">
       <h3 id="ai-preview-title">确认发送内容</h3>
-      <p>以下摘要将发送给模型服务，发送后才会生成报告。</p>
+      <p>以下任务摘要将发送给{{ recipient || '已配置的模型服务' }}，发送后才会生成报告。</p>
     </header>
 
     <div class="pv-scope">
@@ -77,8 +82,8 @@ onMounted(async () => {
 
     <div class="pv-acts">
       <button type="button" class="btn" @click="emit('cancel')">返回</button>
-      <button type="button" class="btn primary" :disabled="!preview" @click="emit('confirm', preview.context_hash)">
-        发送并分析
+      <button type="button" class="btn primary" :disabled="!preview" @click="connected ? emit('confirm', preview.context_hash) : emit('configure')">
+        {{ connected ? '发送并分析' : '配置 DeepSeek 连接' }}
       </button>
       <span class="pv-note">追问内容不会自动脱敏，请勿粘贴敏感信息。</span>
     </div>
@@ -177,15 +182,15 @@ onMounted(async () => {
 }
 .pv-note { font-size: 11px; color: var(--text-4); }
 
-/* 与抽屉一致：会诊里的主操作使用 AI 蓝 */
+
 .pv-acts .btn.primary {
-  background: var(--ds-dk);
-  border-color: var(--ds-dk);
+  background: var(--brand);
+  border-color: var(--brand);
   color: #fff;
 }
 .pv-acts .btn.primary:hover:not(:disabled) {
-  background: var(--ds);
-  border-color: var(--ds);
+  background: var(--brand-hover);
+  border-color: var(--brand-hover);
 }
 
 @media (max-width: 620px) {

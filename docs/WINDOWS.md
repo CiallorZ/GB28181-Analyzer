@@ -4,6 +4,12 @@
 
 程序使用 Microsoft Edge WebView2 Runtime 显示独立窗口。Windows 10/11 一般已自带；离线设备可安装微软的 Evergreen Standalone Installer。可执行文件未做代码签名，可对照 Release 的 `SHA256SUMS.txt` 校验下载。
 
+## 浏览器便携模式
+
+解压文件名以 `-browser.zip` 结尾的包，双击 `Start-Analyzer.cmd`。本地服务会打开系统默认浏览器。启动窗口需保持打开，按 Ctrl+C 停止服务。该模式使用浏览器文件选择器导入抓包，运行依赖可在设置页手工输入路径。默认固定在回环端口 8791，端口冲突时可用 `Start-Analyzer.cmd --port 8792`。
+
+从源码构建浏览器包时使用 `scripts/build-windows.ps1 -BrowserOnly`。构建脚本为 ZIP 生成 `.sha256` 校验文件。可用 `python scripts/smoke-windows.py <ZIP> --browser-only --analyze-sample` 验证解包启动和真实抓包分析。执行分析冒烟前需准备 TShark。
+
 ## 外部依赖
 
 | 用途 | 需要 | 缺少时的表现 |
@@ -35,3 +41,13 @@ DeepSeek 是可选的联网功能。主动配置并运行后会向配置的模�
 
 SQLite 数据库升级时会先备份，再补充新增的可空或带默认值字段。该机制不删除、不改写已有数据，但不等同于完整的 PostgreSQL 迁移方案。
 
+
+## Native Shell 开发入口
+
+Windows 桌面开发使用 Native Shell 0.7.1。安装该版本的 nsh CLI、项目 Python 依赖并在 frontend 目录运行 npm run build 后，在仓库根目录运行以下命令。
+
+```powershell
+.venv/Scripts/python.exe scripts/run-nsh.py
+```
+
+启动器通过随机回环端口连接独立分析服务。可用 --data-dir 指定测试数据目录，--nsh 指定 CLI 的完整路径。加 --test 可运行 Windows 原生宿主测试，测试等待 Vue 工作台通过 WebView 桥发出就绪事件。Windows 便携包使用同一 Native Shell 宿主，Rust 启动器负责监督窗口与分析进程。

@@ -7,11 +7,19 @@ describe('resolvePhase', () => {
   })
 
   it('已有报告时进入结果阶段', () => {
-    expect(resolvePhase({ view: 'flow', report: '# 结论', previewOpen: true })).toBe('result')
+    expect(resolvePhase({ view: 'flow', report: '# 结论', previewOpen: false })).toBe('result')
   })
 
   it('确认发送优先于选择专家', () => {
     expect(resolvePhase({ view: 'flow', report: '', previewOpen: true })).toBe('preview')
+  })
+
+  it('重新分析时允许旧报告先返回发送确认', () => {
+    expect(resolvePhase({ view: 'flow', report: '# 旧报告', previewOpen: true })).toBe('preview')
+  })
+
+  it('首个流式片段之前已经进入报告阶段', () => {
+    expect(resolvePhase({ view: 'flow', report: '', previewOpen: false, running: true })).toBe('result')
   })
 
   it('默认停留在选择专家', () => {

@@ -31,24 +31,6 @@
   --ui-layer-raised:var(--surface-2);
   --ui-press:scale(.98);
 }
-:root[data-theme="dark"] {
-  --bg:#111721;
-  --bg-2:#151e2a;
-  --surface:#1a2532;
-  --surface-2:#202e3d;
-  --surface-3:#2a3b4d;
-  --line:#344456;
-  --line-2:#415469;
-}
-:root[data-theme="light"] {
-  --bg:#edf2f7;
-  --bg-2:#f4f7fa;
-  --surface:#fff;
-  --surface-2:#f4f7fb;
-  --surface-3:#e7eef6;
-  --line:#d8e2ec;
-  --line-2:#cbd8e6;
-}
 :root[data-density="compact"] {
   --ui-row-y:6px;
   --ui-inset:12px;

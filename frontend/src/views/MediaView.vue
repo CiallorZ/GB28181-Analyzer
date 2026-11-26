@@ -4,14 +4,22 @@ import { loadECharts } from '../utils/chartLoader'
 import { chartPalette, seriesPalette } from '../utils/chartTheme'
 import { bindChartResize } from '../utils/chartResize'
 import { api } from '../api/client'
+import AiFocusButton from '../components/AiFocusButton.vue'
 import PageNav from '../components/PageNav.vue'
+import VideoPlayer from '../components/VideoPlayer.vue'
 import { useTaskStore } from '../stores/task'
+import { cachedLoad, cacheKey, set, taskRevision } from '../utils/taskCache'
 
 const store = useTaskStore()
 const streams = shallowRef([])
 const err = ref('')
 const loading = ref(false)
 const activeMetric = ref('bitrate')
+const previewId = ref(null)
+const previewStream = computed(() =>
+  streams.value.find(stream => stream.id === previewId.value) ??
+  streams.value.find(stream => stream.has_rebuilt_video) ?? streams.value[0]
+)
 
 const charts = {}
 let C = chartPalette()
@@ -30,16 +38,51 @@ async function chart(id, opt) {
   charts[id].setOption({ animation: false, ...opt }, true)
 }
 
-watch(() => store.currentTaskId, async (id, _, onCleanup) => {
+// 任务完成时间作为缓存版本号。深链直接进 /media 时任务详情可能还没加载，
+// 版本号从 null 变成实际值后，用已经取到的结果补写缓存，不重复请求。
+const revision = computed(() => taskRevision(store.task))
+let loaded = null        // { taskId, key, items }
+
+watch([() => store.currentTaskId, revision], async ([id], _, onCleanup) => {
   const controller = new AbortController()
   onCleanup(() => controller.abort())
-  streams.value = []
   err.value = ''
   loading.value = !!id
-  if (!id) return
+  if (!id) {
+    streams.value = []
+    loaded = null
+    return
+  }
+  const rev = revision.value
+  const key = rev ? cacheKey(id, rev, 'media-quality') : ''
+
+  if (loaded && loaded.taskId === id) {
+    // 已有数据，没有需要重取的理由时直接返回；但 loading 是进函数时
+    // 置上的，提前返回前必须清掉，否则深链补版本号这条路径会让
+    // “正在读取媒体质量指标…”永远停在页面上。
+    if (!key || loaded.key === key) {
+      loading.value = false
+      return
+    }
+    if (!loaded.key) {
+      // 版本号补上了：把已取到的结果归入该版本，避免再打一次接口。
+      loaded.key = key
+      set(key, { items: loaded.items })
+      loading.value = false
+      return
+    }
+  }
+
+  streams.value = []
   try {
-    const result = await api.mediaQuality(id, controller.signal)
-    if (!controller.signal.aborted) streams.value = result.items
+    // 缓存条目要能被后续页面复用，所以请求本身不绑定本次的 abort signal；
+    // 切换任务时只用 aborted 决定是否把结果写进组件。
+    const load = () => api.mediaQuality(id)
+    const result = key ? await cachedLoad(key, load) : await load()
+    if (controller.signal.aborted) return
+    if (loaded?.taskId !== id) previewId.value = null
+    streams.value = result.items
+    loaded = { taskId: id, key, items: result.items }
   } catch (e) {
     if (!controller.signal.aborted) err.value = e.message
   } finally {
@@ -57,7 +100,7 @@ function render() {
   const metric = activeMetric.value
   const series = streams.value.flatMap((st, i) => st[metric].length ? [{
     name: st.ssrc == null ? '流 #' + st.id : '0x' + st.ssrc.toString(16),
-    type: 'line', smooth: true, showSymbol: false,
+    type: 'line', showSymbol: false,
     itemStyle: { color: PALETTE[i % PALETTE.length] },
     lineStyle: { width: 2, color: PALETTE[i % PALETTE.length] },
     data: st[metric]
@@ -198,6 +241,7 @@ watch([activeMetric, streams, loading], async () => {
       title="媒体质量分析"
       :sub="`任务 #${store.currentTaskId || '未选择'} · ${stats.total} 条 RTP 流`"
       :crumbs="[{label:'工作台', to:'/'}, {label:'媒体质量分析'}]">
+      <template #actions><AiFocusButton focus="media" label="DeepSeek · 分析媒体链路" /></template>
     </PageNav>
 
     <div v-if="err" class="err-box mb-12">{{ err }}</div>
@@ -250,12 +294,13 @@ watch([activeMetric, streams, loading], async () => {
       </div>
 
       <!-- 图表 -->
-      <section class="card trend-panel mb-12">
+      <div class="media-workspace mb-12">
+      <section v-panel-change="activeMetric" class="card trend-panel">
         <header class="trend-head"><h2>媒体传输趋势</h2><div class="seg">
           <button v-for="m in [
               {k:'bitrate',l:'码率'},
               {k:'jitter',l:'抖动'},
-              {k:'gap',l:'丢包'}
+              {k:'gap',l:'序号缺口'}
             ]" :key="m.k" :class="{ on: activeMetric === m.k }" :aria-pressed="activeMetric === m.k"
             @click="activeMetric = m.k">{{ m.l }}</button>
         </div></header>
@@ -265,6 +310,19 @@ watch([activeMetric, streams, loading], async () => {
         </template>
         <div v-else class="empty">{{loading ? '正在读取趋势…' : '无媒体流'}}</div>
       </section>
+      <section v-if="previewStream" class="card media-preview">
+        <div class="card-head">
+          <span>重建视频预览</span>
+          <select class="inp sm" :value="previewStream.id" aria-label="预览媒体流"
+                  @change="previewId = Number($event.target.value)">
+            <option v-for="stream in streams" :key="stream.id" :value="stream.id">
+              流 #{{ stream.id }}<template v-if="stream.ssrc != null"> · 0x{{ stream.ssrc.toString(16) }}</template>
+            </option>
+          </select>
+        </div>
+        <div class="card-body tight"><VideoPlayer :stream="previewStream" /></div>
+      </section>
+      </div>
       <div class="mb-12">
         <div class="card">
           <div class="card-head">流质量对比</div>
@@ -273,7 +331,7 @@ watch([activeMetric, streams, loading], async () => {
               <thead>
                 <tr>
                   <th>SSRC / 会话</th><th>传输</th><th>包数</th><th>码率</th>
-                  <th>抖动</th><th>缺口</th><th>静默</th>
+                  <th>抖动</th><th>缺口</th><th>对端丢包</th><th>RTT</th><th>静默</th>
                 </tr>
               </thead>
               <tbody>
@@ -287,6 +345,17 @@ watch([activeMetric, streams, loading], async () => {
                   </td>
                   <td class="num" :class="st.seq_gap_packets ? 'text-critical' : ''">
                     {{ st.seq_gap_packets }}
+                  </td>
+                  <td class="num" :class="st.extra?.rtcp?.fraction_lost_latest > 1 ? 'text-warning' : ''"
+                      :title="st.extra?.rtcp ? '来自对端 RTCP 接收报告' : '抓包中未观察到 RTCP 接收报告'">
+                    {{ st.extra?.rtcp?.fraction_lost_latest != null
+                      ? fmt(st.extra.rtcp.fraction_lost_latest, 2) + '%' : '—' }}
+                  </td>
+                  <td class="num"
+                      :title="st.extra?.rtcp?.rtt_estimated ? 'TCP 承载没有逐帧时间戳，到达时间由时间窗插值，RTT 仅为估算值' : ''">
+                    {{ st.extra?.rtcp?.rtt_ms_latest != null
+                      ? fmt(st.extra.rtcp.rtt_ms_latest, 1) + 'ms'
+                        + (st.extra.rtcp.rtt_estimated ? '（估算）' : '') : '—' }}
                   </td>
                   <td class="num" :class="st.max_gap > 3 ? 'text-warning' : ''">
                     {{ st.max_gap != null ? fmt(st.max_gap, 2) : '—' }}
@@ -364,4 +433,10 @@ watch([activeMetric, streams, loading], async () => {
   line-height: 1.75;
 }
 .stream-cell strong{display:block;font:600 12px var(--font-mono)}.stream-cell small,.stream-cell a{font-size:11px}.stream-cell small{color:var(--text-3)}
+ .trend-panel { border-radius:var(--radius); }
+.trend-panel .chart-lg { border-top:1px solid var(--line); }
+.media-workspace { display:grid; grid-template-columns:minmax(0,1.6fr) minmax(290px,1fr); gap:var(--space-3); align-items:start; }
+.media-workspace > :only-child { grid-column:1/-1; }
+.media-preview .card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+@media (max-width:900px) { .media-workspace { grid-template-columns:minmax(0,1fr); } }
 </style>

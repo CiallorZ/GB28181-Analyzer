@@ -1,16 +1,20 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '../api/client'
+import PaneDivider from '../components/PaneDivider.vue'
 import PageNav from '../components/PageNav.vue'
 import { useTaskStore } from '../stores/task'
 
+const listHeight = ref(300)
 const props=defineProps({embedded:Boolean,seed:Array,seedTotal:Number,range:Array})
 const listLoading=ref(false), descending=ref(false)
 const route = useRoute()
 const store = useTaskStore()
 
 const items = ref(props.seed || [])
+const linkedPacket = ref(null)
+const visiblePackets = computed(() => linkedPacket.value ? [linkedPacket.value, ...items.value] : items.value)
 const total = ref(props.seedTotal || 0)
 const page = ref(1)
 const pageSize = props.embedded ? 8 : 200
@@ -31,6 +35,7 @@ async function load() {
   const taskId = store.currentTaskId
   const seq = ++listSeq
   listLoading.value = true
+  linkedPacket.value = null
   err.value = ''
   detailSeq++
   packetLookup++
@@ -66,6 +71,7 @@ async function openPacket(p) {
   const seq = ++detailSeq
   const taskId = store.currentTaskId
   packetLookup++
+  if (linkedPacket.value?.id !== p.id) linkedPacket.value = null
   selectedId.value = p.id
   detail.value = null
   err.value = ''
@@ -75,6 +81,30 @@ async function openPacket(p) {
     if (seq === detailSeq && taskId === store.currentTaskId) detail.value = result
   } catch (e) { if (seq === detailSeq) err.value = e.message }
   finally { if (seq === detailSeq) detailLoading.value = false }
+}
+
+const highlightedField = ref(null)
+const hexView = ref(null)
+watch(detail, () => { highlightedField.value = null })
+
+async function highlightField(field) {
+  highlightedField.value = field
+  await nextTick()
+  const mark = hexView.value?.querySelector('mark')
+  const pane = mark?.closest('.pane-body')
+  if (pane) pane.scrollTop += mark.getBoundingClientRect().top - pane.getBoundingClientRect().top - 32
+}
+
+function highlights(offset, hex, ascii) {
+  const field = highlightedField.value
+  if (!field || field.offset >= offset + hex.length || field.offset + field.size <= offset) {
+    return [{ hex: hex.join(' '), ascii, active: false }]
+  }
+  const start = Math.max(0, field.offset - offset)
+  const end = Math.min(hex.length, field.offset + field.size - offset)
+  return [[0, start, false], [start, end, true], [end, hex.length, false]]
+    .filter(([from, to]) => from < to)
+    .map(([from, to, active]) => ({ hex: hex.slice(from, to).join(' '), ascii: ascii.slice(from, to), active }))
 }
 
 // 十六进制视图：每行 16 字节 + ASCII
@@ -91,8 +121,7 @@ const hexRows = computed(() => {
     }).join('')
     rows.push({
       offset: (i / 2).toString(16).padStart(4, '0'),
-      hex: bytes.join(' '),
-      ascii
+      spans: highlights(i / 2, bytes, ascii)
     })
   }
   return rows
@@ -106,6 +135,7 @@ async function locatePacket(value) {
   const num = Number(value)
   const taskId = store.currentTaskId
   const seq = ++packetLookup
+  linkedPacket.value = null
   ++detailSeq
   detailLoading.value = false
   if (!Number.isInteger(num) || num < 1 || !taskId) return
@@ -119,8 +149,12 @@ async function locatePacket(value) {
     })
     if (seq !== packetLookup || taskId !== store.currentTaskId) return
     const packet = hit || result.items[0]
-    if (packet) await openPacket(packet)
-    else err.value = `未找到报文 #${num}`
+    if (!packet) {
+      err.value = `未找到报文 #${num}`
+      return
+    }
+    if (!hit) linkedPacket.value = packet
+    await openPacket(packet)
   } catch (e) {
     if (seq === packetLookup) err.value = e.message
   }
@@ -168,11 +202,12 @@ if(props.embedded && items.value[0])openPacket(items.value[0])
       <div class="empty">尚未选择分析任务</div>
     </div>
 
-    <div v-else class="tri-pane">
+    <div v-if="embedded || store.currentTaskId" class="tri-pane" :style="{ '--packet-list-height': listHeight + 'px' }">
       <!-- 栏 1：报文列表 -->
       <div class="pane pane-list">
         <div class="pane-head">
           报文列表
+          <span v-if="linkedPacket" class="badge brand">定位 #{{ linkedPacket.packet_number }}</span>
           <span class="spacer"></span>
           <button class="mini" aria-label="上一页" :disabled="page <= 1" @click="page--; load()"><AppIcon name="prev" /></button>
           <span class="mono-sm">{{ page }}</span>
@@ -184,7 +219,7 @@ if(props.embedded && items.value[0])openPacket(items.value[0])
               <tr><th :aria-sort="descending ? 'descending' : 'ascending'"><button aria-label="切换报文号排序" @click="descending=!descending;page=1;load()">No. {{descending?'↓':'↑'}}</button></th><th>时间</th><th>源</th><th>目的</th><th>协议</th><th>长度</th><th>信息</th></tr>
             </thead>
             <tbody v-if="!listLoading" class="page-content-in">
-              <tr v-for="p in items" :key="p.id"
+              <tr v-for="p in visiblePackets" :key="p.id"
                   :class="{ active: selectedId === p.id }"
                   tabindex="0" :aria-selected="selectedId === p.id"
                   @click="openPacket(p)" @keydown.enter.prevent="openPacket(p)" @keydown.space.prevent="openPacket(p)">
@@ -197,11 +232,12 @@ if(props.embedded && items.value[0])openPacket(items.value[0])
               </tr>
             </tbody>
           </table>
-          <div v-if="listLoading" class="empty">读取中…</div><div v-else-if="!items.length && !err" class="empty">无匹配报文</div>
+          <div v-if="listLoading" class="empty">读取中…</div><div v-else-if="!visiblePackets.length && !err" class="empty">无匹配报文</div>
         </div>
       </div>
 
       <!-- 栏 2：协议树 -->
+      <PaneDivider v-if="!embedded" v-model="listHeight" horizontal class="packet-divider" label="调整报文列表高度" :min="180" :max="480" />
       <div class="pane pane-tree">
         <div class="pane-head">
           协议详情
@@ -222,7 +258,9 @@ if(props.embedded && items.value[0])openPacket(items.value[0])
                 <div class="layer-fields">
                   <div v-for="(f, fi) in layer.fields" :key="fi" class="field"
                        :style="{ paddingLeft: (f.indent || 0) * 2 + 'px' }">
-                    <span class="fname">{{ f.name }}</span>
+                    <button v-if="f.size" type="button" class="field-link" :aria-pressed="highlightedField === f"
+                            @click="highlightField(f)">{{ f.name }}</button>
+                    <span v-else class="fname">{{ f.name }}</span>
                     <span class="fval mono">{{ f.value }}</span>
                   </div>
                 </div>
@@ -235,11 +273,11 @@ if(props.embedded && items.value[0])openPacket(items.value[0])
       </div>
 
       <!-- 栏 3：字段摘要 -->
-      <div class="pane pane-info">
+      <div v-panel-change="detail?.id" class="pane pane-info">
         <div class="pane-head">原始字节 · HEX / ASCII</div>
         <div class="pane-body scroll">
           <div v-if="!detail" class="empty">—</div>
-                      <div v-if="detail && !detailLoading" class="hex-view">
+                      <div v-if="detail && !detailLoading" ref="hexView" class="hex-view">
               <div class="hex-head">
                 <span class="ho">偏移</span>
                 <span class="hh">十六进制</span>
@@ -247,8 +285,8 @@ if(props.embedded && items.value[0])openPacket(items.value[0])
               </div>
               <div v-for="row in hexRows" :key="row.offset" class="hex-row">
                 <span class="ho">{{ row.offset }}</span>
-                <span class="hh">{{ row.hex }}</span>
-                <span class="ha">{{ row.ascii }}</span>
+                <span class="hh"><template v-for="(part, index) in row.spans" :key="index">{{ index ? ' ' : '' }}<component :is="part.active ? 'mark' : 'span'">{{ part.hex }}</component></template></span>
+                <span class="ha"><component v-for="(part, index) in row.spans" :key="index" :is="part.active ? 'mark' : 'span'">{{ part.ascii }}</component></span>
               </div>
               <div v-if="!hexRows.length" class="empty">无原始字节</div>
             </div>
@@ -278,20 +316,13 @@ if(props.embedded && items.value[0])openPacket(items.value[0])
 
 .tri-pane {
   flex: 1; min-height: 0;
-  display: grid; grid-template-columns: 440px minmax(0, 1fr) 250px;
-  gap: 0; border:1px solid var(--line-2); border-radius:8px; overflow:hidden;
+  display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);
+  grid-template-rows: var(--packet-list-height) 10px minmax(230px, 34vh);
+  border:1px solid var(--line); border-radius:var(--radius); overflow:hidden;
 }
-@media (max-width: 1500px) { .tri-pane { grid-template-columns: 390px minmax(0, 1fr) 220px; } }
-@media (max-width: 1080px) {
-  .packets-page { height: auto; }
-  .tri-pane { grid-template-columns: minmax(0, 1fr); }
-  .pane { height:clamp(220px,42vh,340px); }
-}
-
-@media (851px <= width <= 1080px) {
-  .packets-page:not(.embedded) .tri-pane { grid-template-columns:repeat(2,minmax(0,1fr)); }
-  .packets-page:not(.embedded) .pane-list { grid-column:1/-1; }
-  .packets-page:not(.embedded) .pane-tree { border-right:1px solid var(--line-2); }
+.packets-page:not(.embedded) .pane-list { grid-column:1/-1; border-right:0; border-bottom:1px solid var(--line); }
+@media (max-width:760px) {
+  .packets-page:not(.embedded) .tri-pane { grid-template-columns:minmax(0,1fr); grid-template-rows:var(--packet-list-height) 10px 250px 250px; }
 }
 .pane {
   background: var(--surface); border-right: 1px solid var(--line-2);
@@ -386,4 +417,10 @@ if(props.embedded && items.value[0])openPacket(items.value[0])
 .packets-page.embedded{padding:0;height:auto;max-width:none}.embedded .tri-pane{grid-template-columns:minmax(0,1.45fr) minmax(0,.95fr) minmax(0,1.05fr);height:190px;min-height:0;border:0}.embedded .pane{min-height:0}.pane-body{overflow:auto}.packet-filters{display:flex;align-items:center;gap:8px;padding:6px 12px}.packet-filters input{width:125px}.pane-list td:last-child{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.layer summary{cursor:pointer}
 @media(max-width:850px){.embedded .tri-pane{grid-template-columns:minmax(0,1fr);height:auto}.embedded .pane{height:220px}}
 @media(max-width:650px){.packets-page:not(.embedded){padding:16px}.packet-filters{flex-wrap:wrap}.packet-filters input{width:min(125px,100%)}}
+.packet-divider { grid-column:1/-1; background:var(--bg-2); }
+.embedded .tri-pane { grid-template-rows:minmax(0,1fr); }
+@media(max-width:850px) { .embedded .tri-pane { grid-template-rows:auto; } }
+.field-link { color:var(--brand-lt); font:inherit; border:0; background:none; padding:0; text-align:start; cursor:pointer; }
+.field-link[aria-pressed="true"], .hex-row mark { background:var(--bg-selected); color:var(--brand-lt); }
+.hex-row mark { font:inherit; }
 </style>
