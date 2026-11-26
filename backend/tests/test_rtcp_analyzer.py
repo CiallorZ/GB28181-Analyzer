@@ -390,6 +390,31 @@ def test_link_media_derives_first_keyframe_latency():
     assert session.first_keyframe_latency == 1.8
 
 
+def test_link_media_uses_keyframe_from_the_stream_that_started_first():
+    """首关键帧耗时必须和首媒体耗时同源
+
+    两条流都精确关联时，首媒体耗时取最早的那条；关键帧偏移也必须取同一条，
+    否则两根时间轴对不上，相加结果没有意义。
+    """
+    from app.parsers.session_builder import SessionInfo, link_media
+
+    session = SessionInfo(device_id='d1', start_time=1.0, end_time=10.0,
+                          negotiated_port=8000, negotiated_transport='UDP',
+                          sdp_ssrc=str(0x11223344))
+    early = {'id': 1, 'ssrc': 0x11223344, 'src_port': 6000, 'dst_port': 8000,
+             'transport': 'UDP', 'start_time': 2.0, 'end_time': 9.0,
+             'keyframe_offset': None}          # 这条先到，但没有关键帧数据
+    late = {'id': 2, 'ssrc': 0x11223344, 'src_port': 6001, 'dst_port': 8000,
+            'transport': 'UDP', 'start_time': 4.0, 'end_time': 9.0,
+            'keyframe_offset': 0.5}
+
+    link_media([session], [early, late])
+
+    assert session.first_media_latency == 1.0        # 来自 early
+    # early 没有关键帧偏移，不能拿 late 的 0.5 去凑 1.5
+    assert session.first_keyframe_latency is None
+
+
 def test_link_media_leaves_keyframe_latency_unknown_without_es_data():
     from app.parsers.session_builder import SessionInfo, link_media
 
