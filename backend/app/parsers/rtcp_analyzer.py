@@ -66,6 +66,7 @@ class RtcpPacket:
     pt: int = 0
     ssrc: int = 0                     # SR: 发送端；RR: 报告端
     arrival: float = 0.0
+    source_ip: str | None = None      # 发包方，用来判断报告属于哪条流
     ntp_seconds: float | None = None
     ntp_msw: int = 0
     ntp_lsw: int = 0
@@ -98,7 +99,8 @@ def _parse_report_blocks(body: bytes, count: int) -> list[ReportBlock]:
     return blocks
 
 
-def parse_compound(payload: bytes, arrival: float = 0.0) -> list[RtcpPacket]:
+def parse_compound(payload: bytes, arrival: float = 0.0,
+                   source_ip: str | None = None) -> list[RtcpPacket]:
     """解析一个 RTCP compound 包（可含多个 SR/RR/SDES...）
 
     截断或字段不足时停止解析当前包，但保留前面已经成功的部分；
@@ -123,6 +125,7 @@ def parse_compound(payload: bytes, arrival: float = 0.0) -> list[RtcpPacket]:
                 continue
             p = RtcpPacket(
                 pt=pt, ssrc=int.from_bytes(pkt[4:8], 'big'), arrival=arrival,
+                source_ip=source_ip,
                 ntp_msw=int.from_bytes(pkt[8:12], 'big'),
                 ntp_lsw=int.from_bytes(pkt[12:16], 'big'),
                 rtp_timestamp=int.from_bytes(pkt[16:20], 'big'),
@@ -138,6 +141,7 @@ def parse_compound(payload: bytes, arrival: float = 0.0) -> list[RtcpPacket]:
                 continue
             p = RtcpPacket(
                 pt=pt, ssrc=int.from_bytes(pkt[4:8], 'big'), arrival=arrival,
+                source_ip=source_ip,
             )
             p.report_blocks = _parse_report_blocks(pkt[8:], rc)
             out.append(p)
@@ -149,20 +153,18 @@ def parse_compound(payload: bytes, arrival: float = 0.0) -> list[RtcpPacket]:
 def summarize(events: list[dict]) -> dict:
     """把 RTCP 事件汇总成按 RTP SSRC 索引的指标
 
-    events: [{'arrival': float, 'payload': bytes}, ...]
+    events: [{'arrival': float, 'payload': bytes, 'source_ip': str|None}, ...]
 
-    返回 {ssrc: {
-        report_count, fraction_lost_latest, fraction_lost_avg,
-        cumulative_lost_latest, peer_jitter_raw, peer_jitter_ms,
-        rtt_ms_latest, rtt_ms_avg, sr_count,
-        sender_packet_count, sender_octet_count, ...
-    }}
+    返回 {ssrc: {...}}。同一 SSRC 可能被多台设备复用，所以每个条目还带
+    `source_ips`（观察到该 SSRC 的 SR 发送方）。调用方应核对媒体流的
+    源地址是否在其中，避免把别的设备的接收报告挂到本流上。
     """
     packets: list[RtcpPacket] = []
     for ev in sorted(events, key=lambda x: x.get('arrival') or 0.0):
         payload = ev.get('payload') or b''
         if payload:
-            packets.extend(parse_compound(payload, ev.get('arrival') or 0.0))
+            packets.extend(parse_compound(
+                payload, ev.get('arrival') or 0.0, ev.get('source_ip')))
     if not packets:
         return {}
 
@@ -176,6 +178,8 @@ def summarize(events: list[dict]) -> dict:
         item['sender_octet_count'] = p.sender_octet_count
         if p.ntp_seconds is not None:
             item['last_sr_ntp'] = round(p.ntp_seconds, 3)
+        if p.source_ip and p.source_ip not in item['_sources']:
+            item['_sources'].append(p.source_ip)
 
     for p in packets:
         for block in p.report_blocks:
@@ -201,6 +205,7 @@ def summarize(events: list[dict]) -> dict:
     for item in summary.values():
         fractions = item.pop('_fractions')
         rtts = item.pop('_rtts')
+        item['source_ips'] = item.pop('_sources')
         if fractions:
             item['fraction_lost_avg'] = round(sum(fractions) / len(fractions), 3)
         if rtts:
@@ -222,6 +227,8 @@ def _empty_summary() -> dict:
         'sender_packet_count': None,
         'sender_octet_count': None,
         'last_sr_ntp': None,
+        'source_ips': [],
         '_fractions': [],
         '_rtts': [],
+        '_sources': [],
     }

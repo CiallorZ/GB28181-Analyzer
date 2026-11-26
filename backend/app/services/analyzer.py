@@ -592,7 +592,8 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
     except capture.CaptureError:
         udp_pkts, udp_rtcp = [], []
 
-    rtcp_events = [{'arrival': r['ts'], 'payload': r['payload']}
+    rtcp_events = [{'arrival': r['ts'], 'payload': r['payload'],
+                    'source_ip': r.get('src_ip')}
                    for r in udp_rtcp]
 
     if udp_pkts:
@@ -674,7 +675,8 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
             arrival = (tcp_first + (tcp_last - tcp_first) * pos
                        if tcp_first is not None and tcp_last is not None
                        else (meta.get('ts') or 0.0))
-            rtcp_events.append({'arrival': arrival, 'payload': payload})
+            rtcp_events.append({'arrival': arrival, 'payload': payload,
+                                'source_ip': meta.get('src_ip')})
 
         # 同一 TCP 连接可能承载多路媒体（共享端口），逐 SSRC 建流。
         for _ssrc, pkts in ssrc_groups.items():
@@ -725,8 +727,7 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
             analysis_control.checkpoint()
             row = _save_stream(db, task, st, key, transport, meta, ps,
                                rb_map.get(tag),
-                               rtcp=rtcp_summary.get(st.ssrc)
-                               if st.ssrc is not None else None)
+                               rtcp=_rtcp_for_stream(rtcp_summary, st, key))
             streams.append(row)
 
     db.commit()
@@ -945,6 +946,25 @@ def _load_devices(db: Session, task: AnalysisTask, sip_msgs: list[dict]):
             raw={'event': d.get('event')},
         ))
     db.commit()
+
+
+def _rtcp_for_stream(rtcp_summary: dict, st, key) -> dict | None:
+    """把 RTCP 汇总挂到对应的媒体流上
+
+    RTCP 只按 SSRC 索引，而 SSRC 由设备自行生成，不同设备完全可能重复。
+    同一 SSRC 出现多个发送方地址时，只有本流的源地址在其中才认领；
+    认不出归属就不挂，避免把别的设备的接收报告算到这条流上。
+    """
+    if st.ssrc is None:
+        return None
+    item = rtcp_summary.get(st.ssrc)
+    if not item:
+        return None
+    sources = item.get('source_ips') or []
+    src_ip = key[1] if key else None
+    if sources and src_ip and src_ip not in sources:
+        return None
+    return item
 
 
 def _keyframe_offset(stream: MediaStream) -> float | None:

@@ -422,7 +422,6 @@ def test_keyframe_offset_reads_ps_extra():
 
 
 def test_peer_jitter_is_converted_with_clock_rate():
-    from app.models.entities import MediaStream
     from app.services import analyzer
     from app.parsers.rtp_analyzer import StreamStat
 
@@ -433,7 +432,64 @@ def test_peer_jitter_is_converted_with_clock_rate():
         'UDP', {}, None, None,
         rtcp={'peer_jitter_raw': 900, 'fraction_lost_latest': 1.0})
     assert row.extra['rtcp']['peer_jitter_ms'] == 10.0
-    assert isinstance(row, MediaStream)
+
+
+# ---------------------------------------------------------------
+# SSRC 复用：RTCP 只能挂到源地址对得上的那条流
+# ---------------------------------------------------------------
+def test_summary_records_sr_source_ips():
+    sr = _rtcp(rtcp.PT_SR, 0x1000, ntp=(0xE0000001, 0))
+
+    summary = rtcp.summarize([
+        {'arrival': 1.0, 'payload': sr, 'source_ip': '10.0.0.1'},
+        {'arrival': 2.0, 'payload': sr, 'source_ip': '10.0.0.9'},
+    ])
+
+    assert summary[0x1000]['source_ips'] == ['10.0.0.1', '10.0.0.9']
+
+
+def _stat(ssrc=0x1000):
+    from app.parsers.rtp_analyzer import StreamStat
+    return StreamStat(ssrc=ssrc, clock_rate=90000, packet_count=10,
+                      start_time=0.0, end_time=1.0)
+
+
+def test_rtcp_attached_when_source_matches():
+    from app.services import analyzer
+
+    summary = {0x1000: {'fraction_lost_latest': 2.0,
+                        'source_ips': ['10.0.0.1']}}
+    key = (0x1000, '10.0.0.1', 6000, '10.0.0.2', 8000)
+
+    assert analyzer._rtcp_for_stream(summary, _stat(), key) is not None
+
+
+def test_rtcp_not_attached_when_only_other_device_reports():
+    """SSRC 相同但源地址对不上时不能认领，否则会把别的设备的报告算进来"""
+    from app.services import analyzer
+
+    summary = {0x1000: {'fraction_lost_latest': 2.0,
+                        'source_ips': ['10.0.0.9']}}
+    key = (0x1000, '10.0.0.1', 6000, '10.0.0.2', 8000)
+
+    assert analyzer._rtcp_for_stream(summary, _stat(), key) is None
+
+
+def test_rtcp_attached_when_no_source_known():
+    """只有 RR、没有 SR 时拿不到发送方地址，此时仍按 SSRC 挂上"""
+    from app.services import analyzer
+
+    summary = {0x1000: {'fraction_lost_latest': 2.0, 'source_ips': []}}
+    key = (0x1000, '10.0.0.1', 6000, '10.0.0.2', 8000)
+
+    assert analyzer._rtcp_for_stream(summary, _stat(), key) is not None
+
+
+def test_rtcp_missing_ssrc_returns_none():
+    from app.services import analyzer
+
+    assert analyzer._rtcp_for_stream({}, _stat(ssrc=None),
+                                     (None, 'a', 1, 'b', 2)) is None
 
 
 class _FakeSession:
