@@ -86,7 +86,7 @@ flowchart TD
 
 项目面向单机离线排障。已有现场验收使用 73,049 个报文的抓包，覆盖自动分析、视频播放、报文跳转和报告导出。已有性能基线中，227.72 MiB 样本分析耗时约 160 秒、峰值内存约 2.55 GiB。抓包内容、流数、磁盘性能与视频重建工作量都会影响结果。[验收与性能基线](docs/FREEZE_V1_1.md)
 
-RTCP 已有接收报告块等证据，完整 SR/RR 对时仍有局限；端点关系可供核对，多跳交互拓扑和团队数据库属于后续范围。[当前实现与已知限制](IMPLEMENTATION_STATUS.md) · [开放 Issue](https://github.com/CiallorZ/gb28181-analyzer/issues)
+RTCP 已能解析 SR/RR，并用 LSR/DLSR 计算 RTT 与对端丢包、抖动；SR 时间轴尚未整体换算成墙钟时间；端点关系可供核对，多跳交互拓扑和团队数据库属于后续范围。[当前实现与已知限制](IMPLEMENTATION_STATUS.md) · [开放 Issue](https://github.com/CiallorZ/gb28181-analyzer/issues)
 
 ## 开发与维护
 

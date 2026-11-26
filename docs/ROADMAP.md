@@ -693,7 +693,10 @@ SQLite 外键与 WAL（实测 `foreign_keys=1`、`journal_mode=wal`）。
 
 Windows v0.8.2 已接入以下工作台入口：
 
-1. 设备拓扑与媒体证据：按需读取 TShark 识别的 RTCP 报告块；RTT 缺失时显示未知。
+1. ✅ 设备拓扑与媒体证据：改为自研 RTCP SR/RR 解析（`parsers/rtcp_analyzer.py`），
+   不再依赖 TShark 的报告块字段；按 LSR/DLSR 算 RTT，读对端丢包与抖动，
+   接入 MED-002/003/009，并在媒体页、工作台与报告里展示。RTT 缺失仍显示「—」。
+   首个关键帧偏移按 RTP 时间戳换算，新增 `first_keyframe_latency` 与 MED-010。
 2. 报告导出：Markdown、JSON、单文件 HTML、诊断事件 CSV。
 3. 设备拓扑：绘制实际 SIP/RTP 端点方向，并展示国标目录中的父子关系。
 4. 超过 32 MiB 的文件在安全上下文中自动按 8 MiB 分片，单文件上限 16 GiB；再次选择相同文件恢复上传。
