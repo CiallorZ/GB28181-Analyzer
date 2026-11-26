@@ -433,7 +433,10 @@ def parse_rfc4571_streams(buf: bytes, max_scan: int = DEFAULT_MAX_SCAN,
         truncated = 0
         while o + 2 <= len(buf):
             L = int.from_bytes(buf[o:o + 2], 'big')
-            if L < 12 or L > MAX_RTP_PACKET:
+            # 合法的 RTCP 帧最小 8 字节（空 RR / BYE 都是 8），RTP 至少 12。
+            # 下限必须放到 8：否则一个 8 字节 RR 会在 is_rtcp 判断之前把
+            # 对齐扫描打断，后面的 RTP 全部丢失。
+            if L < 8 or L > MAX_RTP_PACKET:
                 break
             if o + 2 + L > len(buf):
                 if groups:                    # 已经有完整帧，尾部这帧才算截断
@@ -450,6 +453,8 @@ def parse_rfc4571_streams(buf: bytes, max_scan: int = DEFAULT_MAX_SCAN,
                 rtcp_frames.append((o / max(1, len(buf)), pp))
                 o += 2 + L
                 continue
+            if L < 12:                       # RTP 固定头 12 字节，短于此是坏帧
+                break
             header_length = 12 + 4 * (pp[0] & 0x0f)
             if header_length > L:
                 break

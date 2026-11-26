@@ -131,12 +131,18 @@ def build_markdown(task, file, sessions, streams, diagnostics) -> str:
                 st.seq_gap_count,
                 '—' if peer_loss is None else '%.2f%%' % peer_loss,
                 '—' if rtcp.get('rtt_ms_latest') is None
-                else '%.1f ms' % rtcp['rtt_ms_latest'],
+                else '%.1f ms%s' % (rtcp['rtt_ms_latest'],
+                                    '（估算）' if rtcp.get('rtt_estimated') else ''),
                 _cell(st.codec), res))
         if any((st.extra or {}).get('rtcp') for st in streams):
             add('')
             add('「对端丢包 / RTT」来自 RTCP 接收报告，是本端之外的第二视角；'
                 '抓包中未观察到 RTCP 的流显示为 —，不代表对端没有统计。')
+            if any(((st.extra or {}).get('rtcp') or {}).get('rtt_estimated')
+                   for st in streams):
+                add('')
+                add('标「估算」的 RTT 来自 TCP 承载：TCP 没有逐帧时间戳，'
+                    'SR/RR 的到达时间由时间窗插值得到，只能作为估算值参考。')
             offsets = [(st, (st.extra or {}).get('rtcp') or {})
                        for st in streams
                        if ((st.extra or {}).get('rtcp') or {}

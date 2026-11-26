@@ -472,10 +472,15 @@ def _check_media(sessions: list, streams: list, by_session: dict) -> list[Diagno
                         % (st.get('ssrc') or 0, st.get('seq_gap_count') or 0,
                            gap_pkts, ratio * 100, total))
             if peer_loss is not None:
+                peer_avg = rtcp.get('fraction_lost_avg')
                 desc += (' 对端 RTCP 接收报告最近一次区间丢包率为 %.2f%%'
                          '（累计丢失 %s 包），可作为交叉验证。'
                          % (peer_loss, rtcp.get('cumulative_lost_latest')))
-                if peer_loss <= 0.01 and ev != INSUFFICIENT:
+                # 只有"最近一次"和"各区间平均"都接近零，才能说对端几乎不丢包。
+                # 单看最近一次会被"最后一个区间恰好没丢"骗过去，从而把持续
+                # 存在的对端丢包误判成抓包点问题。
+                quiet = peer_loss <= 0.01 and (peer_avg is None or peer_avg <= 0.01)
+                if quiet and ev != INSUFFICIENT:
                     # 对端报告几乎不丢包，本端缺口更可能来自抓包点。
                     # 只降不升：TCP 流本来就是 INSUFFICIENT，不能因为这条
                     # 交叉证据反而把等级抬上去。

@@ -66,6 +66,9 @@ class RtcpPacket:
     pt: int = 0
     ssrc: int = 0                     # SR: 发送端；RR: 报告端
     arrival: float = 0.0
+    # TCP 承载时没有逐帧时间戳，到达时间是从该方向的时间窗插值出来的。
+    # 用它算的 RTT 只能当估算值，不能当作实测往返时延。
+    arrival_estimated: bool = False
     source_ip: str | None = None      # 发包方，用来判断报告属于哪条流
     epoch: float | None = None        # 抓包机墙钟（Unix 秒），用于比对 SR 的 NTP
     ntp_seconds: float | None = None
@@ -102,7 +105,8 @@ def _parse_report_blocks(body: bytes, count: int) -> list[ReportBlock]:
 
 def parse_compound(payload: bytes, arrival: float = 0.0,
                    source_ip: str | None = None,
-                   epoch: float | None = None) -> list[RtcpPacket]:
+                   epoch: float | None = None,
+                   arrival_estimated: bool = False) -> list[RtcpPacket]:
     """解析一个 RTCP compound 包（可含多个 SR/RR/SDES...）
 
     截断或字段不足时停止解析当前包，但保留前面已经成功的部分；
@@ -127,6 +131,7 @@ def parse_compound(payload: bytes, arrival: float = 0.0,
                 continue
             p = RtcpPacket(
                 pt=pt, ssrc=int.from_bytes(pkt[4:8], 'big'), arrival=arrival,
+                arrival_estimated=arrival_estimated,
                 source_ip=source_ip, epoch=epoch,
                 ntp_msw=int.from_bytes(pkt[8:12], 'big'),
                 ntp_lsw=int.from_bytes(pkt[12:16], 'big'),
@@ -143,6 +148,7 @@ def parse_compound(payload: bytes, arrival: float = 0.0,
                 continue
             p = RtcpPacket(
                 pt=pt, ssrc=int.from_bytes(pkt[4:8], 'big'), arrival=arrival,
+                arrival_estimated=arrival_estimated,
                 source_ip=source_ip, epoch=epoch,
             )
             p.report_blocks = _parse_report_blocks(pkt[8:], rc)
@@ -156,7 +162,12 @@ def summarize(events: list[dict]) -> dict:
     """把 RTCP 事件汇总成按 RTP SSRC 索引的指标
 
     events: [{'arrival': float, 'payload': bytes,
-              'source_ip': str|None, 'epoch': float|None}, ...]
+              'source_ip': str|None, 'epoch': float|None,
+              'arrival_estimated': bool}, ...]
+
+    `arrival_estimated=True` 表示到达时间是从 TCP 方向的时间窗插值出来的
+    （TCP 没有逐帧时间戳）。这类 RTT 只是估算值，汇总里会带
+    `rtt_estimated=True`，调用方展示时应注明。
 
     返回 {ssrc: {...}}。同一 SSRC 可能被多台设备复用，所以每个条目还带
     `source_ips`（观察到该 SSRC 的 SR 发送方）。调用方应核对媒体流的
@@ -171,7 +182,7 @@ def summarize(events: list[dict]) -> dict:
         if payload:
             packets.extend(parse_compound(
                 payload, ev.get('arrival') or 0.0, ev.get('source_ip'),
-                ev.get('epoch')))
+                ev.get('epoch'), bool(ev.get('arrival_estimated'))))
     if not packets:
         return {}
 
@@ -183,7 +194,10 @@ def summarize(events: list[dict]) -> dict:
         item['sr_count'] += 1
         item['sender_packet_count'] = p.sender_packet_count
         item['sender_octet_count'] = p.sender_octet_count
-        if p.ntp_seconds is not None:
+        # NTP 字段全零表示发送端没有墙钟（RFC 3550 允许）。这时换算出来是
+        # 1900 年，既不应用作 last_sr_ntp，也不能拿去和抓包机墙钟相减——
+        # 否则会显示成约 127 年的时钟差。
+        if p.ntp_msw or p.ntp_lsw:
             item['last_sr_ntp'] = round(p.ntp_seconds, 3)
             if p.epoch is not None:
                 # 抓包机墙钟 − 发送端 NTP。含单向传输时延，只能说明
@@ -213,10 +227,15 @@ def summarize(events: list[dict]) -> dict:
                     rtt = (p.arrival - sr.arrival) - block.dlsr_seconds
                     if rtt >= 0:
                         item['_rtts'].append(rtt * 1000)
+                        # 只要 SR 或 RR 有一端的时间是插值来的，RTT 就是
+                        # 估算值：TCP 承载时两端都可能没有逐帧时间戳。
+                        if p.arrival_estimated or sr.arrival_estimated:
+                            item['_rtt_estimated'] = True
 
     for item in summary.values():
         fractions = item.pop('_fractions')
         rtts = item.pop('_rtts')
+        estimated = item.pop('_rtt_estimated', False)
         item['source_ips'] = item.pop('_sources')
         if fractions:
             # RFC 3550 的 Fraction Lost 是"自上次报告以来"的区间值，不是
@@ -226,6 +245,7 @@ def summarize(events: list[dict]) -> dict:
         if rtts:
             item['rtt_ms_latest'] = round(rtts[-1], 3)
             item['rtt_ms_avg'] = round(sum(rtts) / len(rtts), 3)
+            item['rtt_estimated'] = bool(estimated)
     return summary
 
 
@@ -239,6 +259,7 @@ def _empty_summary() -> dict:
         'peer_jitter_raw': None,
         'rtt_ms_latest': None,
         'rtt_ms_avg': None,
+        'rtt_estimated': False,
         'sender_packet_count': None,
         'sender_octet_count': None,
         'last_sr_ntp': None,

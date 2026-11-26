@@ -102,6 +102,38 @@ def test_tcp_rtcp_only_is_not_media():
     assert rtp_analyzer.parse_rfc4571_ex(buf) is None
 
 
+def _rtcp_rr_empty(ssrc: int = 0x11223344) -> bytes:
+    """8 字节 RR（0 个报告块）。比 RTP 的 12 字节头还短，
+    但它是合法的 RTCP 帧，不能把对齐扫描打断。"""
+    return bytes([0x80, 201, 0, 1]) + ssrc.to_bytes(4, 'big')
+
+
+def test_short_tcp_rtcp_does_not_break_alignment():
+    """8 字节 RR 夹在 RTP 中间：前后 RTP 都必须保留，RR 也要被收集"""
+    buf = b''.join([
+        _frame(_rtp(1)), _frame(_rtp(2)), _frame(_rtcp_rr_empty()),
+        _frame(_rtp(3)), _frame(_rtp(4)), _frame(_rtp(5)),
+    ])
+
+    got = rtp_analyzer.parse_rfc4571_streams(buf)
+
+    assert got is not None
+    assert got[0] == 0, '不应因为短 RTCP 帧而错位重扫'
+    assert [p.seq for p in got[1][0x11223344]] == [1, 2, 3, 4, 5]
+    assert len(got[2]['rtcp']) == 1
+
+
+def test_short_tcp_rtcp_is_not_mistaken_for_rtp():
+    """8 字节 RR 的 PT=201，不能被当作 RTP 计入媒体统计"""
+    buf = b''.join([_frame(_rtp(seq)) for seq in range(1, 4)]
+                   + [_frame(_rtcp_rr_empty())])
+
+    got = rtp_analyzer.parse_rfc4571_streams(buf)
+
+    assert got is not None
+    assert sum(len(v) for v in got[1].values()) == 3
+
+
 def test_tcp_multiple_ssrcs_are_parsed_separately():
     frames = []
     for seq in range(1, 5):

@@ -211,6 +211,33 @@ def test_med002_uses_peer_loss_to_avoid_overclaiming():
     assert events[0].evidence['rtcp_fraction_lost'] == 0.0
 
 
+def test_med002_keeps_evidence_when_peer_avg_loss_is_high():
+    """最近一次区间恰好没丢，但各区间平均仍明显丢包：不能下调等级"""
+    stream = _stream(seq_gap_packets=10, seq_gap_count=2,
+                     rtcp={'fraction_lost_latest': 0.0,
+                           'fraction_lost_avg': 3.0,
+                           'cumulative_lost_latest': 30})
+
+    events = [e for e in diagnosis._check_media([], [stream], {})
+              if e.rule_id == 'MED-002']
+
+    assert len(events) == 1
+    assert events[0].evidence_level == diagnosis.CONFIRMED
+    assert '接近零' not in events[0].description
+
+
+def test_med002_downgrades_only_when_latest_and_avg_are_quiet():
+    stream = _stream(seq_gap_packets=10, seq_gap_count=2,
+                     rtcp={'fraction_lost_latest': 0.0,
+                           'fraction_lost_avg': 0.0,
+                           'cumulative_lost_latest': 0})
+
+    events = [e for e in diagnosis._check_media([], [stream], {})
+              if e.rule_id == 'MED-002']
+
+    assert events[0].evidence_level == diagnosis.SUSPECTED
+
+
 def test_med003_mentions_peer_jitter():
     stream = _stream(jitter_avg=80.0, jitter_max=120.0,
                      rtcp={'peer_jitter_ms': 10.0})
@@ -492,6 +519,51 @@ def test_summary_records_sr_source_ips():
     ])
 
     assert summary[0x1000]['source_ips'] == ['10.0.0.1', '10.0.0.9']
+
+
+def test_zero_ntp_sr_does_not_report_absurd_clock_offset():
+    """NTP 全零表示发送端没有墙钟（RFC 3550 允许），不能当成 1900 年"""
+    sr = _rtcp(rtcp.PT_SR, 0x1000, ntp=(0, 0))
+
+    summary = rtcp.summarize([
+        {'arrival': 1.0, 'payload': sr, 'source_ip': '10.0.0.1',
+         'epoch': 1700000000.0},
+    ])
+
+    item = summary[0x1000]
+    assert item['sr_count'] == 1
+    assert item['last_sr_ntp'] is None
+    assert item['sr_clock_offset_seconds'] is None
+
+
+def test_udp_rtcp_rtt_is_not_marked_estimated():
+    ntp = (0xE0000001, 0)
+    sr = _rtcp(rtcp.PT_SR, 0x1000, ntp=ntp)
+    rr = _rtcp(rtcp.PT_RR, 0x2000,
+               [_block(0x1000, lsr=rtcp.ntp_middle32(*ntp), dlsr=0)])
+
+    summary = rtcp.summarize([
+        {'arrival': 10.0, 'payload': sr},
+        {'arrival': 10.1, 'payload': rr},
+    ])
+
+    assert summary[0x1000]['rtt_estimated'] is False
+
+
+def test_tcp_rtcp_rtt_is_marked_estimated():
+    """TCP 没有逐帧时间戳，插值出来的到达时间算的 RTT 必须标注为估算"""
+    ntp = (0xE0000001, 0)
+    sr = _rtcp(rtcp.PT_SR, 0x1000, ntp=ntp)
+    rr = _rtcp(rtcp.PT_RR, 0x2000,
+               [_block(0x1000, lsr=rtcp.ntp_middle32(*ntp), dlsr=0)])
+
+    summary = rtcp.summarize([
+        {'arrival': 10.0, 'payload': sr, 'arrival_estimated': True},
+        {'arrival': 10.1, 'payload': rr, 'arrival_estimated': True},
+    ])
+
+    assert summary[0x1000]['rtt_ms_latest'] is not None
+    assert summary[0x1000]['rtt_estimated'] is True
 
 
 def _stat(ssrc=0x1000):
