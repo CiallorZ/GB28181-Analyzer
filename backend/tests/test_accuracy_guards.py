@@ -58,6 +58,21 @@ def test_udp_extraction_returns_rtcp_separately(monkeypatch):
     assert rtcp_rows[0]['payload'] == rtcp
 
 
+def test_udp_extraction_keeps_wall_clock_for_rtcp(monkeypatch):
+    """RTCP 需要抓包机墙钟才能与 SR 的 NTP 比对；RTP 用不到这一列"""
+    rtcp = _rtcp_sr()
+    rows = [
+        ['2', '0.2', '10.0.0.1', '50001', '10.0.0.2', '50001',
+         rtcp.hex(), '1700000000.25'],
+    ]
+    monkeypatch.setattr(capture, 'TSHARK', '/bin/true')
+    monkeypatch.setattr(capture, 'iter_fields', lambda *a, **k: iter(rows))
+
+    _rtp_rows, rtcp_rows = capture.extract_udp_rtp_and_rtcp('ignored.pcap')
+
+    assert rtcp_rows[0]['epoch'] == 1700000000.25
+
+
 def test_tcp_rtcp_frames_are_reported_for_summary():
     buf = b''.join([_frame(_rtp(1)), _frame(_rtp(2)),
                     _frame(_rtcp_sr()), _frame(_rtp(3))])
