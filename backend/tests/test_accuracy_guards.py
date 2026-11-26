@@ -38,7 +38,7 @@ def test_rtcp_payload_type_is_classified():
     assert not rtp_analyzer.is_rtcp(b'')
 
 
-def test_udp_extraction_drops_rtcp(monkeypatch):
+def test_udp_extraction_returns_rtcp_separately(monkeypatch):
     rtcp = _rtcp_sr()
     rows = [
         ['1', '0.1', '10.0.0.1', '50000', '10.0.0.2', '50000',
@@ -49,10 +49,27 @@ def test_udp_extraction_drops_rtcp(monkeypatch):
     monkeypatch.setattr(capture, 'TSHARK', '/bin/true')
     monkeypatch.setattr(capture, 'iter_fields', lambda *a, **k: iter(rows))
 
-    out = capture.extract_udp_rtp('ignored.pcap')
+    rtp, rtcp_rows = capture.extract_udp_rtp_and_rtcp('ignored.pcap')
 
-    assert len(out) == 1
-    assert out[0]['payload'][1] == 96
+    assert len(rtp) == 1
+    assert rtp[0]['payload'][1] == 96
+    assert len(rtcp_rows) == 1
+    assert rtcp_rows[0]['frame'] == 2
+    assert rtcp_rows[0]['payload'] == rtcp
+
+
+def test_tcp_rtcp_frames_are_reported_for_summary():
+    buf = b''.join([_frame(_rtp(1)), _frame(_rtp(2)),
+                    _frame(_rtcp_sr()), _frame(_rtp(3))])
+
+    got = rtp_analyzer.parse_rfc4571_streams(buf)
+
+    assert got is not None
+    stats = got[2]
+    assert len(stats['rtcp']) == 1
+    pos, payload = stats['rtcp'][0]
+    assert 0.0 <= pos <= 1.0
+    assert payload == _rtcp_sr()
 
 
 def test_tcp_rtcp_interleaved_does_not_truncate_rtp():
