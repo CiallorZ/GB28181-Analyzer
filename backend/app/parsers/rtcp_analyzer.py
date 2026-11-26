@@ -219,6 +219,9 @@ def summarize(events: list[dict]) -> dict:
         rtts = item.pop('_rtts')
         item['source_ips'] = item.pop('_sources')
         if fractions:
+            # RFC 3550 的 Fraction Lost 是"自上次报告以来"的区间值，不是
+            # 累计值。这里对所有报告等权平均，得到的是"平均每区间丢包率"，
+            # 不是整段会话的丢包率；要累计口径请看 cumulative_lost_latest。
             item['fraction_lost_avg'] = round(sum(fractions) / len(fractions), 3)
         if rtts:
             item['rtt_ms_latest'] = round(rtts[-1], 3)
