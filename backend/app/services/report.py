@@ -137,6 +137,19 @@ def build_markdown(task, file, sessions, streams, diagnostics) -> str:
             add('')
             add('「对端丢包 / RTT」来自 RTCP 接收报告，是本端之外的第二视角；'
                 '抓包中未观察到 RTCP 的流显示为 —，不代表对端没有统计。')
+            offsets = [(st, (st.extra or {}).get('rtcp') or {})
+                       for st in streams
+                       if ((st.extra or {}).get('rtcp') or {}
+                           ).get('sr_clock_offset_seconds') is not None]
+            if offsets:
+                add('')
+                add('**两端时钟差**（抓包机墙钟 − SR 中的 NTP，含单向传输时延，'
+                    '不是 RTT）：')
+                add('')
+                for st, rtcp in offsets:
+                    add('- SSRC %s：%.3f s' % (
+                        '%08x' % st.ssrc if st.ssrc else '—',
+                        rtcp['sr_clock_offset_seconds']))
     else:
         add('未识别到 RTP 媒体流。')
     add('')

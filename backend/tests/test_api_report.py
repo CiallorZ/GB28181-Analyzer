@@ -54,6 +54,24 @@ def test_markdown_report(client, db, make_task):
     assert '00005678' in body
 
 
+def test_markdown_report_lists_rtcp_peer_metrics_and_clock_offset(client, db, make_task):
+    task = make_task()
+    _seed(db, task)
+    stream = db.query(MediaStream).filter(MediaStream.task_id == task.id).one()
+    stream.extra = {'rtcp': {
+        'fraction_lost_latest': 2.5, 'rtt_ms_latest': 40.0,
+        'sr_clock_offset_seconds': 1.234}}
+    db.commit()
+
+    body = client.get('/api/v1/tasks/%d/report' % task.id).text
+
+    assert '对端丢包' in body and '2.50%' in body
+    assert '40.0 ms' in body
+    # 时钟差必须写明不是 RTT，避免被当成时延
+    assert '两端时钟差' in body and '不是 RTT' in body
+    assert '1.234 s' in body
+
+
 def test_json_report_matches_endpoints(client, db, make_task):
     task = make_task()
     _seed(db, task)
