@@ -452,9 +452,12 @@ def extract_udp_rtp_and_rtcp(path: str) -> tuple[list, list]:
     kept_bytes = 0
     for r in iter_fields(path, [
         'frame.number', 'frame.time_relative',
-        'ip.src', 'udp.srcport', 'ip.dst', 'udp.dstport', 'udp.payload'
+        'ip.src', 'udp.srcport', 'ip.dst', 'udp.dstport', 'udp.payload',
+        # 墙钟时间只给 RTCP 用：SR 里的 NTP 是发送端时钟，和抓包机时钟
+        # 一比就能看出两端时间偏差（含单向传输时延）。
+        'frame.time_epoch',
     ], 'udp.length>20'):
-        r = (r + [''] * 7)[:7]
+        r = (r + [''] * 8)[:8]
         try:
             payload = bytes.fromhex(re.sub(r'[^0-9a-fA-F]', '', r[6]))
         except (ValueError, TypeError):
@@ -466,8 +469,14 @@ def extract_udp_rtp_and_rtcp(path: str) -> tuple[list, list]:
             frame = int(r[0]) if r[0] else 0
         except (TypeError, ValueError):
             continue
+        epoch = None
+        if r[7]:
+            try:
+                epoch = float(r[7])
+            except ValueError:
+                epoch = None
         meta = {
-            'frame': frame, 'ts': ts,
+            'frame': frame, 'ts': ts, 'epoch': epoch,
             'src_ip': r[2], 'src_port': int(r[3]) if r[3] else None,
             'dst_ip': r[4], 'dst_port': int(r[5]) if r[5] else None,
         }

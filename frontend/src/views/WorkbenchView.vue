@@ -1191,6 +1191,10 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
                   <b v-if="st.extra.rtcp.peer_jitter_ms != null">
                     抖动 {{ fmt(st.extra.rtcp.peer_jitter_ms, 1) }}ms
                   </b>
+                  <b v-if="st.extra.rtcp.sr_clock_offset_seconds != null"
+                     title="抓包机墙钟与 SR 中 NTP 的差值，含单向传输时延；只能说明两端时间差多少，不是 RTT">
+                    时钟差 {{ fmt(st.extra.rtcp.sr_clock_offset_seconds, 2) }}s
+                  </b>
                 </div>
                 <div class="sc-bar">
                   <div class="sb-track">

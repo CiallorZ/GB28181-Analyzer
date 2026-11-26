@@ -421,6 +421,27 @@ def test_keyframe_offset_reads_ps_extra():
     assert analyzer._keyframe_offset(empty) is None
 
 
+def test_sr_clock_offset_uses_capture_wall_clock():
+    """SR 的 NTP 与抓包机墙钟比对，给出两端时间差（含单向时延）"""
+    ntp = (0xE0000001, 0)              # 一个确定的发送端时间
+    sr = _rtcp(rtcp.PT_SR, 0x1000, ntp=ntp)
+    ntp_seconds = 0xE0000001 - rtcp.NTP_EPOCH_OFFSET
+
+    summary = rtcp.summarize([
+        {'arrival': 1.0, 'payload': sr, 'epoch': ntp_seconds + 2.5},
+    ])
+
+    assert summary[0x1000]['sr_clock_offset_seconds'] == pytest.approx(2.5, abs=0.01)
+
+
+def test_sr_clock_offset_absent_without_epoch():
+    sr = _rtcp(rtcp.PT_SR, 0x1000, ntp=(0xE0000001, 0))
+
+    summary = rtcp.summarize([{'arrival': 1.0, 'payload': sr}])
+
+    assert summary[0x1000]['sr_clock_offset_seconds'] is None
+
+
 def test_peer_jitter_is_converted_with_clock_rate():
     from app.services import analyzer
     from app.parsers.rtp_analyzer import StreamStat

@@ -593,7 +593,7 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
         udp_pkts, udp_rtcp = [], []
 
     rtcp_events = [{'arrival': r['ts'], 'payload': r['payload'],
-                    'source_ip': r.get('src_ip')}
+                    'source_ip': r.get('src_ip'), 'epoch': r.get('epoch')}
                    for r in udp_rtcp]
 
     if udp_pkts:
