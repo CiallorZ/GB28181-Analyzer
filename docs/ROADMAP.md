@@ -663,7 +663,10 @@ SQLite 外键与 WAL（实测 `foreign_keys=1`、`journal_mode=wal`）。
   内存不再随报文数线性增长。`extract_fields` 仍按批返回，未做真流式。
 - ✅ `rebuild` 并发按 CPU 核数（R6-B）：`REBUILD_WORKERS` 默认 0 表示自动，
   取 `min(4, cores/2)` —— ffmpeg 自身多线程，进程数超过核数只会互相抢核。
-- ⬜ 合并 `iter_packets` 与 SIP 字段抽取为单次 tshark 调用（当前仍是 2 次）。
+- ✅ 报文索引与 SIP 字段抽取合并为一次 tshark 扫描：`iter_packets(include_sip=True)`
+  在同一遍读取里顺带取 `sip.*` 字段，只把真正带 SIP 内容的报文交给解析层；
+  `_load_sip(rows_raw=...)` 复用这批行，为 None 时仍可独立扫描。
+  大抓包少一次全量 `-Y 'sip || tcp.port==5060'` 扫描。
 - ⬜ 前端任务级数据缓存（按 `taskId`），路由切换仍会全量重取。
 
 ### 阶段 2.5：视觉语言、交互与可访问性（R5）

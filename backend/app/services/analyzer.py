@@ -194,9 +194,13 @@ def _run(db: Session, task: AnalysisTask):
     endpoints: dict = {}
     ip_addresses = set()
     transport_counts = {'TCP': 0, 'UDP': 0}
+    sip_rows: list = []      # 同一次扫描顺带取到的 SIP 字段，交给第 3 步解析
     batch = []
-    for p in capture.iter_packets(path):
+    for p in capture.iter_packets(path, include_sip=True):
         stats['count'] += 1
+        sip = p.pop('sip', None)
+        if sip:
+            sip_rows.append(sip)
         for address in (p.get('src_ip'), p.get('dst_ip')):
             if address:
                 ip_addresses.add(address)
@@ -255,7 +259,7 @@ def _run(db: Session, task: AnalysisTask):
 
     # ---------------- 3. SIP 消息 ----------------
     _set_progress(db, task, '解析 SIP 信令', 30)
-    sip_msgs = _load_sip(db, task, path)
+    sip_msgs = _load_sip(db, task, path, rows_raw=sip_rows)
 
     # ---------------- 4. 会话重建 ----------------
     _set_progress(db, task, '重建点播会话', 45)
@@ -466,18 +470,24 @@ def _run(db: Session, task: AnalysisTask):
 # ===============================================================
 # 子步骤
 # ===============================================================
-def _load_sip(db: Session, task: AnalysisTask, path: str) -> list[dict]:
-    """抽取并解析所有 SIP 消息，返回 [{info, row}]"""
-    rows_raw = capture.extract_fields(path, [
-        'frame.number', 'frame.time_relative',
-        # SIP 既可能走 UDP 5060，也可能走 TCP 5060（国标 2022 很常见），
-        # 只取 udp.* 会让 TCP 信令的端口全为空，端点与会话方向随之残缺。
-        'ip.src', 'udp.srcport', 'tcp.srcport',
-        'ip.dst', 'udp.dstport', 'tcp.dstport',
-        'sip.CSeq', 'sip.Status-Code',
-        'sip.Request-Line', 'sip.Status-Line',
-        'sip.msg_hdr', 'sip.msg_body',
-    ], 'sip || tcp.port==5060')
+def _load_sip(db: Session, task: AnalysisTask, path: str,
+              rows_raw: list | None = None) -> list[dict]:
+    """抽取并解析所有 SIP 消息，返回 [{info, row}]
+
+    rows_raw 由报文索引扫描顺带提供（capture.iter_packets(include_sip=True)），
+    传入时不再单独跑一次 tshark；为 None 时回退到独立扫描，便于单独调用。
+    """
+    if rows_raw is None:
+        rows_raw = capture.extract_fields(path, [
+            'frame.number', 'frame.time_relative',
+            # SIP 既可能走 UDP 5060，也可能走 TCP 5060（国标 2022 很常见），
+            # 只取 udp.* 会让 TCP 信令的端口全为空，端点与会话方向随之残缺。
+            'ip.src', 'udp.srcport', 'tcp.srcport',
+            'ip.dst', 'udp.dstport', 'tcp.dstport',
+            'sip.CSeq', 'sip.Status-Code',
+            'sip.Request-Line', 'sip.Status-Line',
+            'sip.msg_hdr', 'sip.msg_body',
+        ], 'sip || tcp.port==5060')
 
     out = []
     rows = []          # 待批量插入的 ORM 对象

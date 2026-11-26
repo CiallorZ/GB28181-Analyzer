@@ -212,22 +212,39 @@ PACKET_FIELDS = [
     'frame.protocols',
 ]
 
+# SIP 字段跟在 PACKET_FIELDS 后面，顺序与 _load_sip 的解包顺序一致。
+# 与报文索引合并到同一次 tshark 扫描：大抓包上每多一次全量扫描就多一遍
+# 磁盘 I/O 与解包开销，而 SIP 字段在非 SIP 报文上为空，代价可以忽略。
+SIP_FIELDS = [
+    'ip.src', 'udp.srcport', 'tcp.srcport',
+    'ip.dst', 'udp.dstport', 'tcp.dstport',
+    'sip.CSeq', 'sip.Status-Code',
+    'sip.Request-Line', 'sip.Status-Line',
+    'sip.msg_hdr', 'sip.msg_body',
+]
+
 
 def iter_packets(path: str, display_filter: str | None = None,
-                 limit: int | None = None):
+                 limit: int | None = None, include_sip: bool = False):
     """流式产出报文索引，避免一次性载入内存
 
     yield dict:
       number, ts, src_ip, dst_ip, src_port, dst_port, transport, length, protocols
+      sip —— 仅在 include_sip=True 且该报文含 SIP 字段时出现，元组顺序与
+             _load_sip 的字段顺序完全一致：
+             (frame, time, ip.src, udp.srcport, tcp.srcport, ip.dst,
+              udp.dstport, tcp.dstport, sip.CSeq, sip.Status-Code,
+              sip.Request-Line, sip.Status-Line, sip.msg_hdr, sip.msg_body)
     """
     if not TSHARK:
         raise CaptureError('未找到 tshark')
 
+    fields = PACKET_FIELDS + (SIP_FIELDS if include_sip else [])
     cmd = [TSHARK, '-r', path, '-T', 'fields',
            '-E', 'separator=\x1f', '-E', 'occurrence=f']
     if display_filter:
         cmd += ['-Y', display_filter]
-    for f in PACKET_FIELDS:
+    for f in fields:
         cmd += ['-e', f]
 
     proc = subprocess.Popen(cmd, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -237,7 +254,7 @@ def iter_packets(path: str, display_filter: str | None = None,
         with analysis_control.track(proc):
             for line in proc.stdout:
                 parts = line.rstrip('\r\n').split('\x1f')
-                while len(parts) < len(PACKET_FIELDS):
+                while len(parts) < len(fields):
                     parts.append('')
                 (num, ts, ln, ip_src, ip_dst, v6_src, v6_dst,
                  t_sport, t_dport, u_sport, u_dport, protos) = parts[:12]
@@ -256,7 +273,7 @@ def iter_packets(path: str, display_filter: str | None = None,
                     except (TypeError, ValueError):
                         return None
 
-                yield {
+                item = {
                     'number': _int(num),
                     'ts': float(ts) if ts else None,
                     'src_ip': ip_src or v6_src or None,
@@ -267,6 +284,14 @@ def iter_packets(path: str, display_filter: str | None = None,
                     'length': _int(ln) or 0,
                     'protocols': protos or '',
                 }
+                if include_sip:
+                    sip = parts[12:24]
+                    # 只有真正带 SIP 内容的报文才交给上层解析：判据是 sip.*
+                    # 字段（元组后 6 项），不是地址/端口——后者每个报文都有。
+                    # 这样 tcp.port==5060 上的握手与裸 TCP 段被自然过滤掉。
+                    if any(sip[6:]):
+                        item['sip'] = (num, ts, *sip)
+                yield item
                 count += 1
                 if limit and count >= limit:
                     break
