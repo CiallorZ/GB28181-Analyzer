@@ -149,6 +149,33 @@ def test_tcp_rfc4571_end_to_end(db, tmp_path):
     assert st.seq_gap_count == 0
 
 
+def test_rtcp_sr_rr_end_to_end(db, tmp_path):
+    """真实 SR/RR 解析：RTT、对端丢包、抖动、两端时钟差都要落到媒体流上
+
+    样本刻意把 SR→RR 间隔和 DLSR 配好：RTT 应恰好 40ms；
+    抓包机墙钟比 SR 的 NTP 快 1 秒，时钟差应为 1.0s。
+    """
+    task, _dst = _make_task(db, tmp_path, 'rtcp-sr-rr.pcap')
+    analyzer.run_analysis(db, task.id)
+
+    db.expire_all()
+    t = db.get(AnalysisTask, task.id)
+    assert t.status == TaskStatus.COMPLETED, t.error_message
+
+    st = db.scalar(select(MediaStream).where(MediaStream.task_id == task.id))
+    assert st is not None
+    rtcp = (st.extra or {}).get('rtcp')
+    assert rtcp is not None, 'RTCP 汇总没有挂到媒体流上'
+    assert rtcp['sr_count'] == 1
+    assert rtcp['report_count'] == 1
+    assert rtcp['fraction_lost_latest'] == 25.0
+    assert rtcp['cumulative_lost_latest'] == 25
+    assert rtcp['rtt_ms_latest'] == pytest.approx(40.0, abs=0.01)
+    assert rtcp['sr_clock_offset_seconds'] == pytest.approx(1.0, abs=0.001)
+    # 1800 / 90000 * 1000 = 20.0ms
+    assert rtcp['peer_jitter_ms'] == pytest.approx(20.0, abs=0.01)
+
+
 def test_tcp_sip_ports_and_empty_packets(db, tmp_path):
     """TCP 5060 的 SIP：端口不能为空，握手的空包不能入库"""
     task, _dst = _make_task(db, tmp_path, 'sip-tcp-register.pcap')
