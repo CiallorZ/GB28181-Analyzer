@@ -50,11 +50,18 @@ watch([() => store.currentTaskId, revision], async ([id], _, onCleanup) => {
   const key = rev ? cacheKey(id, rev, 'media-quality') : ''
 
   if (loaded && loaded.taskId === id) {
-    if (!key || loaded.key === key) return
+    // 已有数据，没有需要重取的理由时直接返回；但 loading 是进函数时
+    // 置上的，提前返回前必须清掉，否则深链补版本号这条路径会让
+    // “正在读取媒体质量指标…”永远停在页面上。
+    if (!key || loaded.key === key) {
+      loading.value = false
+      return
+    }
     if (!loaded.key) {
       // 版本号补上了：把已取到的结果归入该版本，避免再打一次接口。
       loaded.key = key
       set(key, { items: loaded.items })
+      loading.value = false
       return
     }
   }
@@ -321,9 +328,11 @@ watch([activeMetric, streams, loading], async () => {
                     {{ st.extra?.rtcp?.fraction_lost_latest != null
                       ? fmt(st.extra.rtcp.fraction_lost_latest, 2) + '%' : '—' }}
                   </td>
-                  <td class="num">
+                  <td class="num"
+                      :title="st.extra?.rtcp?.rtt_estimated ? 'TCP 承载没有逐帧时间戳，到达时间由时间窗插值，RTT 仅为估算值' : ''">
                     {{ st.extra?.rtcp?.rtt_ms_latest != null
-                      ? fmt(st.extra.rtcp.rtt_ms_latest, 1) + 'ms' : '—' }}
+                      ? fmt(st.extra.rtcp.rtt_ms_latest, 1) + 'ms'
+                        + (st.extra.rtcp.rtt_estimated ? '（估算）' : '') : '—' }}
                   </td>
                   <td class="num" :class="st.max_gap > 3 ? 'text-warning' : ''">
                     {{ st.max_gap != null ? fmt(st.max_gap, 2) : '—' }}

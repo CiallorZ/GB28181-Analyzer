@@ -1185,8 +1185,9 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
                     丢包 {{ st.extra.rtcp.fraction_lost_latest != null
                       ? fmt(st.extra.rtcp.fraction_lost_latest, 2) + '%' : '—' }}
                   </b>
-                  <b v-if="st.extra.rtcp.rtt_ms_latest != null">
-                    RTT {{ fmt(st.extra.rtcp.rtt_ms_latest, 1) }}ms
+                  <b v-if="st.extra.rtcp.rtt_ms_latest != null"
+                     :title="st.extra.rtcp.rtt_estimated ? 'TCP 承载没有逐帧时间戳，到达时间由时间窗插值，RTT 仅为估算值' : ''">
+                    RTT {{ fmt(st.extra.rtcp.rtt_ms_latest, 1) }}ms{{ st.extra.rtcp.rtt_estimated ? '（估算）' : '' }}
                   </b>
                   <b v-if="st.extra.rtcp.peer_jitter_ms != null">
                     抖动 {{ fmt(st.extra.rtcp.peer_jitter_ms, 1) }}ms
