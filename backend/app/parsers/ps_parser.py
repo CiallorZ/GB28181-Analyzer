@@ -23,6 +23,7 @@ PS / PES / ES 解封装与视频编码分析（M08）
 """
 from __future__ import annotations
 
+import bisect
 from dataclasses import dataclass, field
 
 # ---------------------------------------------------------------
@@ -712,12 +713,18 @@ def _fill_keyframe_times(video: VideoInfo, es_marks: list,
     if not offsets or not es_marks:
         return
     rate = clock_rate if clock_rate and clock_rate > 0 else 90000
+    # es_marks 按 PES 段结束位置递增，用二分定位每个关键帧落在哪一段，
+    # 避免逐个关键帧线性扫描（长流上关键帧与 PES 段都不少）。
+    ends = [m[0] for m in es_marks]
     marks = []
     for off in offsets:
-        # es_marks 是每个 PES 段结束位置，取第一个覆盖该偏移的段
-        mark = next((m for m in es_marks if m[0] > off), None)
-        if mark is not None:
-            marks.append(mark)
+        idx = bisect.bisect_right(ends, off)
+        if idx >= len(es_marks):
+            # 关键帧落在最后一个 PES 段之后（或恰好压在段边界上），
+            # 无法定位到具体包。整条序列作废：跳过中间某个关键帧会让
+            # 相邻间隔跨过它，算出的 GOP 直接翻倍，MED-010 随之误报。
+            return
+        marks.append(es_marks[idx])
     if not marks:
         return
 

@@ -303,6 +303,26 @@ def test_keyframe_times_never_mix_rtp_and_arrival_sources():
     assert out.video.keyframe_gop_seconds == [1.5]
 
 
+def test_keyframe_times_dropped_when_a_keyframe_cannot_be_located():
+    """关键帧定位不到对应 RTP 包时整条序列作废
+
+    跳过中间某个关键帧会让相邻间隔跨过它，GOP 直接翻倍，
+    MED-010 会因此误报。
+    """
+    from app.parsers import ps_parser
+
+    video = ps_parser.VideoInfo()
+    video.keyframe_offsets = [10, 200]
+    # 只有一段结束于 100，第二个关键帧（偏移 200）落在所有段之后
+    marks = [(100, 0.0, 90000)]
+
+    ps_parser._fill_keyframe_times(video, marks, 90000)
+
+    assert video.keyframe_times == []
+    assert video.keyframe_gop_seconds == []
+    assert video.first_keyframe_offset is None
+
+
 def test_keyframe_times_empty_without_any_time_source():
     from app.parsers import ps_parser
 
