@@ -19,7 +19,7 @@ const info = computed(() => {
   const s = props.stream
   const rb = s.extra?.rebuild || {}
   return {
-    ok: !!rb.ok && !!s.rebuilt_path,
+    ok: !!rb.ok && (s.has_rebuilt_video ?? Boolean(s.rebuilt_path)),
     aligned: !!rb.aligned,
     duration: rb.duration ?? s.duration,
     psBytes: rb.ps_bytes,
@@ -210,7 +210,7 @@ watch(() => props.stream.id, () => {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   overflow: hidden;
-  transition: all var(--dur) var(--ease);
+  transition: border-color var(--dur) var(--ease);
 }
 .vp:hover { border-color: var(--line-strong); }
 
@@ -236,13 +236,12 @@ watch(() => props.stream.id, () => {
 .vp-poster {
   position: absolute; inset: 0;
   width: 100%; height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   opacity: .82;
-  transition: opacity var(--dur) var(--ease), transform var(--dur-lg) var(--ease);
+  transition: opacity var(--dur) var(--ease);
 }
 .vp-cover:hover .vp-poster {
   opacity: 1;
-  transform: scale(1.03);
 }
 .vp-play {
   position: relative;

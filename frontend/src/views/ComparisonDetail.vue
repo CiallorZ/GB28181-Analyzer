@@ -95,7 +95,7 @@ function identifiers(values) {
       <p v-if="data.stale" class="err-box" role="status">输入任务已变化。当前显示已保存的快照，原始证据跳转已禁用。</p>
       <div class="g2">
         <section v-for="side in sides" :key="side" class="card card-body">
-          <div class="row"><b class="side">{{ side.toUpperCase() }}</b><h2>{{ data['label_'+side] || '抓包任务' }} #{{ data['task_'+side+'_id'] }}</h2></div>
+          <div class="row"><b :class="['side', side]">{{ side.toUpperCase() }}</b><h2>{{ data['label_'+side] || '抓包任务' }} #{{ data['task_'+side+'_id'] }}</h2></div>
           <p v-for="(f,i) in data.fingerprint[side].files" :key="i">{{ f.filename }}</p>
           <p class="meta">完成时间（UTC） {{ utcTime(data.fingerprint[side].completed_at) }} · {{ data.fingerprint[side].sessions }} 个会话 · {{ data.fingerprint[side].streams }} 条流</p>
           <button class="btn" :disabled="!!reason(side,null)" @click="jump(side)">查看报文</button> <small>{{ reason(side,null) }}</small>
@@ -103,8 +103,11 @@ function identifiers(values) {
       </div>
       <section class="card card-body">
         <h2>对齐摘要</h2>
-        <p>已对齐 <b>{{ data.summary.aligned_sessions }}</b> 个会话、<b>{{ data.summary.aligned_streams }}</b> 条流。
-          结构或精确值差异 {{ data.summary.structural }} 项，超出对比容差 {{ data.summary.beyond_tolerance }} 项，无法比较 {{ data.summary.unknown }} 项。</p>
+        <dl class="alignment-metrics">
+          <div v-for="[label,value] in [['已对齐会话',data.summary.aligned_sessions],['已对齐媒体流',data.summary.aligned_streams],['结构或精确值差异',data.summary.structural],['超出容差',data.summary.beyond_tolerance],['无法比较',data.summary.unknown]]" :key="label">
+            <dt>{{ label }}</dt><dd>{{ value ?? '—' }}</dd>
+          </div>
+        </dl>
         <p class="meta">{{ data.result.methods }}</p>
         <p v-if="data.result.truncated">明细已截断。全量对齐会话 {{ data.result.totals.sessions }}、媒体流 {{ data.result.totals.streams }}、诊断规则 {{ data.result.totals.diagnostics }}。</p>
         <ul v-if="data.result.truncated && data.result.detail_counts">
@@ -114,7 +117,7 @@ function identifiers(values) {
           </li>
         </ul>
       </section>
-      <div class="row-between wrapx">
+      <div v-panel-change="tab" class="row-between wrapx">
         <nav class="row wrapx" aria-label="对比层面"><button v-for="([name],i) in groups" :key="name" class="btn"
           :aria-pressed="tab===i" @click="tab=i">{{ name }}</button></nav>
         <label><input type="checkbox" v-model="onlyDiff"> 只看差异（含未知）</label>
@@ -176,4 +179,10 @@ h2 { font-size:17px; } h3 { font-size:15px; }
 table { min-width:460px; }
 th,td { text-align:left; }
 summary { cursor:pointer; }
+ .comparison .tbl :is(th, td) { min-width:88px; }
+.comparison .tbl td { overflow-wrap:anywhere; }
+.alignment-metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:8px; margin:14px 0; }
+.alignment-metrics div { padding:10px 12px; background:var(--surface-2); border-radius:var(--radius-sm); }
+.alignment-metrics dt { font-size:12px; color:var(--text-2); }.alignment-metrics dd { font-size:22px; font-weight:650; margin:4px 0 0; font-variant-numeric:tabular-nums; }
+.side { display:grid; place-items:center; width:30px; height:30px; border:0; padding:0; border-radius:8px; color:var(--brand-lt); background:var(--bg-selected); }.side.b { background:var(--surface-2); color:var(--text-2); }
 </style>

@@ -222,7 +222,7 @@ function renderCharts() {
         }
       },
       data: biz,
-      color: [C.ds, C.info, C.dim, C.ok, '#A371F7', C.warn]
+      color: [C.ds, C.info, C.dim, C.ok, C.ai, C.warn]
     }]
   }))
 
@@ -285,7 +285,7 @@ function renderMediaCharts() {
   if (!streams.value.length) return
   const t = themeColors()
   /* --- 4. 码率趋势 --- */
-  const PALETTE = [C.brand, C.info, C.ok, C.warn, '#9b59f0', C.ds]
+  const PALETTE = [C.brand, C.info, C.ok, C.warn, C.ai, C.ds]
   const trendStreams = streams.value.slice(0, TREND_LIMIT)
   const streamLabel = st => `#${st.id}${st.ssrc == null ? '' : ' · 0x' + st.ssrc.toString(16)}`
   const brSeries = trendStreams.map((st, i) => {
@@ -748,7 +748,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
                     stroke-linecap="round"
                     :stroke-dasharray="`${264 * (busyPct || task.progress) / 100} 264`"
                     transform="rotate(-90 50 50)"
-                    style="transition:stroke-dasharray .5s var(--ease)"/>
+                    style="transition:stroke-dasharray var(--dur-lg) var(--ease-out)"/>
           </svg>
           <div class="an-pct">{{ busyPct || task.progress }}<span>%</span></div>
         </div>
@@ -1469,16 +1469,15 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
   transition: color var(--dur) var(--ease);
   padding: 3px 0;
 }
-.an-step .as-txt { transition: all var(--dur) var(--ease); }
+.an-step .as-txt { transition: opacity var(--dur) var(--ease); }
 .an-step.done .as-txt { opacity: .8; }
 .an-step.now .as-txt {
   font-weight: 600;
-  transform: translateX(2px);
 }
 .as-dot {
   width: 6px; height: 6px; border-radius: 50%;
   background: var(--line-strong); flex: none;
-  transition: all .3s;
+  transition: background-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
 .an-step.done { color: var(--text-2); }
 .an-step.done .as-dot { background: var(--ok); }
@@ -1514,7 +1513,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
   font-size: 12.5px;
   font-family: inherit;
   cursor: pointer;
-  transition: all var(--dur) var(--ease);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
   position: relative;
 }
 .spy-btn:hover { color: var(--text); background: var(--surface); }

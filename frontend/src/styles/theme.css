@@ -1,41 +1,7 @@
-/* ============================================================
-   GB28181 Analyzer · 设计系统 v3
-   ------------------------------------------------------------
-   视觉立场：测量仪器面板，不是营销页。
-   - 红色只表示"故障/当前"，操作按钮用墨色（ink），避免告警色被
-     日常动作稀释；品牌红留给 Logo、当前页和焦点环。
-   - 数据用等宽数字，标签用系统中文字体；字号下限 11px。
-   - 面板之间靠 1px 细线与留白分隔，不用渐变、发光和悬浮抬升。
-   ============================================================ */
+/* Shared typography, controls and layout. Theme colors live in tokens.css. */
 
 :root {
   --app-header-height: 56px;
-  /* ---- 品牌：中国铁塔 ---- */
-  --brand: #D70C1A;
-  --brand-dk: #A80D17;
-  --brand-lt: #FF5A64;
-  --brand-soft: rgba(217, 18, 31, 0.10);
-  --brand-line: rgba(255, 90, 100, 0.32);
-
-  /* ---- DeepSeek（仅用于 AI 相关）---- */
-  --ds: #4D6BFE;
-  --ds-dk: #3550D6;
-  --ds-lt: #8FA6FF;
-  --ds-soft: rgba(77, 107, 254, 0.10);
-  --ds-line: rgba(143, 166, 255, 0.30);
-
-  /* ---- 语义 ---- */
-  --critical: #FF6B63;
-  --warning: #E3B341;
-  --info: #6CB6FF;
-  --ok: #56D364;
-  --unknown: #8B98A5;
-
-  --critical-soft: rgba(255, 107, 99, 0.10);
-  --warning-soft: rgba(227, 179, 65, 0.10);
-  --info-soft: rgba(108, 182, 255, 0.10);
-  --ok-soft: rgba(86, 211, 100, 0.10);
-  --unknown-soft: rgba(139, 152, 165, 0.10);
 
   /* 仪器感：小圆角，避免"卡片套卡片"的 SaaS 观感 */
   --radius-xs: 3px;
@@ -70,29 +36,6 @@
 :root, :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: #10161E;
-  --bg-2: #141B24;
-  --surface: #19222D;
-  --surface-2: #202C38;
-  --surface-3: #2A3745;
-  --surface-4: #354557;
-  --flow: #FF7277;
-  --flow-soft: rgba(217, 18, 31, .15);
-
-  --line: #303E4E;
-  --line-2: #415065;
-  --line-strong: #617287;
-
-  --text: #E6EDF3;
-  --text-2: #CED8E3;
-  --text-3: #AFBFCE;
-  --text-4: #99ABBE;
-
-  /* 操作色：与告警红分离 */
-  --ink-btn: #E6EDF3;
-  --ink-btn-hover: #FFFFFF;
-  --ink-btn-text: #0A0E13;
-
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, .45);
   --shadow: 0 4px 16px rgba(0, 0, 0, .35);
   --shadow-lg: 0 12px 40px rgba(0, 0, 0, .45);
@@ -107,52 +50,6 @@
    ============================================================ */
 :root[data-theme="light"] {
   color-scheme: light;
-
-  --bg: #F2F5F8;
-  --bg-2: #FFFFFF;
-  --surface: #FFFFFF;
-  --surface-2: #F7F9FB;
-  --surface-3: #EBF0F5;
-  --surface-4: #DFE7EF;
-  --flow: #B20C19;
-  --flow-soft: rgba(192, 11, 22, .08);
-
-  --line: #DFE6ED;
-  --line-2: #CDD7E1;
-  --line-strong: #9CAABA;
-
-  --text: #0F1720;
-  --text-2: #47535F;
-  --text-3: #536474;
-  --text-4: #5C6B79;
-
-  --brand: #C00B16;
-  --brand-dk: #97080F;
-  --brand-lt: #B00A14;
-  --brand-soft: rgba(192, 11, 22, .06);
-  --brand-line: rgba(192, 11, 22, .24);
-
-  --ds: #3A54D8;
-  --ds-dk: #2C3FA8;
-  --ds-lt: #2C3FA8;
-  --ds-soft: rgba(58, 84, 216, .07);
-  --ds-line: rgba(58, 84, 216, .22);
-
-  --critical: #C62828;
-  --warning: #8A5A00;
-  --info: #0B5CAD;
-  --ok: #1A7F37;
-  --unknown: #6E7781;
-
-  --critical-soft: rgba(198, 40, 40, .07);
-  --warning-soft: rgba(138, 90, 0, .08);
-  --info-soft: rgba(11, 92, 173, .07);
-  --ok-soft: rgba(26, 127, 55, .07);
-  --unknown-soft: rgba(110, 119, 129, .08);
-
-  --ink-btn: #131A22;
-  --ink-btn-hover: #26313D;
-  --ink-btn-text: #FFFFFF;
 
   --shadow-sm: 0 1px 2px rgba(16, 24, 40, .05);
   --shadow: 0 2px 10px rgba(16, 24, 40, .06);
@@ -376,11 +273,11 @@ code, .mono {
   line-height: 1.6;
   border: 1px solid transparent;
 }
-.badge.critical { background: var(--critical-soft); color: var(--critical); border-color: rgba(255,107,99,.28); }
-.badge.warning { background: var(--warning-soft); color: var(--warning); border-color: rgba(227,179,65,.28); }
-.badge.info { background: var(--info-soft); color: var(--info); border-color: rgba(108,182,255,.28); }
-.badge.ok { background: var(--ok-soft); color: var(--ok); border-color: rgba(86,211,100,.28); }
-.badge.unknown { background: var(--unknown-soft); color: var(--unknown); border-color: rgba(139,152,165,.28); }
+.badge.critical { background: var(--critical-soft); color: var(--critical); border-color: color-mix(in srgb,var(--critical) 28%,transparent); }
+.badge.warning { background: var(--warning-soft); color: var(--warning); border-color: color-mix(in srgb,var(--warning) 28%,transparent); }
+.badge.info { background: var(--info-soft); color: var(--info); border-color: color-mix(in srgb,var(--info) 28%,transparent); }
+.badge.ok { background: var(--ok-soft); color: var(--ok); border-color: color-mix(in srgb,var(--ok) 28%,transparent); }
+.badge.unknown { background: var(--unknown-soft); color: var(--unknown); border-color: color-mix(in srgb,var(--unknown) 28%,transparent); }
 /* 品牌徽章用于"分析中"等中性进行态：不占用告警红 */
 .badge.brand { background: var(--surface-3); color: var(--text-2); border-color: var(--line-2); }
 .badge.ds { background: var(--ds-soft); color: var(--ds-lt); border-color: var(--ds-line); }
@@ -480,13 +377,13 @@ code, .mono {
 }
 .btn.danger:hover:not(:disabled) {
   background: var(--critical-soft);
-  border-color: rgba(255, 107, 99, .4);
+  border-color: color-mix(in srgb,var(--critical) 40%,transparent);
   color: var(--critical);
 }
 
 .btn.success {
   background: transparent;
-  border-color: rgba(86, 211, 100, .35);
+  border-color: color-mix(in srgb,var(--ok) 35%,transparent);
   color: var(--ok);
 }
 .btn.success:hover:not(:disabled) {
@@ -575,7 +472,7 @@ code, .mono {
 .btn-mini:disabled { opacity: .4; cursor: not-allowed; }
 .btn-mini.danger:hover:not(:disabled) {
   background: var(--critical-soft);
-  border-color: rgba(255, 107, 99, .4);
+  border-color: color-mix(in srgb,var(--critical) 40%,transparent);
   color: var(--critical);
 }
 
@@ -720,7 +617,7 @@ select.inp { cursor: pointer; }
 
 .err-box {
   background: var(--critical-soft);
-  border: 1px solid rgba(255, 107, 99, .28);
+  border: 1px solid color-mix(in srgb,var(--critical) 28%,transparent);
   border-radius: var(--radius-sm);
   padding: 12px 15px;
   font-size: 13px;
@@ -729,7 +626,7 @@ select.inp { cursor: pointer; }
 }
 .warn-box {
   background: var(--warning-soft);
-  border: 1px solid rgba(227, 179, 65, .28);
+  border: 1px solid color-mix(in srgb,var(--warning) 28%,transparent);
   border-radius: var(--radius-sm);
   padding: 12px 15px;
   font-size: 13px;
@@ -738,7 +635,7 @@ select.inp { cursor: pointer; }
 }
 .info-box {
   background: var(--info-soft);
-  border: 1px solid rgba(108, 182, 255, .24);
+  border: 1px solid color-mix(in srgb,var(--info) 24%,transparent);
   border-radius: var(--radius-sm);
   padding: 12px 15px;
   font-size: 13px;
@@ -761,13 +658,13 @@ select.inp { cursor: pointer; }
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: none; }
 }
-.rise { animation: rise .38s var(--ease-out) both; }
+.rise { animation: rise var(--dur-lg) var(--ease-out) both; }
 
 @keyframes fadeIn {
   from { opacity: 0 }
   to { opacity: 1 }
 }
-.fade { animation: fadeIn .28s var(--ease) both; }
+.fade { animation: fadeIn var(--dur-lg) var(--ease) both; }
 
 /* Keep native scrolling immediate. Animate targeted navigation and incoming content. */
 .panel-slide-enter-active { transition:opacity .18s var(--ease),translate .22s var(--ease-out); }
@@ -777,8 +674,8 @@ select.inp { cursor: pointer; }
   from { opacity:.25; translate:0 5px; }
   to { opacity:1; translate:0 0; }
 }
-.page-content-in { animation:page-content-in .23s var(--ease-out) backwards; }
-details[open] > summary + * { animation:page-content-in .2s var(--ease-out); }
+.page-content-in { animation:page-content-in var(--dur) var(--ease-out) backwards; }
+details[open] > summary + * { animation:page-content-in var(--dur) var(--ease-out); }
 
 /* 用户要求减少动效时，全部动画只保留最终态 */
 @media (prefers-reduced-motion: reduce) {

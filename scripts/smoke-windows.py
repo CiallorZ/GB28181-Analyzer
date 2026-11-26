@@ -1,6 +1,7 @@
 """Verify the ZIP can be extracted and run with a fresh data directory."""
 import argparse
 import ctypes
+import hashlib
 import json
 import socket
 import subprocess
@@ -40,13 +41,19 @@ def desktop_smoke(root):
     user32 = ctypes.windll.user32
     callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    expected_host = exe.parent / 'shell' / 'AnalyzerShell.exe'
     GA_ROOT = 2
 
     @callback_type
     def find_window(hwnd, _):
         pid = wintypes.DWORD()
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        if pid.value != process.pid or not user32.IsWindowVisible(hwnd):
+        if not user32.IsWindowVisible(hwnd):
             return True
         # WebView2 会创建继承同一标题的子窗口，只有顶层窗口才响应关窗
         if user32.GetAncestor(hwnd, GA_ROOT) != hwnd:
@@ -54,7 +61,15 @@ def desktop_smoke(root):
         title = ctypes.create_unicode_buffer(160)
         user32.GetWindowTextW(hwnd, title, len(title))
         if '视联网分析工作台' in title.value:
-            handles.append(hwnd)
+            handle = kernel.OpenProcess(0x1000, False, pid.value)
+            if handle:
+                try:
+                    path = ctypes.create_unicode_buffer(32768)
+                    length = wintypes.DWORD(len(path))
+                    if kernel.QueryFullProcessImageNameW(handle, 0, path, ctypes.byref(length)) and Path(path.value) == expected_host:
+                        handles.append(hwnd)
+                finally:
+                    kernel.CloseHandle(handle)
         return True
 
     try:
@@ -89,7 +104,46 @@ def desktop_smoke(root):
             process.wait(timeout=10)
 
 
-def smoke(archive):
+def analyze_sample(base, sample):
+    boundary = 'gb28181-portable-smoke'
+    body = (f'--{boundary}\r\n'
+            'Content-Disposition: form-data; name="file"; filename="gb28181-demo.pcap"\r\n'
+            'Content-Type: application/octet-stream\r\n\r\n').encode()
+    upload = urllib.request.Request(
+        base + '/api/v1/tasks/upload', data=body + sample + f'\r\n--{boundary}--\r\n'.encode(),
+        headers={'Content-Type': f'multipart/form-data; boundary={boundary}'})
+    with urllib.request.urlopen(upload, timeout=10) as response:
+        task_id = json.load(response)['task_id']
+    endpoint = f'{base}/api/v1/tasks/{task_id}'
+    with urllib.request.urlopen(urllib.request.Request(endpoint + '/analyze', data=b''), timeout=10):
+        pass
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        with urllib.request.urlopen(endpoint, timeout=5) as response:
+            state = json.load(response)
+        if state['status'] == 'completed':
+            break
+        assert state['status'] not in ('failed', 'cancelled'), state
+        time.sleep(0.2)
+    assert state['status'] == 'completed', state
+    assert state['summary']['packet_count'] == 126
+    with urllib.request.urlopen(endpoint + '/packets?page_size=1', timeout=5) as response:
+        packet = json.load(response)['items'][0]
+    with urllib.request.urlopen(f"{base}/api/v1/packets/{packet['id']}", timeout=10) as response:
+        detail = json.load(response)
+    assert bytes.fromhex(detail['raw_hex'])[26:30] == bytes([192, 168, 1, 10])
+    assert any(field.get('offset') == 26 and field.get('size') == 4
+               for layer in detail['layers'] for field in layer['fields']), 'Verified IP byte span missing'
+    with urllib.request.urlopen(endpoint + '/report', timeout=5) as response:
+        assert 'attachment' in response.headers.get('Content-Disposition', '')
+
+
+def smoke(archive, browser_only=False, run_analysis=False):
+    checksum_path = archive.with_suffix(archive.suffix + '.sha256')
+    if checksum_path.is_file():
+        expected = checksum_path.read_text(encoding='ascii').split()[0]
+        with archive.open('rb') as file:
+            assert hashlib.file_digest(file, 'sha256').hexdigest() == expected, 'Portable ZIP checksum mismatch'
     with tempfile.TemporaryDirectory(prefix='gb28181-smoke-', ignore_cleanup_errors=True) as temp:
         root = Path(temp)
         with zipfile.ZipFile(archive) as bundle:
@@ -115,10 +169,14 @@ def smoke(archive):
                 with urllib.request.urlopen(f'{base}/tasks/1', timeout=5) as response:
                     assert 'GB28181 Analyzer' in response.read().decode()
                 with urllib.request.urlopen(f'{base}/samples/gb28181-demo.pcap', timeout=5) as response:
-                    assert response.read(4) == bytes.fromhex('d4 c3 b2 a1')
+                    sample = response.read()
+                    assert sample[:4] == bytes.fromhex('d4 c3 b2 a1')
                 with urllib.request.urlopen(f'{base}/api/v1/tasks', timeout=5) as response:
                     assert json.load(response)['items'] == []
                 assert (root / 'data' / 'analyzer.db').is_file()
+                if run_analysis:
+                    assert health['dependencies']['tshark'], 'TShark required for the analysis smoke test'
+                    analyze_sample(base, sample)
             except Exception:
                 print(log_path.read_text(encoding='utf-8', errors='replace'))
                 raise
@@ -126,11 +184,21 @@ def smoke(archive):
                 if process.poll() is None:
                     process.terminate()
                     process.wait(timeout=10)
-        desktop_smoke(root)
-        print(f'Portable ZIP smoke test passed ({version}).')
+        if browser_only:
+            starter = root / 'GB28181-Analyzer' / 'Start-Analyzer.cmd'
+            result = subprocess.check_output(['cmd.exe', '/d', '/c', 'call', str(starter), '--version'],
+                                             cwd=starter.parent, text=True, timeout=10).strip()
+            assert result == version, f'Browser launcher returned an unexpected version: {result}'
+        else:
+            desktop_smoke(root)
+        variant = 'browser' if browser_only else 'desktop'
+        print(f'Portable {variant} ZIP smoke test passed ({version}).')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('archive', type=Path)
-    smoke(parser.parse_args().archive)
+    parser.add_argument('--browser-only', action='store_true')
+    parser.add_argument('--analyze-sample', action='store_true', help='Run the bundled PCAP through TShark')
+    args = parser.parse_args()
+    smoke(args.archive, browser_only=args.browser_only, run_analysis=args.analyze_sample)

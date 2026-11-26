@@ -33,8 +33,8 @@ def test_health_exposes_persisted_log_path(client):
 
 def test_desktop_version_matches():
     root = Path(__file__).resolve().parents[2]
-    tauri = json.loads((root / 'desktop' / 'tauri.conf.json').read_text(encoding='utf-8'))
-    assert tauri['version'] == __version__
+    nsh = json.loads((root / 'desktop-nsh' / 'nsh.json').read_text(encoding='utf-8'))
+    assert nsh['version'] == __version__
     cargo = (root / 'desktop' / 'Cargo.toml').read_text(encoding='utf-8')
     assert 'version = "%s"' % __version__ in cargo
     lock = (root / 'desktop' / 'Cargo.lock').read_text(encoding='utf-8')

@@ -21,12 +21,19 @@ def test_preview_and_analysis_use_same_context(client, db, make_task, monkeypatc
     task = make_task(status=TaskStatus.COMPLETED)
     for ssrc in (None, 0, 37):
         db.add(MediaStream(task_id=task.id, ssrc=ssrc, start_time=0, end_time=1))
+    db.add(MediaStream(task_id=task.id, ssrc=48, start_time=0, end_time=1, codec='H.264',
+                       rebuild_error='private-video-path', extra={'rtcp': {
+                           'fraction_lost_latest': 0, 'peer_jitter_ms': 1.25, 'rtt_ms_latest': 14.5}}))
     db.commit()
     preview = client.get(f'/api/v1/ai/context/{task.id}')
     assert preview.status_code == 200
     data = preview.json()
     for value in ('SSRC=未知 ', 'SSRC=0x00000000 ', 'SSRC=0x00000025 '):
         assert data['context'].count(value) == 1
+    assert '对端最近报告丢包=0.00%' in data['context']
+    assert '对端最近报告抖动=1.25 ms' in data['context']
+    assert 'RTCP RTT=14.50 ms' in data['context']
+    assert '未生成重建预览' in data['context'] and 'private-video-path' not in data['context']
     seen = {}
 
     def fake_analyze(db, task_id, on_delta=None, context=None, expert='general'):

@@ -63,11 +63,15 @@ export const useTaskStore = defineStore('task', () => {
     }
   }
 
-  function openAiPanel() { aiPanelOpen.value = true }
+  const aiFocus = ref('general')
+  function openAiPanel(focus = 'general') {
+    aiFocus.value = focus
+    aiPanelOpen.value = true
+  }
   function closeAiPanel() { aiPanelOpen.value = false }
 
   return {
-    currentTaskId, task, loading, aiPanelOpen, activeCount,
+    currentTaskId, task, loading, aiPanelOpen, aiFocus, activeCount,
     isAnalyzing, isReady,
     setCurrent, loadTask, startPolling, stopPolling, refreshActive,
     openAiPanel, closeAiPanel

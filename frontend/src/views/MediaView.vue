@@ -4,7 +4,9 @@ import { loadECharts } from '../utils/chartLoader'
 import { chartPalette, seriesPalette } from '../utils/chartTheme'
 import { bindChartResize } from '../utils/chartResize'
 import { api } from '../api/client'
+import AiFocusButton from '../components/AiFocusButton.vue'
 import PageNav from '../components/PageNav.vue'
+import VideoPlayer from '../components/VideoPlayer.vue'
 import { useTaskStore } from '../stores/task'
 import { cachedLoad, cacheKey, set, taskRevision } from '../utils/taskCache'
 
@@ -13,6 +15,11 @@ const streams = shallowRef([])
 const err = ref('')
 const loading = ref(false)
 const activeMetric = ref('bitrate')
+const previewId = ref(null)
+const previewStream = computed(() =>
+  streams.value.find(stream => stream.id === previewId.value) ??
+  streams.value.find(stream => stream.has_rebuilt_video) ?? streams.value[0]
+)
 
 const charts = {}
 let C = chartPalette()
@@ -73,6 +80,7 @@ watch([() => store.currentTaskId, revision], async ([id], _, onCleanup) => {
     const load = () => api.mediaQuality(id)
     const result = key ? await cachedLoad(key, load) : await load()
     if (controller.signal.aborted) return
+    if (loaded?.taskId !== id) previewId.value = null
     streams.value = result.items
     loaded = { taskId: id, key, items: result.items }
   } catch (e) {
@@ -92,7 +100,7 @@ function render() {
   const metric = activeMetric.value
   const series = streams.value.flatMap((st, i) => st[metric].length ? [{
     name: st.ssrc == null ? '流 #' + st.id : '0x' + st.ssrc.toString(16),
-    type: 'line', smooth: true, showSymbol: false,
+    type: 'line', showSymbol: false,
     itemStyle: { color: PALETTE[i % PALETTE.length] },
     lineStyle: { width: 2, color: PALETTE[i % PALETTE.length] },
     data: st[metric]
@@ -233,6 +241,7 @@ watch([activeMetric, streams, loading], async () => {
       title="媒体质量分析"
       :sub="`任务 #${store.currentTaskId || '未选择'} · ${stats.total} 条 RTP 流`"
       :crumbs="[{label:'工作台', to:'/'}, {label:'媒体质量分析'}]">
+      <template #actions><AiFocusButton focus="media" label="DeepSeek · 分析媒体链路" /></template>
     </PageNav>
 
     <div v-if="err" class="err-box mb-12">{{ err }}</div>
@@ -285,12 +294,13 @@ watch([activeMetric, streams, loading], async () => {
       </div>
 
       <!-- 图表 -->
-      <section class="card trend-panel mb-12">
+      <div class="media-workspace mb-12">
+      <section v-panel-change="activeMetric" class="card trend-panel">
         <header class="trend-head"><h2>媒体传输趋势</h2><div class="seg">
           <button v-for="m in [
               {k:'bitrate',l:'码率'},
               {k:'jitter',l:'抖动'},
-              {k:'gap',l:'丢包'}
+              {k:'gap',l:'序号缺口'}
             ]" :key="m.k" :class="{ on: activeMetric === m.k }" :aria-pressed="activeMetric === m.k"
             @click="activeMetric = m.k">{{ m.l }}</button>
         </div></header>
@@ -300,6 +310,19 @@ watch([activeMetric, streams, loading], async () => {
         </template>
         <div v-else class="empty">{{loading ? '正在读取趋势…' : '无媒体流'}}</div>
       </section>
+      <section v-if="previewStream" class="card media-preview">
+        <div class="card-head">
+          <span>重建视频预览</span>
+          <select class="inp sm" :value="previewStream.id" aria-label="预览媒体流"
+                  @change="previewId = Number($event.target.value)">
+            <option v-for="stream in streams" :key="stream.id" :value="stream.id">
+              流 #{{ stream.id }}<template v-if="stream.ssrc != null"> · 0x{{ stream.ssrc.toString(16) }}</template>
+            </option>
+          </select>
+        </div>
+        <div class="card-body tight"><VideoPlayer :stream="previewStream" /></div>
+      </section>
+      </div>
       <div class="mb-12">
         <div class="card">
           <div class="card-head">流质量对比</div>
@@ -410,4 +433,10 @@ watch([activeMetric, streams, loading], async () => {
   line-height: 1.75;
 }
 .stream-cell strong{display:block;font:600 12px var(--font-mono)}.stream-cell small,.stream-cell a{font-size:11px}.stream-cell small{color:var(--text-3)}
+ .trend-panel { border-radius:var(--radius); }
+.trend-panel .chart-lg { border-top:1px solid var(--line); }
+.media-workspace { display:grid; grid-template-columns:minmax(0,1.6fr) minmax(290px,1fr); gap:var(--space-3); align-items:start; }
+.media-workspace > :only-child { grid-column:1/-1; }
+.media-preview .card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+@media (max-width:900px) { .media-workspace { grid-template-columns:minmax(0,1fr); } }
 </style>

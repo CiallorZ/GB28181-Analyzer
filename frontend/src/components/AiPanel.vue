@@ -5,7 +5,7 @@
  * 三个阶段：确认配置 → 选择专家并确认发送内容 → 研判报告与追问。
  * 视觉沿用应用本身的仪器面板语言：1px 细线、小圆角、蓝色只作为 AI 强调色。
  */
-import { ref, reactive, computed, watch, nextTick, onUnmounted } from 'vue'
+import { defineAsyncComponent, ref, reactive, computed, watch, nextTick, onUnmounted } from 'vue'
 import { api } from '../api/client'
 import AiContextPreview from './AiContextPreview.vue'
 import InterfaceState from './InterfaceState.vue'
@@ -13,6 +13,8 @@ import { feedback } from '../stores/interface'
 import { useTaskStore } from '../stores/task'
 import { renderMd } from '../utils/markdown'
 import { AI_STEPS, resolvePhase, stepIndexFor } from '../utils/aiStages'
+
+const AiExpertPicker = defineAsyncComponent(() => import('./AiExpertPicker.vue'))
 
 const props = defineProps({ open: Boolean })
 const emit = defineEmits(['update:open'])
@@ -51,6 +53,7 @@ const profiles = {
 }
 const suggestedQuestions = computed(() => profiles[expert.value][2])
 const expertName = computed(() => profiles[expert.value][0])
+const requestedExpert = computed(() => Object.hasOwn(profiles, store.aiFocus) ? store.aiFocus : 'general')
 
 function useSuggestion(text) {
   question.value = text
@@ -75,12 +78,12 @@ const facts = computed(() => {
   const s = store.task?.summary || {}
   const d = s.diagnostics || {}
   return [
-    { k: '报文', v: (s.packet_count || 0).toLocaleString() },
-    { k: '会话', v: s.session_count ?? 0 },
+    { k: '报文', v: (s.packet_count ?? '—').toLocaleString() },
+    { k: '会话', v: s.session_count ?? '—' },
     { k: '信令成功', v: s.signal_success_rate != null ? s.signal_success_rate.toFixed(1) + '%' : '—' },
-    { k: '有媒体', v: s.sessions_with_media ?? 0 },
-    { k: '严重', v: d.critical || 0, tone: d.critical ? 'critical' : '' },
-    { k: '警告', v: d.warning || 0, tone: d.warning ? 'warning' : '' }
+    { k: '有媒体', v: s.sessions_with_media ?? '—' },
+    { k: '严重', v: d.critical ?? '—', tone: d.critical ? 'critical' : '' },
+    { k: '警告', v: d.warning ?? '—', tone: d.warning ? 'warning' : '' }
   ]
 })
 
@@ -88,8 +91,17 @@ const facts = computed(() => {
 const phase = computed(() => resolvePhase({
   view: view.value,
   report: report.value,
+  running: running.value,
   previewOpen: previewOpen.value
 }))
+
+watch(phase, async () => {
+  await nextTick()
+  const drawer = drawerRef.value
+  if (props.open && drawer && !drawer.contains(document.activeElement)) {
+    drawer.focus({ preventScroll: true })
+  }
+})
 
 const stepIndex = computed(() => stepIndexFor(phase.value))
 
@@ -122,7 +134,6 @@ async function loadCfg() {
     cfg.value = await api.aiConfig()
     modelInput.value = cfg.value.model || ''
     baseInput.value = cfg.value.base_url || ''
-    if (cfg.value.has_key && view.value === 'config') view.value = 'flow'
   } catch { /* 读取失败时保持默认，用户仍可手动填写 */ }
 }
 
@@ -173,6 +184,7 @@ async function runAnalyze(contextHash) {
   err.value = ''
   report.value = ''
   reportContextHash.value = ''
+  reportSeconds.value = ''
   chat.value = []
   reportExpert.value = expert.value
   const t0 = Date.now()
@@ -232,7 +244,7 @@ async function runAnalyze(contextHash) {
     scrollBody(true)
   } catch (e) {
     report.value = ''
-    err.value = e.message
+    err.value = e.name === 'AbortError' ? '已停止接收报告。已发出的请求仍可能由服务端处理。' : e.message
     if (e.name !== 'AbortError') feedback('error')
   } finally {
     running.value = false
@@ -363,6 +375,7 @@ async function copyReport() {
 }
 
 function resetReport() {
+  expert.value = requestedExpert.value
   report.value = ''
   reportContextHash.value = ''
   reportSeconds.value = ''
@@ -392,15 +405,15 @@ watch(() => props.open, async (v) => {
     previousFocus = null
     return
   }
+  if (!report.value && !running.value && !previewOpen.value) expert.value = requestedExpert.value
   previousFocus = document.activeElement
   lockPageScroll()
   await nextTick()
   drawerRef.value?.focus()
-  const before = cfg.value.has_key
+  view.value = 'flow'
   await loadCfg()
-  if (!cfg.value.has_key) view.value = 'config'
-  else if (!before && !report.value) view.value = 'flow'
-})
+}, { immediate: true })
+onUnmounted(() => { if (props.open) unlockPageScroll() })
 
 onUnmounted(unlockPageScroll)
 </script>
@@ -453,7 +466,8 @@ onUnmounted(unlockPageScroll)
             </template>
           </nav>
 
-          <div ref="bodyRef" class="ai-body">
+          <div ref="bodyRef" v-panel-change="phase" class="ai-body">
+            <p v-if="err && view === 'flow' && !previewOpen" class="ai-msg bad" role="alert">{{ err }}</p>
             <div v-if="view === 'config'" class="ai-config">
               <div class="ai-note">
                 <span class="ai-note-icon" aria-hidden="true"><AppIcon name="info" /></span>
@@ -506,20 +520,40 @@ onUnmounted(unlockPageScroll)
                 v-if="!canAnalyze"
                 icon="signal"
                 title="先完成一次抓包分析"
-                detail="会诊使用当前任务的信令、媒体与规则诊断摘要。"
-              />
+                detail="选择已完成的抓包后，可以在本机查看会诊依据，选择信令或媒体分析视角。"
+              >
+                <router-link class="btn primary" to="/tasks" @click="close">选择历史任务</router-link>
+                <router-link class="btn" to="/" @click="close">导入抓包</router-link>
+              </InterfaceState>
 
               <template v-else>
                 <AiContextPreview
                   v-if="phase === 'preview'"
                   :task-id="store.currentTaskId"
                   :expert="expertName"
-                  :expert-key="expert"
+                  :model-endpoint="cfg.base_url"
+                  :connected="cfg.has_key"
+                  @configure="view = 'config'"
                   @cancel="previewOpen = false"
                   @confirm="runAnalyze"
                 />
 
-                <template v-else-if="phase === 'choose'">
+                <div v-else-if="phase === 'choose'" class="consult-grid">
+                  <section class="ai-block consult-roles">
+                    <h3 class="ai-block-title">选择会诊视角</h3>
+                    <p v-if="requestedExpert !== 'general'" class="ai-focus-note">当前页面建议：{{ profiles[requestedExpert][0] }}</p>
+                    <AiExpertPicker v-model="expert" :profiles="profiles" />
+                  </section>
+                  <section class="ai-block perspective">
+                    <header class="perspective-head">
+                      <span class="perspective-logo"><img src="/brand/deepseek.svg" alt="" width="28"></span>
+                      <div><small>当前会诊视角</small><h3>{{ expertName }}</h3></div>
+                    </header>
+                    <div :key="expert" class="perspective-body">
+                      <h4>优先核实的问题</h4>
+                      <ul><li v-for="item in suggestedQuestions" :key="item">{{ item }}</li></ul>
+                    </div>
+                  </section>
                   <section class="ai-block">
                     <h3 class="ai-block-title">本次会诊依据</h3>
                     <dl class="ai-facts">
@@ -529,45 +563,13 @@ onUnmounted(unlockPageScroll)
                       </div>
                     </dl>
                   </section>
-
-                  <section class="ai-block">
-                    <h3 class="ai-block-title">选择会诊视角</h3>
-                    <p class="ai-block-desc">不同视角决定模型先看哪一层证据，报告结构也会随之变化。</p>
-                    <div class="ai-experts" role="radiogroup" aria-label="会诊视角">
-                      <button
-                        v-for="(profile, key) in profiles"
-                        :key="key"
-                        type="button"
-                        role="radio"
-                        :aria-checked="expert === key"
-                        class="ai-expert"
-                        :class="{ on: expert === key }"
-                        @click="expert = key"
-                      >
-                        <span class="ae-head">
-                          <strong>{{ profile[0] }}</strong>
-                          <span class="ae-tick" aria-hidden="true"><AppIcon name="check" /></span>
-                        </span>
-                        <span class="ae-desc">{{ profile[1] }}</span>
-                      </button>
-                    </div>
-                  </section>
-
-                  <section class="ai-block">
-                    <h3 class="ai-block-title">这个视角会先问</h3>
-                    <ul class="ai-prompts">
-                      <li v-for="item in suggestedQuestions" :key="item">{{ item }}</li>
-                    </ul>
-                  </section>
-
                   <div class="ai-run">
-                    <button type="button" class="btn primary lg" :disabled="!cfg.has_key" @click="previewOpen = true">
-                      查看发送内容
+                    <button type="button" class="btn primary lg" @click="previewOpen = true">
+                      查看发送内容 <AppIcon name="forward" />
                     </button>
-                    <span v-if="!cfg.has_key" class="ai-hint">需要先在连接设置里填入 API Key。</span>
-                    <span v-else class="ai-hint">下一步会展示将发送给模型的摘要全文。</span>
+                    <span class="ai-hint">在本机预览摘要全文，确认后再发送。</span>
                   </div>
-                </template>
+                </div>
 
                 <template v-else>
                   <div v-if="running && !report" class="ai-running" role="status">
@@ -575,7 +577,9 @@ onUnmounted(unlockPageScroll)
                     <span>正在生成研判报告，通常需要十几秒</span>
                   </div>
 
-                  <p v-if="err" class="ai-msg bad" role="alert">{{ err }}</p>
+                  <button v-if="running" type="button" class="btn" @click="reportController?.abort()">
+                    停止接收
+                  </button>
 
                   <article v-if="report" class="ai-report">
                     <header class="ai-report-head">
@@ -594,6 +598,7 @@ onUnmounted(unlockPageScroll)
                         <button type="button" class="btn-mini" :disabled="running || chatBusy" @click="resetReport">新会诊</button>
                       </div>
                     </header>
+                    <p class="ai-focus-note">AI 辅助研判 · 请按报告中的证据编号回查抓包。</p>
                     <div class="ai-md" v-html="renderMd(report)"></div>
                   </article>
 
@@ -654,7 +659,7 @@ onUnmounted(unlockPageScroll)
                 aria-label="发送追问"
                 :disabled="chatBusy || running || !reportContextHash || !question.trim()"
                 @click="sendQuestion"
-              ><AppIcon name="send" /></button>
+              ><AppIcon name="send" /><span>发送</span></button>
             </div>
             <p class="ai-composer-hint">
               <span v-if="chatBusy">正在回答…</span>
@@ -674,7 +679,6 @@ onUnmounted(unlockPageScroll)
   position: fixed; inset: 0; z-index: 300;
   display: flex; justify-content: flex-end;
   background: color-mix(in srgb, var(--bg) 46%, transparent);
-  backdrop-filter: blur(3px);
 }
 
 .ai-drawer {
@@ -698,10 +702,10 @@ onUnmounted(unlockPageScroll)
   }
 }
 
-.ai-slide-enter-active, .ai-slide-leave-active { transition: opacity .18s var(--ease); }
-.ai-slide-enter-active .ai-drawer, .ai-slide-leave-active .ai-drawer { transition: transform .26s var(--ease-out); }
+.ai-slide-enter-active, .ai-slide-leave-active { transition: opacity var(--dur) var(--ease); }
+.ai-slide-enter-active .ai-drawer, .ai-slide-leave-active .ai-drawer { transition: transform var(--dur-lg) var(--ease-out); }
 .ai-slide-enter-from, .ai-slide-leave-to { opacity: 0; }
-.ai-slide-enter-from .ai-drawer, .ai-slide-leave-to .ai-drawer { transform: translateX(24px); }
+.ai-slide-enter-from .ai-drawer, .ai-slide-leave-to .ai-drawer { transform: translateX(12px); }
 
 /* ===== 头部 ===== */
 .ai-head {
@@ -810,40 +814,6 @@ onUnmounted(unlockPageScroll)
 }
 .ai-facts dd.critical { color: var(--critical); }
 .ai-facts dd.warning { color: var(--warning); }
-
-.ai-experts {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
-  gap: 8px;
-}
-.ai-expert {
-  display: flex; flex-direction: column; gap: 5px;
-  padding: 11px 12px;
-  text-align: left;
-  font: inherit;
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: border-color var(--dur) var(--ease), background-color var(--dur) var(--ease);
-}
-.ai-expert:hover { border-color: var(--line-strong); background: var(--surface-2); }
-.ai-expert.on { border-color: var(--ds); background: var(--ds-soft); }
-.ai-expert:focus-visible { outline: 2px solid var(--ds); outline-offset: 1px; }
-.ae-head { display: flex; align-items: center; gap: 8px; }
-.ae-head strong { font-size: 13px; font-weight: 600; }
-.ae-tick {
-  margin-left: auto;
-  width: 15px; height: 15px;
-  display: grid; place-items: center;
-  border-radius: 50%;
-  border: 1px solid var(--line-2);
-  color: transparent;
-}
-.ae-tick :deep(svg) { width: 9px; height: 9px; }
-.ai-expert.on .ae-tick { border-color: var(--ds); background: var(--ds); color: #fff; }
-.ae-desc { font-size: 11.5px; color: var(--text-3); line-height: 1.55; }
 
 .ai-prompts {
   margin: 0; padding: 0;
@@ -1140,5 +1110,38 @@ onUnmounted(unlockPageScroll)
   .ai-md { padding: 12px 13px 14px; }
   .ai-composer-warn { margin-left: 0; }
 }
+ .ai-head { border-top:2px solid var(--brand); }
+.ai-step.on i { background:var(--status-ai); border-color:var(--status-ai); color:var(--bg); }
+.ai-focus-note { color:var(--ds-lt); font-size:12px; margin:4px 0; }
+
+@media (min-width:1000px) {
+  .ai-drawer { width:clamp(680px,56vw,850px); }
+  .consult-grid { display:grid; grid-template-columns:minmax(170px,32%) minmax(0,1fr); align-items:start; padding:16px; gap:14px; }
+  .consult-grid .ai-block { padding:14px; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); }
+  .consult-grid .consult-roles { grid-column:1; grid-row:1 / span 3; background:var(--surface-2); }
+  .consult-grid .ai-run { margin:0; padding:0; flex-wrap:wrap; }
+  .consult-grid .ai-facts { grid-template-columns:repeat(3,minmax(0,1fr)); }
+}
+
+.ai-head { padding:16px 20px; background:linear-gradient(110deg,var(--bg-selected),var(--surface) 62%); }
+.ai-head-text strong { font-size:18px; letter-spacing:-.025em; }
+.ai-mark { width:40px; height:40px; border-radius:12px; background:var(--surface); }
+.ai-mark img { width:26px; }
+.consult-grid .perspective { overflow:hidden; padding:0; }
+.perspective-head { display:flex; align-items:center; gap:12px; padding:16px; background:linear-gradient(105deg,var(--ds-soft),var(--surface)); border-bottom:1px solid var(--line); }
+.perspective-logo { display:grid; place-items:center; width:44px; height:44px; background:var(--surface); border:1px solid var(--ds-line); border-radius:12px; }
+.perspective-head small { font-size:11px; color:var(--text-3); }
+.perspective-head h3 { margin:3px 0 0; font-size:20px; color:var(--text); }
+.perspective-body { padding:14px 16px; }
+.perspective-body h4 { font-size:12px; color:var(--text-3); margin:0 0 8px; }
+.perspective-body ul { padding-left:18px; list-style:disc; margin:0; }
+.perspective-body li { padding:3px 0; font-size:13px; color:var(--text); }
+.perspective-body li::marker { color:var(--brand-lt); }
+.ai-run .btn svg { width:15px; }
+.ai-composer .ai-send { display:inline-flex; align-items:center; justify-content:center; gap:5px; width:auto; padding:0 12px; font:inherit; font-weight:600; }
+.ai-composer .ai-send:enabled,.ai-run .btn.primary { background:var(--brand); color:white; }
+@media(min-width:1000px){.consult-grid .consult-roles { background:var(--surface); padding:12px 8px; }.consult-roles .ai-block-title { padding:4px 8px; }}
+@media(max-width:999px){.consult-grid .perspective { margin:16px 16px 0; border:1px solid var(--line); border-radius:var(--radius); }}
+@media(prefers-reduced-motion:no-preference){.perspective-body { animation:perspective-in var(--dur-lg) var(--ease-out); } @keyframes perspective-in { from {opacity:.4; transform:translateY(4px)} to {opacity:1; transform:translateY(0)} }}
 </style>
 

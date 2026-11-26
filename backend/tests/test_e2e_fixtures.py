@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import func, select
 
+from app.api.diagnostics import get_packet
 from app.models.entities import (
     AnalysisTask, BusinessSession, CaptureFile, DiagnosticEvent, MediaMetric, MediaStream,
     PacketIndex, SipDialog, SipMessage, TaskStatus,
@@ -104,6 +105,14 @@ def test_udp_basic_end_to_end(db, tmp_path):
     mismatch = db.scalar(select(DiagnosticEvent).where(
         DiagnosticEvent.task_id == task.id, DiagnosticEvent.rule_id == 'SDP-003'))
     assert mismatch.related_packet_ids == [invite.packet_id, answer.packet_id]
+
+    packet = db.scalar(select(PacketIndex).where(
+        PacketIndex.task_id == task.id, PacketIndex.packet_number == 1))
+    packet_detail = get_packet(packet.id, db)
+    ip_source = next(field for layer in packet_detail.layers for field in layer['fields']
+                     if field['name'] == 'Source Address' and field['value'] == '192.168.1.10')
+    assert ip_source['offset'] == 26 and ip_source['size'] == 4
+    assert bytes.fromhex(packet_detail.raw_hex)[26:30] == bytes([192, 168, 1, 10])
 
     # 分析本身不应动源文件（保留策略在 conftest 里已关掉）
     assert dst.exists()

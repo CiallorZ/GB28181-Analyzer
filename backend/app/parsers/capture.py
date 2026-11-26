@@ -19,6 +19,9 @@ import hashlib
 import os
 import re
 import subprocess
+import tempfile
+import time
+from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -221,6 +224,46 @@ SIP_FIELDS = [
 ]
 
 
+def _tshark_lines(cmd, timeout: float = TSHARK_TIMEOUT):
+    # A capture with many diagnostics can fill a stderr pipe while stdout
+    # is still being read. Spool stderr and retain only a short error excerpt.
+    #
+    # 流式读取后不再有 subprocess.run(timeout=...)，但外部进程仍必须有
+    # 时限：tshark 卡在坏抓包或失效的网络盘上时，不能把分析线程永久挂住。
+    # 这里在逐行读取的同时检查已用时间，超时就杀掉并抛可读错误。
+    with tempfile.TemporaryFile() as stderr:
+        proc = subprocess.Popen(
+            cmd, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+            stdout=subprocess.PIPE, stderr=stderr, text=True, errors='replace',
+            bufsize=1 << 20)
+        started = time.monotonic()
+        try:
+            with analysis_control.track(proc):
+                for line in proc.stdout:
+                    if time.monotonic() - started > timeout:
+                        raise CaptureError('tshark 读取超时（%d 秒）' % timeout)
+                    yield line
+                try:
+                    status = proc.wait(timeout=10)
+                except subprocess.TimeoutExpired as exc:
+                    raise CaptureError('tshark 输出结束后未能正常退出') from exc
+                analysis_control.checkpoint()
+                if status:
+                    size = stderr.seek(0, os.SEEK_END)
+                    stderr.seek(max(0, size - 1600))
+                    error = stderr.read(1600).decode('utf-8', errors='replace').strip()
+                    raise CaptureError('tshark 读取报文失败：' + (error[-400:] or f'退出码 {status}'))
+        except FileNotFoundError as exc:
+            # 工具路径失效（Wireshark 被卸载/移动）时给出可读错误，
+            # 而不是把 WinError 2 原样写进任务错误信息。
+            raise CaptureError('找不到程序：%s' % cmd[0]) from exc
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+            proc.stdout.close()
+
+
 def iter_packets(path: str, display_filter: str | None = None,
                  limit: int | None = None, include_sip: bool = False):
     """流式产出报文索引，避免一次性载入内存
@@ -244,66 +287,49 @@ def iter_packets(path: str, display_filter: str | None = None,
     for f in fields:
         cmd += ['-e', f]
 
-    proc = subprocess.Popen(cmd, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            text=True, errors='replace', bufsize=1 << 20)
     count = 0
-    try:
-        with analysis_control.track(proc):
-            for line in proc.stdout:
-                parts = line.rstrip('\r\n').split('\x1f')
-                while len(parts) < len(fields):
-                    parts.append('')
-                (num, ts, ln, ip_src, ip_dst, v6_src, v6_dst,
-                 t_sport, t_dport, u_sport, u_dport, protos) = parts[:12]
+    with closing(_tshark_lines(cmd)) as lines:
+        for line in lines:
+            parts = line.rstrip('\r\n').split('\x1f')
+            while len(parts) < len(fields):
+                parts.append('')
+            (num, ts, ln, ip_src, ip_dst, v6_src, v6_dst,
+             t_sport, t_dport, u_sport, u_dport, protos) = parts[:12]
 
-                if not num:
-                    continue
-                transport = ''
-                if t_sport or t_dport:
-                    transport = 'TCP'
-                elif u_sport or u_dport:
-                    transport = 'UDP'
+            if not num:
+                continue
+            transport = ''
+            if t_sport or t_dport:
+                transport = 'TCP'
+            elif u_sport or u_dport:
+                transport = 'UDP'
 
-                def _int(v):
-                    try:
-                        return int(v)
-                    except (TypeError, ValueError):
-                        return None
+            def _int(v):
+                try:
+                    return int(v)
+                except (TypeError, ValueError):
+                    return None
 
-                item = {
-                    'number': _int(num),
-                    'ts': float(ts) if ts else None,
-                    'src_ip': ip_src or v6_src or None,
-                    'dst_ip': ip_dst or v6_dst or None,
-                    'src_port': _int(t_sport) or _int(u_sport),
-                    'dst_port': _int(t_dport) or _int(u_dport),
-                    'transport': transport,
-                    'length': _int(ln) or 0,
-                    'protocols': protos or '',
-                }
-                if include_sip:
-                    sip = parts[12:]
-                    if any(sip):
-                        item['sip'] = (num, ts, ip_src, u_sport, t_sport,
-                                       ip_dst, u_dport, t_dport, *sip)
-                yield item
-                count += 1
-                if limit and count >= limit:
-                    break
-    finally:
-        try:
-            if proc.poll() is None:
-                proc.kill()
-        except Exception:
-            pass
-        try:
-            err = proc.stderr.read() if proc.stderr else ''
-            proc.wait(timeout=10)
-        except Exception:
-            err = ''
-        if proc.returncode not in (0, None) and err:
-            analysis_control.checkpoint()
-            raise CaptureError('tshark 读取报文失败：%s' % err.strip()[:400])
+            item = {
+                'number': _int(num),
+                'ts': float(ts) if ts else None,
+                'src_ip': ip_src or v6_src or None,
+                'dst_ip': ip_dst or v6_dst or None,
+                'src_port': _int(t_sport) or _int(u_sport),
+                'dst_port': _int(t_dport) or _int(u_dport),
+                'transport': transport,
+                'length': _int(ln) or 0,
+                'protocols': protos or '',
+            }
+            if include_sip:
+                sip = parts[12:]
+                if any(sip):
+                    item['sip'] = (num, ts, ip_src, u_sport, t_sport,
+                                   ip_dst, u_dport, t_dport, *sip)
+            yield item
+            count += 1
+            if limit and count >= limit:
+                break
 
 
 # ---------------------------------------------------------------
@@ -326,35 +352,14 @@ def iter_fields(path: str, fields: list[str],
         cmd += ['-Y', display_filter]
     for f in fields:
         cmd += ['-e', f]
-    proc = subprocess.Popen(
-        cmd, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, errors='replace', bufsize=1 << 20)
-    try:
-        with analysis_control.track(proc):
-            for line in proc.stdout:
-                if not line.strip():
-                    continue
-                parts = line.rstrip('\r\n').split(separator)
-                while len(parts) < len(fields):
-                    parts.append('')
-                yield parts[:len(fields)]
-    finally:
-        try:
-            if proc.poll() is None:
-                proc.kill()
-        except Exception:
-            pass
-        try:
-            err = proc.stderr.read() if proc.stderr else ''
-            proc.wait(timeout=10)
-        except Exception:
-            err = ''
-        if proc.returncode not in (0, None) and err:
-            # 取消时进程会被杀掉，returncode 同样非 0；不能把取消误报成
-            # 抓包读取失败，否则上层 except CaptureError 会吞掉取消。
-            analysis_control.checkpoint()
-            raise CaptureError('tshark 读取报文失败：%s' % err.strip()[:400])
+    with closing(_tshark_lines(cmd)) as lines:
+        for line in lines:
+            if not line.strip():
+                continue
+            parts = line.rstrip('\r\n').split(separator)
+            while len(parts) < len(fields):
+                parts.append('')
+            yield parts[:len(fields)]
 
 
 def extract_fields(path: str, fields: list[str], display_filter: str | None = None,

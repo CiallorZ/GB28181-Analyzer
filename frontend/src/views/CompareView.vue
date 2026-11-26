@@ -59,7 +59,7 @@ function create() {
       </div>
       <div class="card-body">
         <div class="g2">
-          <fieldset v-for="side in ['a','b']" :key="side">
+          <fieldset :class="{ paired: form['task_'+side+'_id'] }" v-for="side in ['a','b']" :key="side">
             <legend>{{ side.toUpperCase() }} 侧抓包</legend>
             <label>
               <span>已完成任务</span>
@@ -161,5 +161,8 @@ label .inp { width: 100%; }
   border-radius: var(--radius); padding: 10px 12px; font-size: 12.5px;
   color: var(--critical); margin-top: 12px;
 }
+ .g2 > * { min-width:0; padding:var(--space-3); border:1px solid var(--line); border-radius:var(--radius); background:var(--surface-2); }
+fieldset.paired { border-color:color-mix(in srgb,var(--brand) 40%,var(--line)); background:linear-gradient(125deg,var(--bg-selected),var(--surface) 65%); }
+fieldset { transition:border-color var(--dur),background-color var(--dur); }
 </style>
 

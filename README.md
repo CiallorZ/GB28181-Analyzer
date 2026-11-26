@@ -4,11 +4,13 @@
 
 平台返回了 SIP 200 OK，为什么预览仍然黑屏？GB28181 Analyzer 把点播信令、SDP 协商、实际捕获的媒体、重建画面和诊断证据放进同一个任务。现场工程师可以从异常结论回到具体报文，平台和设备开发人员可以对照两端抓包，交付人员可以导出可复核的报告。
 
-**[下载 v1.3.0 Windows x64 便携包](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v1.3.0/gb28181-analyzer-windows-x64-v1.3.0.zip)** · [SHA-256 校验文件](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v1.3.0/SHA256SUMS.txt) · [发行说明](https://github.com/CiallorZ/gb28181-analyzer/releases/tag/v1.3.0)
+**[下载 v1.4.0 Windows x64 便携包](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v1.4.0/gb28181-analyzer-windows-x64-v1.4.0.zip)** · [SHA-256 校验文件](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v1.4.0/SHA256SUMS.txt) · [发行说明](https://github.com/CiallorZ/gb28181-analyzer/releases/tag/v1.4.0)
 
-![工作台实图：左侧可导入抓包或试用示例，右侧展示平台与设备之间的点播流程](docs/images/workbench-intake.png)
+![浅色工作台：抓包导入、协议流程演示与最近任务](docs/screenshots/uiux/workbench-light.png)
 
-*首页实图。右侧动画用于解释点播协议；进入任务后的时序图按实际捕获的消息绘制。*
+*本分支运行截图。工作台的流程演示用于解释点播协议，分析页展示抓包测得的数据。*
+
+[深色工作台](docs/screenshots/uiux/workbench-dark.png) · [全部页面双主题截图与验收记录](docs/UIUX-VALIDATION.md)
 
 ## 第一次使用
 
@@ -65,7 +67,7 @@ AI 是可选的联网服务，发行包不提供测试 Key。用户可设置环�
 
 ```mermaid
 flowchart TD
-    EXE["便携包 · GB28181-Analyzer.exe"] --> SHELL["Tauri 桌面窗口 · WebView2"]
+    EXE["便携包 · GB28181-Analyzer.exe"] --> SHELL["Native Shell 桌面窗口 · WebView2"]
     SHELL --> UI["Vue 3 工作台 · Pinia · ECharts"]
     UI <-->|"本机 HTTP /api/v1"| API["FastAPI 分析服务"]
     API --> TASK["任务调度与分析流水线"]

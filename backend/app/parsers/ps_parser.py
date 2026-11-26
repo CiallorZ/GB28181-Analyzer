@@ -360,6 +360,19 @@ def _iter_nal_spans(data: bytes):
     所以不能用"累计 len(nal)+4"近似——起始码有 3 字节也有 4 字节，
     长流上逐 NAL 的误差会累积到错位一个包。
     """
+    from . import native_scan
+    if native_scan.scan is not None and isinstance(data, bytes):
+        previous = None
+        for off, prefix in native_scan.iter_markers(data, native_scan.scan):
+            if previous is not None:
+                start, begin = previous
+                if off > begin:
+                    yield data[begin:off], start
+            previous = off, off + prefix
+        if previous is not None and previous[1] < len(data):
+            yield data[previous[1]:], previous[0]
+        return
+
     i = 0
     n = len(data)
     starts = []

@@ -16,8 +16,9 @@ export function chartPalette() {
     tipBg: v('--surface-2'),
     tipBorder: v('--line-2'),
     tipText: v('--text'),
-    brand: v('--brand'),
-    ds: v('--ds'),
+    brand: v('--chart-primary') || v('--brand'),
+    ds: v('--chart-blue'),
+    ai: v('--status-ai'),
     ok: v('--ok'),
     warn: v('--warning'),
     crit: v('--critical'),
@@ -44,5 +45,5 @@ export function chartBase(extra = {}) {
 
 export function seriesPalette() {
   const c = chartPalette()
-  return [c.brand, c.info, c.ok, c.warn, '#A371F7', c.ds, c.dim]
+  return [c.brand, c.info, c.ok, c.warn, c.ai, c.ds, c.dim]
 }

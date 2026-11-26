@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, provide } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from './api/client'
 import { useTaskStore } from './stores/task'
@@ -8,8 +8,22 @@ import AiPanel from './components/AiPanel.vue'
 const store = useTaskStore()
 const route = useRoute()
 
-const appearance = ref(document.documentElement.dataset.appearance || 'system')
+const savedAppearance = document.documentElement.dataset.appearance
+const appearance = ref(['light', 'dark'].includes(savedAppearance) ? savedAppearance : 'system')
+provide('workspaceAppearance', { appearance, chooseAppearance })
 const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
+const compactNav = ref(false)
+try { compactNav.value = localStorage.getItem('workspace-sidebar') === 'collapsed' } catch { /* 使用默认宽度。 */ }
+function toggleSidebar() {
+  compactNav.value = !compactNav.value
+  try { localStorage.setItem('workspace-sidebar', compactNav.value ? 'collapsed' : 'expanded') } catch { /* 仍可在当前会话折叠。 */ }
+}
+const taskLinks = [
+  ['diagnostics', 'warning', '分析结论'],
+  ['sip', 'signal', 'SIP 信令'],
+  ['media', 'wave', '媒体分析'],
+  ['packets', 'file', '原始报文']
+]
 const health = ref(null)
 const healthError = ref(false)
 
@@ -46,6 +60,7 @@ const task = computed(() => store.task)
 const globalBusy = computed(() => store.activeCount > 0 || store.isAnalyzing)
 
 function setNativeBusy(busy) {
+  window.nsh?.postMessage?.(busy ? 'analysis-busy' : 'analysis-idle')
   const invoke = window.__TAURI__?.core?.invoke
   if (invoke) invoke('set_analysis_busy', { busy }).catch(() => {})
 }
@@ -101,28 +116,17 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="app">
+  <div class="app" :class="{ compact: compactNav }">
     <!-- 顶栏 -->
-    <header class="bar glass-panel">
+    <header class="bar">
       <div class="bar-in">
         <router-link to="/" class="brand" title="返回工作台">
-          <img src="/brand/analyzer.svg" alt="中国铁塔" class="brand-logo" />
+          <img src="/brand/analyzer.svg" alt="" class="brand-logo" />
           <div class="brand-txt">
             <div class="brand-name">GB28181 Analyzer</div>
             <div class="brand-desc">GB/T 28181 协议与媒体分析工作站</div>
           </div>
         </router-link>
-
-          <router-link to="/settings" class="dep" :class="engine[1]" :title="engine[0]" :aria-label="engine[0]">
-            <i></i>
-            <span>{{ engine[0] }}</span>
-          </router-link>
-        <nav class="bar-nav" aria-label="主导航">
-          <router-link to="/" :class="{current: route.name === 'task'}"><AppIcon name="home" />工作台</router-link>
-          <router-link to="/tasks"><AppIcon name="history" />历史任务</router-link>
-          <router-link to="/compare" :class="{current: route.path.startsWith('/compare/')}"><AppIcon name="compare" />双包对比</router-link>
-          <router-link to="/settings"><AppIcon name="settings" />设置</router-link>
-        </nav>
 
         <router-link class="bar-task" v-if="task" :to="{name: 'task', params: {id: task.id}}" title="打开当前任务">
           <span class="bt-id mono">#{{ task.id }}</span>
@@ -145,30 +149,62 @@ onUnmounted(() => {
             <option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option>
           </select>
 
-          <button
-            class="ai-btn"
-            :class="{ armed: store.aiPanelOpen }"
-            data-cue="confirm"
-            aria-label="打开 DeepSeek 会诊"
-            :aria-expanded="store.aiPanelOpen"
-            @click="store.openAiPanel()"
-          >
-            <img src="/brand/deepseek.svg" alt="" class="ai-ico" />
-            <span>DeepSeek 会诊</span>
-          </button>
-
-
+          <router-link to="/settings" class="nav-setting" aria-label="设置" title="设置"><AppIcon name="settings" /></router-link>
         </div>
       </div>
     </header>
 
+    <aside class="sidebar">
+      <button class="sidebar-toggle" type="button" :aria-expanded="!compactNav" aria-controls="workspace-nav"
+              :title="compactNav ? '展开导航' : '折叠导航'" @click="toggleSidebar">
+        <AppIcon :name="compactNav ? 'forward' : 'back'" /><span>折叠导航</span>
+      </button>
+      <nav id="workspace-nav" aria-label="主导航">
+        <div class="nav-group">
+          <span class="nav-heading">工作空间</span>
+          <router-link to="/" :class="{ current: route.name === 'task' }" title="工作台"><AppIcon name="home" /><span>工作台</span></router-link>
+          <router-link to="/tasks" title="历史任务"><AppIcon name="history" /><span>历史任务</span></router-link>
+        </div>
+        <div class="nav-group">
+          <span class="nav-heading">当前任务</span>
+          <template v-for="[name, icon, label] in taskLinks" :key="name">
+            <router-link v-if="store.currentTaskId" :to="{ name, query: { task: store.currentTaskId } }"
+                         :class="{ current: route.name === name || (name === 'sip' && route.name === 'session-detail') }"
+                         :title="label" :aria-label="label"><AppIcon :name="icon" /><span>{{ label }}</span></router-link>
+            <span v-else class="nav-disabled" aria-disabled="true" :title="label + ' · 请先选择分析任务'">
+              <AppIcon :name="icon" /><span>{{ label }}</span>
+            </span>
+          </template>
+        </div>
+        <div class="nav-group">
+          <span class="nav-heading">辅助分析</span>
+          <router-link to="/compare" :class="{ current: route.path.startsWith('/compare/') }" title="双包对比"><AppIcon name="compare" /><span>双包对比</span></router-link>
+          <button type="button" class="ai-nav" :class="{ current: store.aiPanelOpen }" title="AI 专家会诊"
+                  :aria-expanded="store.aiPanelOpen" data-cue="confirm" @click="store.openAiPanel()">
+            <img src="/brand/deepseek.svg" alt="" width="16" height="16"><span>DeepSeek 会诊</span>
+          </button>
+        </div>
+        <div class="nav-group">
+          <span class="nav-heading">系统</span>
+          <router-link to="/settings" title="系统设置"><AppIcon name="settings" /><span>系统设置</span></router-link>
+        </div>
+      </nav>
+    </aside>
+
     <main class="main">
       <router-view v-slot="{ Component }">
         <transition name="route-slide" mode="out-in">
-          <component :is="Component" :key="route.name === 'session-detail' ? route.path : route.query.task" />
+          <div class="route-surface" :key="JSON.stringify([route.path, route.query.task])"><component :is="Component" /></div>
         </transition>
       </router-view>
     </main>
+
+    <footer class="status-bar" aria-label="工作区状态">
+      <router-link to="/settings" class="dep" :class="engine[1]" :title="engine[0]"><i></i>{{ engine[0] }}</router-link>
+      <span v-if="health?.dependencies" class="tool-status">TShark {{ health.dependencies.tshark ? '可用' : '缺失' }} · FFmpeg {{ health.dependencies.ffmpeg ? '可用' : '缺失' }}</span>
+      <span v-if="task" class="status-task">任务 #{{ task.id }}<template v-if="task.stage"> · {{ task.stage }}</template></span>
+      <span v-if="health?.version" class="version">v{{ health.version }}</span>
+    </footer>
 
     <AiPanel :key="store.currentTaskId" :open="store.aiPanelOpen"
              @update:open="v => v ? store.openAiPanel() : store.closeAiPanel()" />
@@ -176,181 +212,93 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.app { min-height: 100vh; display: flex; flex-direction: column; }
-
-/* 顶栏 */
-.bar {
-  position: sticky; top: 0; z-index: 100;
-  background: color-mix(in srgb, var(--surface) 90%, transparent);
-  backdrop-filter: blur(16px) saturate(160%);
-  border-bottom: 1px solid var(--line);
-  box-shadow: inset 0 3px 0 var(--brand);
+.app {
+  --sidebar-width: 184px;
+  min-height: 100dvh;
+  background: var(--bg);
+  display: grid;
+  grid-template: var(--app-header-height) 1fr var(--status-height) / var(--sidebar-width) minmax(0, 1fr);
 }
-.bar-in {
-  max-width: 1720px; margin: 0 auto;
-  height: calc(var(--app-header-height) - 1px); padding: 0 28px;
-  display: flex; align-items: center; gap: 26px;
+.app.compact { --sidebar-width: 56px; }
+.bar, .status-bar { grid-column: 1 / -1; position: sticky; background: var(--bg-2); z-index: 100; }
+.bar { top: 0; border-bottom: 1px solid var(--line); }
+.bar-in, .brand, .bar-task, .bar-act, .status-bar { display: flex; align-items: center; }
+.bar-in { height: 100%; padding-inline: var(--space-4); gap: var(--space-5); }
+.brand, .bar-task, .bar-act { gap: var(--space-2); }
+.brand { flex: none; color: var(--text); }
+.brand-logo { width: 24px; height: 24px; }
+.brand-name { font-weight: 600; font-size: 15px; }
+.brand-txt { display:flex; align-items:baseline; gap:14px; }
+.brand-desc { font-size: 11px; color: var(--text-3); }
+.bar-task { min-width: 0; color: var(--text-2); font-size: 12px; }
+.bar-task .badge { white-space: nowrap; }
+.spacer, .version { margin-left: auto; }
+.bar-act { flex: none; }
+.appearance, .nav-setting {
+  background: var(--bg-input); color: var(--text);
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  padding: 4px 8px; height: 30px;
 }
-.bar-nav { display: flex; align-items: stretch; align-self: stretch; gap: 8px; white-space: nowrap; }
-.bar-nav a { gap:6px; position: relative; display:flex; align-items:center; padding: 0 12px; color: var(--text-2); font-size: 13px; font-weight: 600; }
-.bar-nav a:hover, .bar-nav .router-link-exact-active, .bar-nav .current {
-  color: var(--brand-lt); text-decoration: none;
+.nav-setting { display: grid; place-items: center; min-width: var(--control-height); }
+.sidebar :is(a, button), .nav-setting {
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
-@media (max-width: 1080px) { .bar-in { padding: 0 16px; gap: 12px; } }
-
-.brand {
-  display: flex; align-items: center; gap: 12px; flex: none;
-  padding: 4px 24px 4px 8px; margin-left: -8px;
-  border-right: 1px solid var(--line-2);
-  transition: background var(--dur) var(--ease);
+.sidebar {
+  grid-column: 1; grid-row: 2; position: sticky; top: var(--app-header-height);
+  height: calc(100dvh - var(--app-header-height) - var(--status-height));
+  background: var(--bg-2); border-right: 1px solid var(--line);
+  overflow: auto; padding: var(--space-2);
 }
-.brand:hover { background: var(--surface); text-decoration: none; }
-.brand-logo {
-  height: 30px; width: auto; display: block;
-  transition: opacity var(--dur) var(--ease);
+.sidebar :is(a, button, .nav-disabled) {
+  display: flex; align-items: center; gap: var(--space-2); min-height: 34px;
+  width: 100%; padding: 4px 10px; border: 0; border-inline-start: 3px solid transparent;
+  border-radius: var(--radius-sm); background: transparent; color: var(--text-2);
+  text-align: start; font: inherit; font-size: 13px; white-space: nowrap;
 }
-.brand-txt { line-height: 1.25; }
-.brand-name {
-  font-size: 15px; font-weight: 700;
-  letter-spacing: -.35px;
-  color: var(--brand-lt);
+.sidebar .app-icon { flex: none; width: 16px; height: 16px; }
+.sidebar :is(a, button):hover { background: var(--surface-3); text-decoration: none; }
+.sidebar :is(.current, .router-link-exact-active) { color: var(--brand-lt); background: var(--bg-selected); border-inline-start-color: var(--brand); }
+.sidebar .nav-disabled { opacity: .55; }
+.sidebar .ai-nav { color:var(--ds-lt); background:var(--ds-soft); }
+.nav-group { padding-block: 8px; border-top: 1px solid var(--line); }
+.nav-heading { display: block; padding: 4px 13px; color: var(--text-4); font-size: 12px; }
+.compact .sidebar :is(.nav-heading, a span, button span, .nav-disabled span) {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%);
 }
-.brand-desc {
-  font-size: 11px; color: var(--text-4);
-  letter-spacing: .01em;
-}
-
-.bar-task {
-  display: flex; align-items: center; gap: 9px;
-  padding: 5px 12px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 99px;
-  font-size: 12px;
-  max-width: 440px;
-  overflow: hidden;
-}
-.bt-id { color: var(--text-3); font-weight: 600; font-size: 11.5px; }
-.bt-name { color: var(--text-2); min-width: 0; }
-
-.bar-act { display: flex; align-items: center; gap: 10px; flex: none; }
-
-.icon-btn {
-  width: 34px; height: 34px; flex: none;
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  color: var(--text-3);
-  cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: all var(--dur) var(--ease);
-  text-decoration: none;
-}
-.icon-btn:hover {
-  border-color: var(--line-strong);
-  background: var(--surface-2);
-  color: var(--text);
-}
-.icon-btn svg { width: 16px; height: 16px; }
-
-.ai-btn {
-  display: inline-flex; align-items: center; gap: 7px;
-  height: 34px; padding: 0 14px;
-  border-radius: var(--radius-sm);
-  background: var(--ds-soft);
-  border: 1px solid var(--ds-line);
-  color: var(--ds-lt);
-  font-size: 12.5px; font-weight: 500;
-  font-family: inherit;
-  cursor: pointer;
-  transition: background-color var(--dur) var(--ease),
-              border-color var(--dur) var(--ease);
-}
-.ai-btn:hover {
-  background: var(--surface-3);
-  border-color: var(--ds-lt);
-}
-.ai-btn:focus-visible { outline: 2px solid var(--ds); outline-offset: 2px; }
-.ai-btn.armed {
-  background: var(--ds-dk);
-  border-color: var(--ds-dk);
-  color: #fff;
-}
-.ai-btn.armed .ai-ico { filter: brightness(0) invert(1); }
-.ai-ico { height: 14px; width: auto; }
-
-.dep {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 11px; color: var(--text-3);
-  padding: 0 11px; height: 28px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 99px;
-}
-.dep i { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.compact .sidebar :is(a, button, .nav-disabled) { padding-inline: 8px; }
+.main { grid-column: 2; grid-row: 2; min-width: 0; }
+.status-bar { bottom: 0; min-width: 0; gap: var(--space-4); padding-inline: var(--space-4); border-top: 1px solid var(--line); font-size: 11px; color: var(--text-3); overflow: hidden; white-space: nowrap; }
+.dep { display: flex; align-items: center; gap: 6px; color: var(--text-2); }
+.dep i { width: 6px; height: 6px; border-radius: 50%; background: var(--unknown); }
 .dep.ok i { background: var(--ok); }
 .dep.bad i { background: var(--critical); }
 .dep.partial i { background: var(--warning); }
-.dep.waiting i { background: var(--text-3); }
-
-.main { flex: 1; min-width: 0; }
-
-/* 移动端：只留标志与图标，任务上下文交给页面标题 */
-@media (max-width: 1020px) {
-  .bar-task { display: none; }
-  .dep span { display: none; }
+.status-task { overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 1100px) {
+  .app { --sidebar-width: 56px; }
+  .sidebar :is(.nav-heading, a span, button span, .nav-disabled span) {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%);
+  }
+  .sidebar :is(a, button, .nav-disabled) { padding-inline: 8px; }
+  .sidebar-toggle, .brand-desc { display: none !important; }
 }
-@media (max-width: 650px) {
-  .bar-in { padding: 0 12px; gap: 8px; }
-  .bar-in { flex-wrap: wrap; padding-top: 8px; }
-  .bar-nav { order: 2; flex-basis: 100%; height: 35px; gap: 6px; }
-  .bar-nav { justify-content:space-between; min-width:0; }
-  .bar-nav a { padding:0 3px; gap:4px; }
-  .brand { border-right: 0; padding-right: 4px; }
-  .brand-desc { display: none; }
-  .brand-name { font-size: 13px; }
-  .brand-logo { height: 24px; width: auto; }
-  .bar-act { gap: 6px; }
-  .icon-btn { width: 30px; height: 30px; }
-  .ai-btn { width: 30px; padding: 0; justify-content: center; }
-  .ai-btn span { display: none; }
-  .dep { padding: 0 8px; }
-  .dep span { display: none; }
+@media (max-width: 640px) {
+  .bar-in { padding-inline: 8px; gap: 8px; }
+  .bar-task, .tool-status { display: none; }
 }
-
-.route-slide-enter-active { transition: opacity .2s var(--ease), translate .24s var(--ease-out); }
-.route-slide-leave-active { transition: opacity .07s ease-in; }
-.route-slide-enter-from { opacity:0; translate:0 7px; }
-.route-slide-leave-to { opacity:0; }
-.bar-nav a { transition:color .16s var(--ease), background-color .16s var(--ease); }
-.bar-nav a {
-  align-self:center;
-  min-height:34px;
-  border-radius:var(--radius-sm);
+.route-surface { min-width:0; }
+.route-slide-enter-active { transition: opacity var(--dur) var(--ease), translate var(--dur) var(--ease-out); }
+.route-slide-leave-active { transition: opacity var(--dur-xs) var(--ease); }
+.route-slide-enter-from { translate: 0 8px; }
+.route-slide-enter-from, .route-slide-leave-to { opacity: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .route-slide-enter-active, .route-slide-leave-active { transition: none; }
 }
-.bar-nav a:is(.router-link-exact-active,.current) {
-  background:var(--brand-soft);
-  color:var(--brand-lt);
-}
-.bar-nav a:not(.router-link-exact-active,.current):hover { background:var(--surface-2); }
-.bar-nav a:is(.router-link-exact-active,.current) .app-icon { color:var(--brand-lt); }
-.bar-nav a .app-icon { width:16px; height:16px; }
-@media (max-width:1279px) { .bar .brand-desc { display:none; } }
-@media (max-width:900px) {
-  .bar-in { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 10px; padding:6px 12px 0; }
-  .bar .brand { border:0; padding-right:0; }
-  .bar .spacer { display:none; }
-  .bar .bar-nav { grid-row:2; grid-column:1/-1; justify-content:space-between; min-width:0; }
-  .bar-nav a { gap:5px; padding:0 clamp(2px,1vw,10px); }
-  .bar-nav a .app-icon { width:14px; height:14px; }
-  .bar-act { grid-column:2; grid-row:1; }
-}
-@media (max-width:360px) {
-  .brand-logo { height:20px; }
-  .bar-nav { gap:3px; }
-  .bar-nav a { font-size:12px; }
-}
-.appearance {background:var(--surface);color:var(--text-2);border:1px solid var(--line-2);border-radius:6px;font:inherit;font-size:12px;padding:5px;}
-@media(min-width:1081px){.bar-in{max-width:none;padding:0 20px;gap:20px}.brand-txt{display:flex;align-items:center;gap:18px}.brand-desc{font-size:12px;border-left:1px solid var(--line);padding-left:16px}.bar-task{display:none}.bar{box-shadow:none}}
-.brand .brand-name{color:var(--text)}@media(min-width:1100px){.bar-in{gap:18px}.dep{border-radius:5px}.bar-nav{margin-left:12px}}@media(max-width:1100px){.bar-in>.dep{display:none}}
+.sidebar { background:linear-gradient(165deg,var(--surface),var(--bg) 85%); padding:10px 8px; }
+.nav-group { border-top:0; padding-block:9px; }
+.nav-heading { font-weight:600; font-size:11px; padding-block:3px 8px; }
+.sidebar :is(a,button,.nav-disabled) { min-height:36px; margin-bottom:2px; }
+.sidebar :is(.current,.router-link-exact-active) { background:var(--bg-selected); color:var(--brand-lt); border-inline-start-color:var(--brand-lt); font-weight:650; }
+.brand-name { letter-spacing:-.03em; }.bar .brand-logo { width:28px;height:28px; }
+.bar { box-shadow:0 1px 6px rgb(0 0 0 / 4%); }
 </style>

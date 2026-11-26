@@ -1,6 +1,6 @@
 <script setup>
 import InterfacePreferences from '../components/InterfacePreferences.vue'
-import { ref, computed, nextTick, onMounted } from 'vue'
+import { inject, ref, computed, nextTick, onMounted } from 'vue'
 import { api } from '../api/client'
 import PageNav from '../components/PageNav.vue'
 
@@ -8,6 +8,7 @@ const health = ref(null)
 const rules = ref([])
 const err = ref('')
 const activeTab = ref('interface')
+const { appearance, chooseAppearance } = inject('workspaceAppearance')
 const tabs = [
   { key: 'interface', label: '界面与反馈' },
   { key: 'dependencies', label: '运行依赖' },
@@ -56,13 +57,13 @@ const missingDeps = computed(() => dependencies.value.filter(dep => !dep.ok))
 
 /* 标签页遵循 tablist 键盘约定：左右键循环，Home/End 跳到首尾。 */
 function onTabKey(event) {
-  const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End']
+  const keys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']
   if (!keys.includes(event.key)) return
   event.preventDefault()
   const index = tabs.findIndex(tab => tab.key === activeTab.value)
   let next = index
-  if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length
-  if (event.key === 'ArrowRight') next = (index + 1) % tabs.length
+  if (['ArrowLeft', 'ArrowUp'].includes(event.key)) next = (index - 1 + tabs.length) % tabs.length
+  if (['ArrowRight', 'ArrowDown'].includes(event.key)) next = (index + 1) % tabs.length
   if (event.key === 'Home') next = 0
   if (event.key === 'End') next = tabs.length - 1
   activeTab.value = tabs[next].key
@@ -99,15 +100,13 @@ function clearProbe(key) {
 }
 
 async function chooseTool(item) {
-  const invoke = window.__TAURI__?.core?.invoke
-  if (!invoke) {
+  if (!window.nsh) {
     toolErr.value = '当前浏览器无法打开原生文件选择器，请直接输入完整路径'
     return
   }
   toolErr.value = ''
   try {
-    const title = '选择 ' + item.label
-    const path = await invoke('pick_executable', { title })
+    const path = await api.pickTool()
     if (path) {
       toolDraft.value[item.key] = path
       await testTool(item)
@@ -192,7 +191,8 @@ onMounted(async () => {
 
     <div v-if="err" class="err-box">{{ err }}</div>
 
-    <nav class="settings-tabs" role="tablist" aria-label="设置分区">
+    <div class="settings-layout">
+    <nav class="settings-tabs" role="tablist" aria-orientation="vertical" aria-label="设置分区">
       <button
         v-for="tab in tabs"
         :key="tab.key"
@@ -205,16 +205,22 @@ onMounted(async () => {
         :tabindex="activeTab === tab.key ? 0 : -1"
         @click="activeTab = tab.key"
         @keydown="onTabKey"
-      >{{ tab.label }}</button>
+      ><AppIcon :name="{ interface: 'monitor', dependencies: 'codec', rules: 'file' }[tab.key]" />{{ tab.label }}</button>
     </nav>
 
     <section v-show="activeTab === 'interface'" id="settings-panel-interface"
-             role="tabpanel" aria-labelledby="settings-tab-interface" tabindex="0">
+             v-panel-change="activeTab" role="tabpanel" aria-labelledby="settings-tab-interface" tabindex="0">
+      <div class="card card-body mb-16 appearance-setting">
+        <label for="settings-appearance">主题模式</label>
+        <select id="settings-appearance" class="inp" v-model="appearance" @change="chooseAppearance">
+          <option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option>
+        </select>
+      </div>
       <InterfacePreferences />
     </section>
 
     <section v-show="activeTab === 'dependencies'" id="settings-panel-dependencies"
-             role="tabpanel" aria-labelledby="settings-tab-dependencies" tabindex="0">
+             v-panel-change="activeTab" role="tabpanel" aria-labelledby="settings-tab-dependencies" tabindex="0">
     <div class="card mb-16">
       <div class="card-head">运行环境</div>
       <div class="card-body">
@@ -319,7 +325,7 @@ onMounted(async () => {
     </section>
 
     <section v-show="activeTab === 'rules'" id="settings-panel-rules"
-             role="tabpanel" aria-labelledby="settings-tab-rules" tabindex="0">
+             v-panel-change="activeTab" role="tabpanel" aria-labelledby="settings-tab-rules" tabindex="0">
     <div class="card mb-16">
       <div class="card-head">
         诊断规则清单
@@ -378,6 +384,7 @@ onMounted(async () => {
       </div>
     </div>
     </section>
+    </div>
   </div>
 </template>
 
@@ -476,4 +483,11 @@ onMounted(async () => {
   border-radius: var(--radius); padding: 12px 14px; font-size: 13px;
   color: var(--critical); margin-bottom: 14px;
 }
+.settings-layout { display:grid; grid-template-columns:155px minmax(0,1fr); gap:var(--space-4); align-items:start; }
+.settings-tabs { flex-direction:column; border:1px solid var(--line); padding:var(--space-1); border-radius:var(--radius); background:var(--surface); }
+.settings-tab { text-align:left; border:0; border-inline-start:3px solid transparent; border-radius:var(--radius-xs); }
+.settings-tab.on { color:var(--brand-lt); background:var(--bg-selected); border-color:var(--brand); }
+@media (max-width:720px) { .settings-layout { grid-template-columns:minmax(0,1fr); } }
+.appearance-setting { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.settings-tab { display:flex; align-items:center; gap:9px; min-height:38px; }.settings-tab svg { width:15px; }
 </style>

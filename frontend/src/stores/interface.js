@@ -1,7 +1,7 @@
 import { computed, reactive } from 'vue'
 
-const defaults = { material: 'clean', density: 'comfortable', sound: false, haptics: false }
-const options = { material: ['clean', 'glass'], density: ['comfortable', 'compact'] }
+const defaults = { material: 'swiss', density: 'comfortable', sound: false, haptics: false }
+const options = { material: ['swiss', 'clean', 'glass'], density: ['comfortable', 'compact'] }
 const storageKey = 'gb28181-interface'
 
 function readPreferences() {

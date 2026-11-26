@@ -187,6 +187,25 @@ def build_context(db, task_id: int) -> str:
                     r.seq_gap_packets, r.out_of_order_count,
                     r.max_gap if r.max_gap is not None else '未知'))
 
+            rtcp = (r.extra or {}).get('rtcp') or {}
+            observations = []
+            for key, label, unit in (
+                ('fraction_lost_latest', '对端最近报告丢包', '%'),
+                ('peer_jitter_ms', '对端最近报告抖动', ' ms'),
+                ('rtt_ms_latest', 'RTCP RTT', ' ms'),
+            ):
+                value = rtcp.get(key)
+                if type(value) in (int, float):
+                    observations.append(f'{label}={value:.2f}{unit}')
+            if r.codec in {'H.264', 'H.265', 'H264', 'H265'}:
+                observations.append(f'编码={r.codec}')
+            if r.rebuilt_path:
+                observations.append('有本地重建预览')
+            elif r.rebuild_error:
+                observations.append('未生成重建预览')
+            if observations:
+                lines.append('  - ' + '，'.join(observations))
+
     # 诊断
     events = (db.query(DiagnosticEvent)
               .filter(DiagnosticEvent.task_id == task_id)
@@ -248,14 +267,14 @@ SYSTEM_PROMPT = '''你是一名资深的 GB/T 28181 视频监控联网与国标�
 7. 不要用"可能"、"也许"来回避判断——能确定就直说，不能确定就说明缺什么证据
 
 输出结构建议：
-## 结论
-一句话说明最可能的问题定位。
+## 优先核查
+指出最早出现偏差的层面，并标明「已观察」或「待核实」。证据不足时给出优先核查方向。
 
 ## 证据链
-按信令层 / 媒体层 / 编码层分段列出关键证据。
+优先引用摘要中的会话、流、报文编号或诊断规则编号。区分抓包观察、规则判断和推断。
 
 ## 处置建议
-按优先级排序，每条写清"做什么"和"怎么验证"。
+按优先级写明检查端、检查项、预期结果和下一步分支。
 
 ## 数据不足的地方
 明确列出需要补充哪些信息才能进一步定位。'''
@@ -361,7 +380,7 @@ def _post(body: dict, on_delta=None) -> str:
 EXPERTS = {
     'general': '综合研判：先给结论，再列信令与媒体的交叉证据和最短验证路径。每条结论标注已观测或待验证，只引用摘要中存在的会话、流或报文标识。',
     'sip': '信令专家：按事务与方向核对 INVITE、最终响应、ACK 和 BYE。按 Call-ID 和 CSeq 区分重传、未观察到响应与明确拒绝，注明抓包窗口边界。',
-    'media': '媒体专家：核对 SDP 和 RTP 的地址、端口、SSRC 与方向，再对照序号缺口、编码和重建结果。',
+    'media': '媒体专家：核对 SDP 和 RTP 的地址、端口、SSRC 与方向，再对照序号缺口、RTCP 接收报告、编码和重建结果。区分抓包点序号缺口与接收端报告丢包，区分首媒体包、关键帧估算与实际画面。',
     'field': '现场排障专家：给出按优先级排列的检查步骤，每步注明检查端、预期观测和下一步分支。'
 }
 

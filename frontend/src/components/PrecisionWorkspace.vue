@@ -347,7 +347,7 @@ watch(filtered, (items) => {
               </option></select
             ><router-link to="/diagnostics">全部 ↗</router-link>
           </header>
-          <div v-if="event" ref="evidencePanel" class="inspect" role="region" aria-label="诊断证据" tabindex="-1" @keydown.esc.stop="closeEvidence">
+          <div v-if="event" ref="evidencePanel" v-panel-change="event.id" class="inspect" role="region" aria-label="诊断证据" tabindex="-1" @keydown.esc.stop="closeEvidence">
             <button @click="closeEvidence">关闭证据</button><b>{{ event.rule_id }} · {{ event.title }}</b
             ><span>{{ event.description }}</span>
             <pre>{{ JSON.stringify(event.evidence, null, 2) }}</pre>
@@ -400,7 +400,7 @@ watch(filtered, (items) => {
       </div>
       <aside v-if="rail" class="assist" aria-label="AI 助手">
         <header>
-          <h2>AI 助手</h2>
+          <h2>DeepSeek 分析助手</h2>
           <button @click="collapseSidebar" aria-label="折叠 AI 助手">收起</button>
         </header>
 
@@ -409,7 +409,7 @@ watch(filtered, (items) => {
             <img src="/brand/deepseek.svg" alt="" />
             <div>
               <strong>DeepSeek 会诊</strong>
-              <small>结合本次证据给出可追问的研判</small>
+              <small>用本次抓包摘要找出优先检查项</small>
             </div>
           </div>
           <dl class="cta-facts">
@@ -417,7 +417,13 @@ watch(filtered, (items) => {
             <div><dt>媒体流</dt><dd>{{ streams.length }}</dd></div>
             <div><dt>诊断</dt><dd>{{ p.events.length }}</dd></div>
           </dl>
-          <button class="consult-action" @click="store.openAiPanel()">开始会诊</button>
+          <button class="consult-action" @click="store.openAiPanel()">综合研判</button>
+          <div class="consult-shortcuts" aria-label="会诊快捷入口">
+            <button type="button" @click="store.openAiPanel('sip')">检查信令</button>
+            <button type="button" @click="store.openAiPanel('media')">检查媒体</button>
+            <button type="button" @click="store.openAiPanel('field')">现场排障</button>
+          </div>
+          <small class="consult-note">先预览摘要，再确认发送</small>
         </section>
 
         <section>

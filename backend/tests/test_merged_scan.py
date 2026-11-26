@@ -15,6 +15,10 @@ class _FakeStdout:
         return iter(self._lines)
 
 
+    def close(self):
+        pass
+
+
 class _FakeProc:
     def __init__(self, lines):
         self.stdout = _FakeStdout(lines)
@@ -123,3 +127,12 @@ def test_load_sip_accepts_precollected_rows(db, make_task):
 
     assert len(out) == 2
     assert {m['info'].call_id for m in out} == {'abc'}
+
+
+def test_stream_surfaces_nonzero_exit_without_stderr(fake_tshark, monkeypatch):
+    fake_tshark([])
+    proc = _FakeProc([])
+    proc.wait = lambda timeout=None: 2
+    monkeypatch.setattr(capture.subprocess, 'Popen', lambda *args, **kwargs: proc)
+    with pytest.raises(capture.CaptureError, match='退出码 2'):
+        list(capture.iter_packets('ignored.pcap'))

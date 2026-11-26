@@ -314,7 +314,7 @@ onUnmounted(() => {
           <input v-model="filterCallId" class="mini-input" placeholder="Call-ID 过滤" />
           <button class="btn-mini" @click="downloadSvg">导出 SVG</button>
         </div>
-        <div class="card-body timeline-body">
+        <div v-panel-change="filterMethod" class="card-body timeline-body">
           <SipLadder ref="ladder" :messages="filteredSip" @select="selectMsg" />
         </div>
       </div>
@@ -586,4 +586,6 @@ onUnmounted(() => {
   padding: 14px 16px; font-size: 13px; color: var(--critical);
   margin-bottom: 16px;
 }
+ .sdp-block { background:var(--surface-2); border:1px solid var(--line); border-radius:var(--radius); padding:var(--space-3); }
+.sdp-grid b { overflow-wrap:anywhere; }
 </style>

@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 import os
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, insert, select, update
 from sqlalchemy.orm import Session
 
 from ..core import analysis_control
@@ -170,7 +170,8 @@ def _run(db: Session, task: AnalysisTask):
     # ---------------- 1. 文件信息 ----------------
     _set_progress(db, task, '读取文件信息', 5)
     cf = files[0]
-    info = capture.inspect_file(cf.stored_path)
+    task_id, file_id, path = task.id, cf.id, cf.stored_path
+    info = capture.inspect_file(path)
     cf.file_format = info.file_format
     cf.checksum = info.checksum or cf.checksum
     cf.packet_count = info.packet_count
@@ -183,8 +184,6 @@ def _run(db: Session, task: AnalysisTask):
     cf.udp_count = info.udp_count
     cf.warnings = info.warnings
     db.commit()
-
-    path = cf.stored_path
 
     # ---------------- 2. 报文索引 ----------------
     _set_progress(db, task, '建立报文索引', 15)
@@ -201,38 +200,41 @@ def _run(db: Session, task: AnalysisTask):
         sip = p.pop('sip', None)
         if sip:
             sip_rows.append(sip)
-        for address in (p.get('src_ip'), p.get('dst_ip')):
+        src_ip, dst_ip, transport = p['src_ip'], p['dst_ip'], p['transport']
+        for address in (src_ip, dst_ip):
             if address:
                 ip_addresses.add(address)
-        if p.get('transport') in transport_counts:
-            transport_counts[p['transport']] += 1
+        if transport in transport_counts:
+            transport_counts[transport] += 1
         ts = p.get('ts')
         if ts is not None:
             stats['first_ts'] = ts if stats['first_ts'] is None else min(stats['first_ts'], ts)
             stats['last_ts'] = ts if stats['last_ts'] is None else max(stats['last_ts'], ts)
         if not stats['has_rtp'] and 'rtp' in (p.get('protocols') or '').lower():
             stats['has_rtp'] = True
-        key = (p['src_ip'], p['src_port'])
-        ep = endpoints.setdefault(key, {'ip': p['src_ip'], 'port': p['src_port'],
-                                        'count': 0, 'bytes': 0})
+        key = (src_ip, p['src_port'])
+        ep = endpoints.get(key)
+        if ep is None:
+            ep = endpoints[key] = {'ip': src_ip, 'port': p['src_port'], 'count': 0, 'bytes': 0}
         ep['count'] += 1
         ep['bytes'] += p['length']
 
-        batch.append(PacketIndex(
-            task_id=task.id, file_id=cf.id,
-            packet_number=p['number'], timestamp=p['ts'],
-            source_ip=p['src_ip'], destination_ip=p['dst_ip'],
-            source_port=p['src_port'], destination_port=p['dst_port'],
-            transport=p['transport'], protocol=_top_protocol(p['protocols']),
-            length=p['length'], summary=_packet_summary(p),
-        ))
+        batch.append({
+            'task_id': task_id, 'file_id': file_id,
+            'packet_number': p['number'], 'timestamp': p['ts'],
+            'source_ip': src_ip, 'destination_ip': dst_ip,
+            'source_port': p['src_port'], 'destination_port': p['dst_port'],
+            'transport': transport, 'protocol': _top_protocol(p['protocols']),
+            'length': p['length'], 'summary': _packet_summary(p),
+        })
         if len(batch) >= 2000:
             analysis_control.checkpoint()
-            db.bulk_save_objects(batch)
+            db.execute(insert(PacketIndex), batch)
             db.commit()
             batch.clear()
     if batch:
-        db.bulk_save_objects(batch)
+        analysis_control.checkpoint()
+        db.execute(insert(PacketIndex), batch)
         db.commit()
 
     # 端点入库

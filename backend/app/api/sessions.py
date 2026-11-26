@@ -281,11 +281,16 @@ def task_media_quality(task_id: int, db: Session = Depends(get_db)):
         st.id, st.session_id, st.ssrc, st.transport, st.packet_count, st.byte_count,
         st.avg_bitrate, st.jitter_avg, st.jitter_max, st.seq_gap_packets,
         st.out_of_order_count, st.duplicate_count, st.max_gap, st.duration, st.extra,
+        st.source_port, st.destination_port, st.codec, st.width, st.height,
+        st.frame_count, st.rebuild_error,
+        st.rebuilt_path.is_not(None).label('has_rebuilt_video'),
     ).where(st.task_id == task_id).order_by(st.packet_count.desc(), st.id)).mappings()
     streams = {}
     for row in rows:
         item = dict(row)
-        item['gaps'] = (item.pop('extra') or {}).get('seq_gap_events', [])
+        extra = item.pop('extra') or {}
+        item['gaps'] = extra.get('seq_gap_events', [])
+        item['extra'] = {key: extra[key] for key in ('rtcp', 'rebuild') if key in extra}
         item.update(bitrate=[], jitter=[])
         streams[item['id']] = item
     if streams:

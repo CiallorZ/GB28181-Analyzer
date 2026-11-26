@@ -184,7 +184,8 @@ def _task_brief(db: Session, t: AnalysisTask) -> S.TaskBrief:
         packet_count=cf.packet_count if cf else None,
         duration=cf.duration if cf else None,
         session_count=s.get('session_count'),
-        diagnostic_count=sum((s.get('diagnostics') or {}).values()) or None,
+        diagnostic_count=(sum(s['diagnostics'].values())
+                          if isinstance(s.get('diagnostics'), dict) else None),
         error_message=t.error_message,
     )
 

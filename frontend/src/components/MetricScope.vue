@@ -93,7 +93,7 @@ async function draw() {
     })
   }
   const c = chartPalette(),
-    colors = [c.info, '#b993ff', c.ok, c.warn, c.crit]
+    colors = [c.info, c.ai, c.ok, c.warn, c.crit]
   const xs = lines.value.flatMap((l) => l.data.map((pt) => pt[0]))
   const selection = windowRange.value
   const min = xs.reduce((a, b) => Math.min(a, b), selection?.[0] ?? Infinity),

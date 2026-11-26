@@ -167,6 +167,7 @@ onMounted(loadStorage)
             视频 {{ storage.usage.rebuilt_mb }} MB ·
             数据库 {{ storage.usage.db_mb }} MB
           </div>
+          <meter v-if="storage.policy.disk_budget_mb > 0" class="storage-meter" min="0" :max="storage.policy.disk_budget_mb" :value="storage.usage.total_mb" aria-label="存储预算使用量"></meter>
           <div class="sc-policy">
             保留最近 <b>{{ storage.policy.keep_tasks }}</b> 个任务 ·
             <b>{{ storage.policy.keep_days }}</b> 天 ·
@@ -295,4 +296,10 @@ onMounted(loadStorage)
   border-radius: var(--radius); padding: 12px 14px; font-size: 13px;
   color: var(--critical); margin-bottom: 14px;
 }
+ .task-list .tbl th { position:sticky; top:0; z-index:1; }
+.task-list .tbl td { height:36px; }
+.task-list .tbl th { white-space:nowrap; }
+.storage-meter { display:block; width:min(300px,100%); height:9px; margin:6px 0; }
+.storage-meter::-webkit-meter-bar { background:var(--line); border:0; }
+.storage-meter::-webkit-meter-optimum-value { background:var(--brand); border-radius:6px; }
 </style>
