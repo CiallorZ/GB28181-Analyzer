@@ -97,6 +97,10 @@ def _resolve_tool(name: str, configured: str | None) -> tuple[str | None, str]:
     for path, source in _environment_candidates(name):
         if Path(path).is_file():
             return path, source
+    if os.name == 'nt' and os.environ.get('LOCALAPPDATA'):
+        link = Path(os.environ['LOCALAPPDATA']) / 'Microsoft/WinGet/Links' / (name + '.exe')
+        if link.is_file():
+            return str(link), 'auto'
     found = shutil.which(name)
     if found:
         return found, 'path'

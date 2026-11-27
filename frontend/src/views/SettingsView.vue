@@ -138,6 +138,26 @@ async function testTool(item) {
   }
 }
 
+const nativeDesktop = Boolean(window.nsh)
+const installing = ref(false)
+async function installTools() {
+  if (!confirm('将通过 WinGet 联网安装缺少的 Wireshark 或 FFmpeg，并接受对应软件包协议。继续安装？')) return
+  installing.value = true
+  window.nsh?.postMessage?.('install-busy')
+  toolMsg.value = toolErr.value = ''
+  try {
+    tools.value = await api.installTools()
+    syncDraft()
+    await refreshHealth()
+    toolMsg.value = Object.values(tools.value.tools).every(t => t.available) ? '分析工具已全部就绪' : '请检查尚未识别的工具路径'
+  } catch (e) {
+    toolErr.value = e.response?.data?.detail || e.message
+  } finally {
+    window.nsh?.postMessage?.('install-idle')
+    installing.value = false
+  }
+}
+
 async function saveTools() {
   toolBusy.value = true
   toolErr.value = ''
@@ -312,10 +332,13 @@ onMounted(async () => {
         <p v-if="toolErr" class="tool-error">{{ toolErr }}</p>
         <p v-if="toolMsg" class="tool-ok">{{ toolMsg }}</p>
         <div class="tool-actions">
-          <button class="btn primary sm" :disabled="toolBusy" @click="saveTools">
+          <button v-if="nativeDesktop" class="btn primary sm" :disabled="installing || toolBusy" @click="installTools">
+            {{ installing ? '正在安装依赖…' : '一键安装缺失依赖' }}
+          </button>
+          <button class="btn primary sm" :disabled="toolBusy || installing" @click="saveTools">
             {{ toolBusy ? '保存中…' : '保存路径' }}
           </button>
-          <button class="btn ghost sm" :disabled="toolBusy" @click="resetTools">
+          <button class="btn ghost sm" :disabled="toolBusy || installing" @click="resetTools">
             恢复自动探测
           </button>
           <span class="tool-actions-note">建议先点“测试”，确认工具版本后再保存。</span>

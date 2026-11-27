@@ -43,6 +43,7 @@ export const api = {
   tools: () => client.get('/settings/tools').then(r => r.data),
   saveTools: (body) => client.put('/settings/tools', body).then(r => r.data),
   resetTools: () => client.delete('/settings/tools').then(r => r.data),
+  installTools: () => client.post('/settings/tools/install', {}, { timeout: 0 }).then(r => r.data),
   pickTool: () => client.post('/settings/tools/pick', {}, { timeout: 0 }).then(r => r.data.path),
   probeTool: (body) => client.post('/settings/tools/probe', body).then(r => r.data),
   activeTasks: () => client.get('/tasks/active-count').then(r => r.data),

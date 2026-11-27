@@ -34,11 +34,12 @@ from . import rtp_analyzer
 def refresh_tools() -> None:
     """Re-read manual paths, environment and PATH without restarting the app."""
     global TSHARK, CAPINFOS, FFMPEG, FFPROBE, DUMPCAP
-    TSHARK = toolchain.find_tool('tshark')
-    CAPINFOS = toolchain.find_tool('capinfos')
-    FFMPEG = toolchain.find_tool('ffmpeg')
-    FFPROBE = toolchain.find_tool('ffprobe')
-    DUMPCAP = toolchain.find_tool('dumpcap')
+    paths = toolchain.status()['tools']
+    TSHARK = paths['tshark']['path']
+    CAPINFOS = paths['capinfos']['path']
+    FFMPEG = paths['ffmpeg']['path']
+    FFPROBE = paths['ffprobe']['path']
+    DUMPCAP = paths['dumpcap']['path']
 
 
 TSHARK = None
