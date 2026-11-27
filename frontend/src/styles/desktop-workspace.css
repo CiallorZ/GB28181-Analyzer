@@ -92,3 +92,19 @@ body { background: var(--bg); }
 :root[data-material="swiss"] .badge { font-weight:600; border-radius:5px; }
 :root[data-material="swiss"] .ai-head { background:var(--card); border-top:3px solid var(--primary); }
 :root[data-material="swiss"] .ai-steps { background:var(--muted); }
+
+:root[data-material="swiss"] .capture-home .mast,
+:root[data-material="swiss"] .ai-head {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: radial-gradient(ellipse at top right, color-mix(in srgb, var(--primary) 12%, transparent), transparent 64%), var(--card);
+}
+:root[data-material="swiss"] .metric-card {
+  border-radius: 12px;
+  background: linear-gradient(155deg, var(--card), var(--muted));
+}
+:root[data-material="swiss"] .btn { border-radius: 9px; }
+@media (prefers-reduced-motion: no-preference) {
+  :root[data-material="swiss"] .btn { transition: transform 150ms ease-out, background-color 150ms ease-out; }
+  :root[data-material="swiss"] .btn:enabled:active { transform: scale(.98); }
+}

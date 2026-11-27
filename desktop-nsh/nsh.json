@@ -1,7 +1,7 @@
 {
   "name": "GB28181 Analyzer",
   "id": "dev.gb28181.analyzer",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "build": 1,
   "capabilities": {
     "windows": true,

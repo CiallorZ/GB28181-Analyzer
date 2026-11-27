@@ -63,3 +63,16 @@ def test_tool_api_rejects_missing_path(client, tmp_path):
     assert response.status_code == 400
     assert '路径不存在' in response.json()['error']
 
+
+def test_install_requires_packaged_loopback_desktop(client):
+    assert client.post('/api/v1/settings/tools/install').status_code == 403
+
+
+def test_refresh_reads_one_configuration_snapshot(monkeypatch):
+    calls = []
+    def snapshot():
+        calls.append(True)
+        return {}
+    monkeypatch.setattr(toolchain, 'load_config', snapshot)
+    capture.refresh_tools()
+    assert len(calls) == 1

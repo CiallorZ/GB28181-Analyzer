@@ -61,8 +61,6 @@ const globalBusy = computed(() => store.activeCount > 0 || store.isAnalyzing)
 
 function setNativeBusy(busy) {
   window.nsh?.postMessage?.(busy ? 'analysis-busy' : 'analysis-idle')
-  const invoke = window.__TAURI__?.core?.invoke
-  if (invoke) invoke('set_analysis_busy', { busy }).catch(() => {})
 }
 
 watch(globalBusy, (active) => {

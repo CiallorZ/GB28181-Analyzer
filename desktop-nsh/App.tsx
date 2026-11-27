@@ -1,5 +1,5 @@
 import { mount, signal, Text, View, WebView } from "nsh";
-import { AlertDialog } from "nsh/base";
+import { AlertDialog, TitleBar } from "nsh/base";
 import { Application, Window } from "nsh/desktop";
 import { origin } from "./engine";
 
@@ -7,10 +7,24 @@ function Workspace() {
   const failed = signal(false);
   const loaded = signal(false);
   const busy = signal(false);
+  const installing = signal(false);
   let confirming = false;
 
   async function requestClose() {
     if (confirming) return;
+    if (installing()) {
+      confirming = true;
+      try {
+        await AlertDialog.show({
+          title: "正在安装分析工具",
+          description: "请完成 Windows 安装提示，等待工具状态刷新后再退出。",
+          actions: [{ id: "stay", label: "返回设置", role: "cancel" }],
+        });
+      } finally {
+        confirming = false;
+      }
+      return;
+    }
     if (busy()) {
       confirming = true;
       try {
@@ -34,12 +48,18 @@ function Workspace() {
     if (data === "workspace-ready") loaded.set(true);
     if (data === "analysis-busy") busy.set(true);
     if (data === "analysis-idle") busy.set(false);
+    if (data === "install-busy") installing.set(true);
+    if (data === "install-idle") installing.set(false);
   }
 
   Application.on("quitRequest", requestClose);
   return <Window id="main" title={loaded() ? "GB28181 Analyzer · 视联网分析工作台" : "GB28181 Analyzer · 正在连接"}
-                 closeOnPress={false} onClosePress={requestClose}>
+                 titleBar={{ style: "hidden" }} closeOnPress={false} onClosePress={requestClose}>
     <View class="flex-1 bg-background">
+      <TitleBar class="flex-row items-center gap-3 bg-red-950 px-5">
+        <Text class="text-sm font-bold text-white">GB28181</Text>
+        <Text class="text-xs text-red-100">视联网诊断工作台</Text>
+      </TitleBar>
       {failed() ? <View class="flex-1 justify-center items-center gap-4">
         <Text class="text-lg text-foreground">无法打开本机分析工作台</Text>
         <Text class="text-foreground">请检查分析服务和 Microsoft Edge WebView2 Runtime。</Text>
