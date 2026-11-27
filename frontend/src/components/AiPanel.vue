@@ -143,10 +143,12 @@ async function saveCfg() {
   cfgMsg.value = ''
   cfgMsgOk.value = false
   try {
-    const body = {}
+    const body = {
+      model: modelInput.value.trim(),
+      base_url: baseInput.value.trim()
+    }
+    // 空模型和地址要发给后端恢复默认值；空密钥则保留已保存的密钥。
     if (keyInput.value.trim()) body.api_key = keyInput.value.trim()
-    if (modelInput.value.trim()) body.model = modelInput.value.trim()
-    if (baseInput.value.trim()) body.base_url = baseInput.value.trim()
     cfg.value = await api.aiSaveConfig(body)
     keyInput.value = ''
     cfgMsg.value = '已保存，可以开始会诊'
@@ -369,10 +371,14 @@ function exportReport() {
 
 async function copyReport() {
   try {
-    await navigator.clipboard?.writeText(report.value)
+    if (!navigator.clipboard?.writeText) throw new Error('当前浏览器不支持剪贴板')
+    await navigator.clipboard.writeText(report.value)
     copied.value = true
     setTimeout(() => { copied.value = false }, 1600)
-  } catch { copied.value = false }
+  } catch (e) {
+    copied.value = false
+    err.value = '复制失败：' + (e.message || '请检查浏览器剪贴板权限')
+  }
 }
 
 function resetReport() {

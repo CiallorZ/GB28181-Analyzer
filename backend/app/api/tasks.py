@@ -6,6 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 import hashlib
 import json
+import logging
 import os
 import re
 import threading
@@ -30,6 +31,7 @@ from ..services.diagnosis import severity_order_clause
 from ..schemas import task as S
 
 router = APIRouter(prefix='/tasks', tags=['tasks'])
+log = logging.getLogger('gb28181.tasks')
 
 _running = analysis_control.active_tasks
 _run_lock = analysis_control.task_lock
@@ -337,9 +339,21 @@ def start_analyze(task_id: int, bg: BackgroundTasks,
             task.stage = '排队中'
             task.error_message = None
             db.commit()
-            threading.Thread(target=_worker, args=(task_id,), daemon=True).start()
         except BaseException:
             _running.pop(task_id, None)
+            raise
+
+        try:
+            threading.Thread(target=_worker, args=(task_id,), daemon=True).start()
+        except BaseException as exc:
+            _running.pop(task_id, None)
+            try:
+                task.status = TaskStatus.FAILED
+                task.stage = '启动失败'
+                task.error_message = '无法启动分析线程：%s: %s' % (type(exc).__name__, exc)
+                db.commit()
+            except Exception:
+                db.rollback()
             raise
 
     db.refresh(task)
@@ -348,17 +362,55 @@ def start_analyze(task_id: int, bg: BackgroundTasks,
 
 def _worker(task_id: int):
     """后台分析线程 —— 不阻塞 HTTP 请求"""
-    db = SessionLocal()
-    token = analysis_control.current.set(_running[task_id])
+    db = None
+    token = None
     try:
+        db = SessionLocal()
+        token = analysis_control.current.set(_running[task_id])
         analyzer.run_analysis(db, task_id)
-    except Exception:
-        pass          # 状态已由 run_analysis 写入
+    except analysis_control.Cancelled:
+        pass          # 取消是正常终态，run_analysis 已处理
+    except Exception as exc:
+        # run_analysis 内部的 try 会写失败状态；这里只兜底进入流水线之前
+        # 的异常（任务加载、初始状态提交、旧结果删除等），否则任务会
+        # 永远停在 PENDING/ANALYZING，页面和 active-count 都显示仍在跑。
+        log.exception('任务 #%s 工作线程异常', task_id)
+        _mark_worker_failed(task_id, exc)
     finally:
-        analysis_control.current.reset(token)
-        db.close()
+        if token is not None:
+            analysis_control.current.reset(token)
+        if db is not None:
+            db.close()
         with _run_lock:
             _running.pop(task_id, None)
+
+
+def _mark_worker_failed(task_id: int, exc: Exception):
+    """用干净的会话兜底写失败状态；不覆盖取消或已写入的终态。"""
+    session = None
+    try:
+        session = SessionLocal()
+        session.execute(update(AnalysisTask).where(
+            AnalysisTask.id == task_id,
+            # 只兜底还没进入终态的任务：CANCELLED 必须保留，
+            # run_analysis 已写的 FAILED（解析失败/分析异常）也更具体，不应覆盖。
+            AnalysisTask.status.in_((TaskStatus.PENDING, TaskStatus.ANALYZING)),
+        ).values(
+            status=TaskStatus.FAILED,
+            stage='工作线程异常',
+            error_message='%s: %s' % (type(exc).__name__, exc),
+        ))
+        session.commit()
+    except Exception:
+        if session is not None:
+            try:
+                session.rollback()
+            except Exception:
+                pass
+        log.exception('任务 #%s 写入工作线程失败状态出错', task_id)
+    finally:
+        if session is not None:
+            session.close()
 
 
 @router.post('/{task_id}/cancel', response_model=S.TaskBrief)

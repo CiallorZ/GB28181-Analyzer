@@ -124,6 +124,10 @@ def _startup():
         if r['actions']:
             log.info('启动清理：%d 个任务被清理，当前占用 %.1f MB',
                      len(r['actions']), r['usage']['total_mb'])
+        if r.get('reconciliation', {}).get('restored'):
+            log.info('隔离区恢复：%d 个任务的文件', r['reconciliation']['restored'])
+        if r.get('orphan_resumes'):
+            log.info('清理了 %d 个超时断点续传目录', r['orphan_resumes'])
     except Exception as e:
         log.warning('启动清理失败：%s', e)
 

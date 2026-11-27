@@ -84,4 +84,37 @@ describe('taskCache', () => {
     expect(get('k0')).toBe(0)
     expect(get('k1')).toBeUndefined()
   })
+
+  it('clearTask 后旧请求不写缓存，也不会删掉同 key 的新请求', async () => {
+    clearAll()
+    const key = cacheKey(1, 'r', 'overview')
+    let resolveOld, resolveNew
+    const oldLoad = cachedLoad(key, () => new Promise(resolve => { resolveOld = resolve }))
+    await Promise.resolve()
+    clearTask(1)
+    const newLoad = cachedLoad(key, () => new Promise(resolve => { resolveNew = resolve }))
+    await Promise.resolve()
+
+    resolveOld('old')
+    expect(await oldLoad).toBe('old')
+    expect(get(key)).toBeUndefined()
+
+    resolveNew('new')
+    expect(await newLoad).toBe('new')
+    expect(get(key)).toBe('new')
+  })
+
+  it('clearAll 后完成的旧请求不会重新写回缓存', async () => {
+    clearAll()
+    const key = cacheKey(4, 'r', 'media')
+    let resolveLoad
+    const pending = cachedLoad(key, () => new Promise(resolve => { resolveLoad = resolve }))
+    await Promise.resolve()
+    clearAll()
+
+    resolveLoad({ items: [1] })
+    expect(await pending).toEqual({ items: [1] })
+    expect(get(key)).toBeUndefined()
+    expect(size()).toBe(0)
+  })
 })

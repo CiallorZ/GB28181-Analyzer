@@ -13,11 +13,20 @@
   KEEP_TASKS=N   保留最近 N 个任务的完整数据
   KEEP_DAYS=N    超过 N 天自动清理
   DISK_BUDGET_MB 总占用超限时，从最旧的开始删
+  KEEP_UPLOADS=0 任务完成后只清原始抓包，保留重建视频与数据库结果
+
+清理采用两阶段：文件先移入 DATA_DIR/quarantine/<task_id>，数据库提交成功
+后才删除隔离目录。若在移动与删除之间进程崩溃，文件留在隔离区；下次启动
+由 reconcile_quarantine() 按数据库状态决定删除（任务已清除/已标记清理）
+还是恢复（数据库仍引用这些文件）。
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
+import time
+import uuid
 from datetime import timedelta
 
 from sqlalchemy import delete, select
@@ -62,6 +71,13 @@ def total_disk_usage() -> dict:
                     uploads += os.path.getsize(p)
             except OSError:
                 pass
+            if name.startswith('.resume-') and os.path.isdir(p):
+                for root, _dirs, files in os.walk(p):
+                    for filename in files:
+                        try:
+                            uploads += os.path.getsize(os.path.join(root, filename))
+                        except OSError:
+                            pass
 
     rebuilt = 0
     if os.path.isdir(settings.REBUILD_DIR):
@@ -106,45 +122,197 @@ def purge_task_media(db: Session, task_id: int, drop_task: bool = False) -> dict
         return _purge_task_media(db, task_id, False)
 
 
-def _purge_task_media(db: Session, task_id: int, drop_task: bool) -> dict:
+def quarantine_dir(task_id: int):
+    """单个任务的隔离目录（移动先于提交，提交成功后再删除）"""
+    return settings.DATA_DIR / 'quarantine' / str(task_id)
+
+
+def _size_of(path) -> int:
+    try:
+        return os.path.getsize(path) if os.path.isfile(path) else 0
+    except OSError:
+        return 0
+
+
+MANIFEST_NAME = 'quarantine.json'
+
+
+def _write_manifest(qdir, task_id: int, manifest: dict, drop_task: bool,
+                    upload_only: bool) -> None:
+    """记录文件原始路径；提交前崩溃后靠它把文件恢复回去。"""
+    data = {**manifest, 'task_id': task_id, 'drop_task': drop_task,
+            'upload_only': upload_only}
+    try:
+        qdir.mkdir(parents=True, exist_ok=True)
+        (qdir / MANIFEST_NAME).write_text(
+            json.dumps(data, ensure_ascii=False), encoding='utf-8')
+    except OSError:
+        pass
+
+
+def _read_manifest(qdir):
+    try:
+        data = json.loads((qdir / MANIFEST_NAME).read_text(encoding='utf-8'))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _restore_quarantine(qdir) -> bool:
+    """把隔离文件恢复到 manifest 记录的原始位置（尽力而为）。"""
+    manifest = _read_manifest(qdir)
+    restored = False
+    for item in manifest.get('files') or []:
+        src = None
+        try:
+            name = item.get('quarantined_as')
+            if name:
+                candidate = qdir / name
+                if candidate.is_file():
+                    src = candidate
+            if src is None:
+                # 老版本/清单损坏时按扩展名猜测唯一候选
+                candidates = [p for p in qdir.iterdir() if p.is_file()
+                              and p.name != MANIFEST_NAME]
+                if len(candidates) == 1:
+                    src = candidates[0]
+            dest = item.get('path')
+            if src and dest:
+                dest_dir = os.path.dirname(dest)
+                if dest_dir:
+                    os.makedirs(dest_dir, exist_ok=True)
+                if not os.path.exists(dest):
+                    shutil.move(src, dest)
+                    restored = True
+        except (OSError, TypeError, AttributeError):
+            continue
+    rebuilt = qdir / 'rebuilt'
+    if isinstance(manifest.get('rebuild'), str) and rebuilt.is_dir():
+        dest = manifest['rebuild']
+        try:
+            if not os.path.exists(dest):
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                shutil.move(rebuilt, dest)
+                restored = True
+        except OSError:
+            pass
+    return restored
+
+
+def reconcile_quarantine(db: Session | None = None) -> dict:
+    """启动时协调隔离区与数据库状态。
+
+    - 任务已不存在，或数据库已标记 media_purged/index_purged/upload_purged：
+      直接删除隔离目录（提交已经生效）。
+    - 任务仍在引用文件（提交前崩溃）：恢复文件到原路径，再删除隔离目录。
+    - 无 manifest 的旧隔离目录：只在任务已消失/已清理时删除，避免误删可恢复文件。
+
+    限制：恢复发生在「移动后、提交前」的崩溃场景；如果提交成功但还没来得及
+    删除隔离区，则按已清理处理。单个文件被外部移动/改名且清单缺失时无法恢复。
+    """
+    root = settings.DATA_DIR / 'quarantine'
+    result = {'deleted': 0, 'restored': 0, 'kept': 0}
+    if not root.is_dir():
+        return result
+
+    own_session = db is None
+    if own_session:
+        from ..core.db import SessionLocal
+        db = SessionLocal()
+    try:
+        for entry in list(root.iterdir()):
+            if not entry.is_dir() or not entry.name.isdigit():
+                continue
+            task_id = int(entry.name)
+            task = db.get(AnalysisTask, task_id)
+            manifest = _read_manifest(entry)
+            cfg = (task.configuration or {}) if task else {}
+            purged = bool(cfg.get('media_purged') or cfg.get('index_purged')
+                          or (cfg.get('upload_purged') and
+                              not any(cf.stored_path and os.path.isfile(cf.stored_path)
+                                      for cf in task.files)))
+            if task is None or purged or manifest.get('drop_task'):
+                shutil.rmtree(entry, ignore_errors=True)
+                result['deleted'] += 1
+                continue
+            if manifest and _restore_quarantine(entry):
+                result['restored'] += 1
+                shutil.rmtree(entry, ignore_errors=True)
+            else:
+                # 无法恢复（例如数据库状态不明）：保留文件等待人工介入
+                result['kept'] += 1
+        return result
+    finally:
+        if own_session:
+            db.close()
+
+
+def _purge_task_media(db: Session, task_id: int, drop_task: bool,
+                      upload_only: bool = False) -> dict:
     task = db.get(AnalysisTask, task_id)
     if not task:
         return {'removed': 0, 'freed_mb': 0}
 
+    qdir = quarantine_dir(task_id)
+    moved = 0
     freed = 0
-    removed = 0
 
-    # 1. 上传的原始抓包
-    for cf in task.files:
+    manifest = {'files': [], 'rebuild': False}
+
+    def _quarantine(src):
+        nonlocal moved, freed
         try:
-            if cf.stored_path and os.path.isfile(cf.stored_path):
-                freed += os.path.getsize(cf.stored_path)
-                os.remove(cf.stored_path)
-                removed += 1
+            if not os.path.isfile(src):
+                return
+            qdir.mkdir(parents=True, exist_ok=True)
+            dest = qdir / (uuid.uuid4().hex + os.path.splitext(src)[1])
+            size = _size_of(src)
+            shutil.move(src, dest)
+            freed += size
+            moved += 1
+            return dest.name
+        except OSError:
+            return None
+
+    # 阶段一：把文件移出原位置（不删除），记录元数据供恢复使用。
+    for cf in task.files:
+        if cf.stored_path and os.path.isfile(cf.stored_path):
+            name = _quarantine(cf.stored_path)
+            manifest['files'].append({'id': cf.id, 'path': cf.stored_path,
+                                      'quarantined_as': name})
+
+    d = os.path.join(settings.REBUILD_DIR, str(task_id))
+    if not upload_only and os.path.isdir(d):
+        # 整个重建目录移入隔离区，保留原始路径以便恢复
+        rebuild_q = qdir / 'rebuilt'
+        try:
+            qdir.mkdir(parents=True, exist_ok=True)
+            if os.path.exists(rebuild_q):
+                shutil.rmtree(rebuild_q, ignore_errors=True)
+            shutil.move(d, rebuild_q)
+            manifest['rebuild'] = d
+            for root, _dirs, files in os.walk(rebuild_q):
+                for name in files:
+                    freed += _size_of(os.path.join(root, name))
+                    moved += 1
         except OSError:
             pass
 
-    # 2. 重建产物目录
-    d = os.path.join(settings.REBUILD_DIR, str(task_id))
-    if os.path.isdir(d):
-        for name in os.listdir(d):
-            p = os.path.join(d, name)
-            try:
-                if os.path.isfile(p):
-                    freed += os.path.getsize(p)
-                    removed += 1
-            except OSError:
-                pass
-        try:
-            shutil.rmtree(d, ignore_errors=True)
-        except Exception:
-            pass
+    if moved:
+        _write_manifest(qdir, task_id, manifest, drop_task, upload_only)
 
+    # 阶段二：更新数据库并提交。提交失败时文件仍在隔离区，可由
+    # reconcile_quarantine() 恢复；不会再次出现「DB 引用已删除文件」。
     if drop_task:
         db.delete(task)
+    elif upload_only:
+        task.configuration = {
+            **(task.configuration or {}),
+            'upload_purged': True,
+            'upload_purged_at': utcnow().isoformat(),
+        }
     else:
         # 媒体清了，报文索引也就没意义（无法再打开原始报文）
-        # 一并删掉，能省下数据库里最大的一块空间
         from sqlalchemy import delete as _del
         from ..models.entities import PacketIndex
         db.execute(_del(PacketIndex).where(PacketIndex.task_id == task_id))
@@ -155,15 +323,46 @@ def _purge_task_media(db: Session, task_id: int, drop_task: bool) -> dict:
             'media_purged_at': utcnow().isoformat(),
             'index_purged': True,
         }
-        removed += 1
 
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        # 提交失败：尝试把隔离文件恢复到原位置
+        _restore_quarantine(qdir)
+        raise
+
+    # 阶段三：提交成功后才真正删除隔离目录
+    if qdir.is_dir():
+        shutil.rmtree(qdir, ignore_errors=True)
     return {
-        'removed': removed,
+        'removed': moved + (0 if drop_task or upload_only else 1),
         'freed_mb': round(freed / 1024 / 1024, 2),
         'task_id': task_id,
         'dropped': drop_task,
     }
+
+
+def cleanup_orphan_resumes(max_age_hours: float | None = None) -> dict:
+    """清理 UPLOAD_DIR 下长时间未完成的 .resume-* 分片目录。
+
+    按目录 mtime 判断陈旧程度；正常上传每次写分片都会更新 mtime。
+    阈值可取 settings.RESUME_MAX_AGE_HOURS（若配置存在），默认 24 小时。
+    """
+    if max_age_hours is None:
+        max_age_hours = getattr(settings, 'RESUME_MAX_AGE_HOURS', 24)
+    cutoff = time.time() - max_age_hours * 3600
+    removed = []
+    upload_dir = settings.UPLOAD_DIR
+    if upload_dir.is_dir():
+        for entry in upload_dir.glob('.resume-*'):
+            try:
+                if entry.is_dir() and entry.stat().st_mtime < cutoff:
+                    shutil.rmtree(entry, ignore_errors=True)
+                    removed.append(entry.name)
+            except OSError:
+                pass
+    return {'removed': removed, 'count': len(removed)}
 
 
 def auto_purge(db: Session, *, keep_tasks: int | None = None) -> dict:
@@ -176,10 +375,33 @@ def auto_purge(db: Session, *, keep_tasks: int | None = None) -> dict:
     actions = []
     keep_tasks = settings.KEEP_TASKS if keep_tasks is None else keep_tasks
 
+    # 启动/定时清理的第一件事：协调上次异常退出遗留的隔离文件，
+    # 并清掉超时未完成的断点续传目录（两者都不依赖任务列表）。
+    reconciliation = reconcile_quarantine(db)
+    resumes = cleanup_orphan_resumes()
+
     tasks = db.scalars(
         select(AnalysisTask).order_by(AnalysisTask.created_at.desc())).all()
+
+    # KEEP_UPLOADS=0：已完成任务只清原始抓包，保留重建视频与数据库结果。
+    # 与 KEEP_TASKS/KEEP_DAYS 无关——即使任务仍在保留窗口内也执行。
+    if not settings.KEEP_UPLOADS:
+        for t in tasks:
+            cfg = t.configuration or {}
+            if t.status != TaskStatus.COMPLETED or cfg.get('upload_purged') \
+                    or cfg.get('media_purged'):
+                continue
+            if not any(cf.stored_path and os.path.isfile(cf.stored_path)
+                       for cf in t.files):
+                continue
+            r = _purge_task_media(db, t.id, drop_task=False, upload_only=True)
+            if r['removed']:
+                actions.append({'task_id': t.id, 'reason': '不保留原始上传',
+                                'upload_purged': True, **r})
+
     if not tasks:
-        return {'actions': [], 'usage': total_disk_usage()}
+        return {'actions': actions, 'usage': total_disk_usage(),
+                'reconciliation': reconciliation, 'orphan_resumes': resumes['count']}
 
     # ---- 1. 保留数量 ----
     if keep_tasks > 0:
@@ -237,7 +459,8 @@ def auto_purge(db: Session, *, keep_tasks: int | None = None) -> dict:
                 })
                 usage = total_disk_usage()
 
-    return {'actions': actions, 'usage': total_disk_usage()}
+    return {'actions': actions, 'usage': total_disk_usage(),
+            'reconciliation': reconciliation, 'orphan_resumes': resumes['count']}
 
 
 def delete_task_completely(db: Session, task_id: int) -> bool:

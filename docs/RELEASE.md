@@ -12,7 +12,7 @@
 backend/app/__init__.py            __version__ = 'X.Y.Z'
 frontend/package.json              "version": "X.Y.Z"
 frontend/package-lock.json         "version": "X.Y.Z"（两处）
-desktop/tauri.conf.json            "version": "X.Y.Z"
+desktop-nsh/nsh.json               "version": "X.Y.Z"
 desktop/Cargo.toml                 gb28181-desktop 的 version
 desktop/Cargo.lock                 gb28181-desktop 的 version
 ```
@@ -32,7 +32,9 @@ ruff check app tests
 cd ../frontend
 npm run lint
 npm run test
+npm audit --audit-level=moderate --registry=https://registry.npmjs.org
 npm run build
+npm run budget
 
 cd .. && docker compose config -q     # 有 Docker 时再跑一次 compose
 ```
@@ -66,7 +68,7 @@ git push origin vX.Y.Z
 ## 5. 发布后
 
 - 下载 Release 里的源码包，按 README 快速开始跑一遍（至少验证源码包不缺文件）。
-- 需要镜像时：`docker compose up --build`，确认前端 8080、后端 8788 与报告导出都正常。
+- 需要镜像时：`docker compose up --build`，确认 `http://127.0.0.1:8080` 与报告导出正常；后端只通过前端代理访问，不映射到宿主机。
 - 失败时：先撤 Release，再 `git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z`；
   修复后用新补丁版本重发，不改已发布的 tag。
 

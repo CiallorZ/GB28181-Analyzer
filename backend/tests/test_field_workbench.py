@@ -18,6 +18,16 @@ def test_resume_checks_bytes_and_survives_retry(client):
     assert client.post(url + '/finish').json()['task_id'] == task
 
 
+def test_resume_enforces_configured_upload_limit(client, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, 'MAX_UPLOAD_MB', 1)
+    manifest = {'name': 'too-large.pcap', 'size': 1024**2 + 1, 'hashes': ['0' * 64]}
+    response = client.post('/api/v1/intake/resume', json=manifest)
+    assert response.status_code == 413
+    assert '1 MB' in response.json()['error']
+
+
 def test_multichunk_resume_keeps_uploaded_prefix(client, db):
     from app.api.intake import CHUNK
     from app.models.entities import CaptureFile

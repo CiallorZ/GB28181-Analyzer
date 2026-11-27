@@ -58,7 +58,35 @@ const names = {
 }
 const sum = computed(() => p.overview.summary || {})
 const counts = computed(() => sum.value.diagnostics)
-const first = computed(() => p.events[0])
+const diagnosticTotal = computed(() =>
+  Object.values(counts.value || {}).reduce((total, count) => total + (count || 0), 0))
+const priorityDiagnosticTotal = computed(() =>
+  (counts.value?.critical || 0) + (counts.value?.warning || 0))
+const diagnosticsTruncated = computed(() => p.events.length < diagnosticTotal.value)
+const first = computed(() => {
+  // 不用低等级事件代替汇总里尚未载入的最高等级事件。
+  if (counts.value?.critical)
+    return p.events.find(event => event.severity === 'critical') || null
+  if (counts.value?.warning)
+    return p.events.find(event => event.severity === 'warning') || null
+  return p.events.find(event => ['critical', 'warning'].includes(event.severity)) || p.events[0]
+})
+const headline = computed(() => {
+  if (first.value) return first.value.title
+  if (priorityDiagnosticTotal.value)
+    return `任务汇总记录 ${priorityDiagnosticTotal.value} 条严重或警告事件`
+  if (diagnosticTotal.value) return `任务汇总记录 ${diagnosticTotal.value} 条诊断事件`
+  return '本次抓包未命中异常规则'
+})
+const headlineSeverity = computed(() => {
+  if (counts.value?.critical) return 'critical'
+  if (counts.value?.warning) return 'warning'
+  return first.value?.severity
+})
+const headlineIcon = computed(() => {
+  if (['critical', 'warning'].includes(headlineSeverity.value)) return 'warning'
+  return diagnosticTotal.value ? 'info' : 'check'
+})
 const extraMetric = ref(null)
 const extraPending = ref(false)
 const extraError = ref(false)
@@ -210,16 +238,21 @@ watch(filtered, (items) => {
             <h2>分析总览</h2>
             <button @click="$emit('expand')">{{ expanded ? '收起完整明细' : '完整分析明细' }}</button>
           </header>
-          <section class="finding" :class="first?.severity" aria-labelledby="finding-title">
-            <AppIcon :name="!first ? 'check' : ['critical', 'warning'].includes(first.severity) ? 'warning' : 'info'" />
+          <section class="finding" :class="headlineSeverity" aria-labelledby="finding-title">
+            <AppIcon :name="headlineIcon" />
             <div class="finding-copy">
               <h3 id="finding-title">分析结论</h3>
-              <strong>{{ first?.title || '本次抓包未命中异常规则' }}</strong>
+              <strong>{{ headline }}</strong>
               <small v-if="first">{{ first.rule_id }} · {{ names[first.evidence_level] }} · {{ first.description }}</small>
-              <small v-else>结论覆盖本次抓包的可见范围和现有诊断规则。</small>
+              <small v-else-if="!diagnosticTotal">结论覆盖本次抓包的可见范围和现有诊断规则。</small>
+              <small v-if="diagnosticsTruncated">
+                当前仅载入 {{ events.length }} / {{ diagnosticTotal }} 条诊断；任务汇总包含
+                {{ counts?.critical || 0 }} 条严重、{{ counts?.warning || 0 }} 条警告。完整事件见“全部”。
+              </small>
             </div>
             <div class="finding-actions">
               <button v-if="first" @click="evidenceOf(first, $event.currentTarget)">查看证据 ›</button>
+              <router-link v-else-if="diagnosticTotal" to="/diagnostics">查看全部诊断 ›</router-link>
               <button type="button" class="finding-ai" data-cue="confirm" @click="store.openAiPanel()">
                 <img src="/brand/deepseek.svg" alt="" />DeepSeek 会诊
               </button>
@@ -428,10 +461,12 @@ watch(filtered, (items) => {
 
         <section>
           <h3>规则结论</h3>
-          <strong>{{ first?.title || '未发现规则命中异常' }}</strong>
-          <p>
-            {{ first ? names[first.evidence_level] + ' · ' + first.rule_id : '当前抓包范围内的规则结果。' }}
+          <strong>{{ headline }}</strong>
+          <p v-if="first">{{ names[first.evidence_level] }} · {{ first.rule_id }}</p>
+          <p v-else-if="diagnosticsTruncated">
+            当前仅载入 {{ events.length }} / {{ diagnosticTotal }} 条诊断，请查看完整诊断列表。
           </p>
+          <p v-else>当前抓包范围内的规则结果。</p>
           <button v-if="first" @click="evidenceOf(first, $event.currentTarget)">查看规则依据 ↗</button>
         </section>
 

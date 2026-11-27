@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import hashlib
 import os
+import queue
 import re
 import subprocess
 import tempfile
+import threading
 import time
 from contextlib import closing
 from dataclasses import dataclass, field
@@ -231,19 +233,46 @@ def _tshark_lines(cmd, timeout: float = TSHARK_TIMEOUT):
     #
     # 流式读取后不再有 subprocess.run(timeout=...)，但外部进程仍必须有
     # 时限：tshark 卡在坏抓包或失效的网络盘上时，不能把分析线程永久挂住。
-    # 这里在逐行读取的同时检查已用时间，超时就杀掉并抛可读错误。
+    # 关键：``for line in proc.stdout`` 可能在进程一行都不输出时无限阻塞，
+    # 所以把阻塞读放进后台线程，主线程按 deadline 有界地取队列，确保
+    # "一行不出" 和 "输出中途卡住" 两种情况都会超时。
     with tempfile.TemporaryFile() as stderr:
         proc = subprocess.Popen(
             cmd, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
             stdout=subprocess.PIPE, stderr=stderr, text=True, errors='replace',
             bufsize=1 << 20)
         started = time.monotonic()
+        lines: queue.Queue = queue.Queue()
+        reader_error: list[BaseException] = []
+
+        def _read_stdout():
+            try:
+                for line in proc.stdout:
+                    lines.put(line)
+            except BaseException as exc:      # 让读错误在主线程可见
+                reader_error.append(exc)
+            finally:
+                lines.put(None)                # EOF 哨兵：与真实输出行(None 不会出现)区分
+
+        thread = threading.Thread(target=_read_stdout, daemon=True)
+        thread.start()
         try:
             with analysis_control.track(proc):
-                for line in proc.stdout:
-                    if time.monotonic() - started > timeout:
-                        raise CaptureError('tshark 读取超时（%d 秒）' % timeout)
+                while True:
+                    remaining = timeout - (time.monotonic() - started)
+                    if remaining <= 0:
+                        raise CaptureError('tshark 读取超时（%g 秒）' % timeout)
+                    try:
+                        # 有界等待：stdout 阻塞时仍能检查 deadline
+                        line = lines.get(timeout=min(remaining, 0.5))
+                    except queue.Empty:
+                        analysis_control.checkpoint()
+                        continue
+                    if line is None:
+                        break
                     yield line
+                if reader_error:
+                    raise reader_error[0]
                 try:
                     status = proc.wait(timeout=10)
                 except subprocess.TimeoutExpired as exc:
@@ -261,8 +290,15 @@ def _tshark_lines(cmd, timeout: float = TSHARK_TIMEOUT):
         finally:
             if proc.poll() is None:
                 proc.kill()
-                proc.wait()
-            proc.stdout.close()
+                # 不让 wait() 无限挂住：短等后仍未退出就再 kill 并直接回收，
+                # 避免坏进程/假进程把分析线程钉死在 finally 里。
+                try:
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+            if proc.stdout:
+                proc.stdout.close()           # 读线程若有阻塞读，会随之退出
 
 
 def iter_packets(path: str, display_filter: str | None = None,

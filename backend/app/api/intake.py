@@ -43,6 +43,9 @@ def directory(key):
 
 @router.post('/resume')
 def resume(body: Manifest, db: Session = Depends(get_db)):
+    limit = settings.MAX_UPLOAD_MB * 1024 * 1024
+    if body.size > limit:
+        raise HTTPException(413, '文件超过 %d MB 上限' % settings.MAX_UPLOAD_MB)
     if Path(body.name).suffix.lower() not in settings.ALLOWED_EXT or len(body.hashes) != (body.size + CHUNK-1)//CHUNK or not all(re.fullmatch('[a-f0-9]{64}', h) for h in body.hashes):
         raise HTTPException(400, '文件清单无效')
     raw = json.dumps(body.model_dump(), sort_keys=True).encode()

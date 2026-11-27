@@ -58,8 +58,15 @@ export async function cachedLoad(key, loader) {
   if (inflight.has(key)) return inflight.get(key)
   const pending = Promise.resolve()
     .then(loader)
-    .then(value => { set(key, value); return value })
-    .finally(() => { inflight.delete(key) })
+    .then(value => {
+      // clearTask/clearAll may have invalidated this request while it was pending.
+      // The identity check also prevents an old request from deleting a newer one.
+      if (inflight.get(key) === pending) set(key, value)
+      return value
+    })
+    .finally(() => {
+      if (inflight.get(key) === pending) inflight.delete(key)
+    })
   inflight.set(key, pending)
   return pending
 }

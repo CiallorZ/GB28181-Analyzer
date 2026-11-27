@@ -589,10 +589,7 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
     pending = []          # 待重建的流：先收集，最后并行重建
 
     # ---- UDP 承载 ----
-    try:
-        udp_pkts, udp_rtcp = capture.extract_udp_rtp_and_rtcp(path)
-    except capture.CaptureError:
-        udp_pkts, udp_rtcp = [], []
+    udp_pkts, udp_rtcp = capture.extract_udp_rtp_and_rtcp(path)
 
     rtcp_events = [{'arrival': r['ts'], 'payload': r['payload'],
                     'source_ip': r.get('src_ip'), 'epoch': r.get('epoch')}
@@ -641,10 +638,7 @@ def _analyze_rtp(db: Session, task: AnalysisTask,
             pending.append((tag, pkts, st, key, 'UDP', meta, ps))
 
     # ---- TCP 承载（RFC4571 自研）----
-    try:
-        tcp_streams = capture.dump_tcp_segments(path)
-    except capture.CaptureError:
-        tcp_streams = {}
+    tcp_streams = capture.dump_tcp_segments(path)
 
     tcp_limits = []
     # 预算耗尽后，之后每个 TCP 方向都会被标记 truncated。逐个方向各报一条

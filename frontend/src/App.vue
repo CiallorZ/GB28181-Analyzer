@@ -1,12 +1,17 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed, watch, provide } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, provide, defineAsyncComponent } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from './api/client'
 import { useTaskStore } from './stores/task'
-import AiPanel from './components/AiPanel.vue'
 
+const AiPanel = defineAsyncComponent(() => import('./components/AiPanel.vue'))
 const store = useTaskStore()
 const route = useRoute()
+const aiPanelMounted = ref(store.aiPanelOpen)
+watch(() => store.aiPanelOpen, (open) => {
+  // 首次打开才下载会诊面板；之后保留组件，关闭抽屉不丢失报告和追问。
+  if (open) aiPanelMounted.value = true
+}, { immediate: true })
 const aiFocusByPage = { sip: 'sip', media: 'media', packets: 'packet', diagnostics: 'field', 'session-detail': 'sip' }
 function openPageConsultation() {
   store.openAiPanel(aiFocusByPage[route.name] || 'general')
@@ -80,11 +85,18 @@ function guardUnload(event) {
   event.returnValue = ''
 }
 
+let healthRequest = 0
+let appUnmounted = false
 async function loadHealth() {
+  const request = ++healthRequest
   try {
-    health.value = await api.health()
+    const value = await api.health()
+    if (request !== healthRequest || appUnmounted) return
+    health.value = value
     healthError.value = false
-  } catch { healthError.value = true }
+  } catch {
+    if (request === healthRequest && !appUnmounted) healthError.value = true
+  }
 }
 
 watch(() => [route.name, store.currentTaskId], ([name, id]) => {
@@ -96,23 +108,34 @@ watch(() => [route.name, store.currentTaskId], ([name, id]) => {
 let healthTimer = null
 let activeTimer = null
 
+async function pollHealth() {
+  await loadHealth()
+  if (!appUnmounted) healthTimer = setTimeout(pollHealth, 30000)
+}
+
+async function pollActive() {
+  await store.refreshActive()
+  if (!appUnmounted) activeTimer = setTimeout(pollActive, 5000)
+}
+
 onMounted(() => {
   systemTheme.addEventListener('change', applyTheme)
   window.addEventListener('beforeunload', guardUnload)
   applyTheme()
-  loadHealth()
-  store.refreshActive()
-
-  healthTimer = setInterval(loadHealth, 30000)
-  activeTimer = setInterval(() => store.refreshActive(), 5000)
+  // Schedule the next request only after the previous one settles. This avoids
+  // overlapping slow requests and prevents older responses winning the race.
+  pollHealth()
+  pollActive()
 })
 
 onUnmounted(() => {
+  appUnmounted = true
+  healthRequest++
   systemTheme.removeEventListener('change', applyTheme)
   window.removeEventListener('beforeunload', guardUnload)
   // 不清的话热更新会累积多个定时器，反复打健康检查
-  if (healthTimer) { clearInterval(healthTimer); healthTimer = null }
-  if (activeTimer) { clearInterval(activeTimer); activeTimer = null }
+  if (healthTimer) { clearTimeout(healthTimer); healthTimer = null }
+  if (activeTimer) { clearTimeout(activeTimer); activeTimer = null }
   setNativeBusy(false)
 })
 </script>
@@ -159,7 +182,7 @@ onUnmounted(() => {
     <aside class="sidebar">
       <button class="sidebar-toggle" type="button" :aria-expanded="!compactNav" aria-controls="workspace-nav"
               :title="compactNav ? '展开导航' : '折叠导航'" @click="toggleSidebar">
-        <AppIcon :name="compactNav ? 'forward' : 'back'" /><span>折叠导航</span>
+        <AppIcon :name="compactNav ? 'forward' : 'back'" /><span>{{ compactNav ? '展开导航' : '折叠导航' }}</span>
       </button>
       <nav id="workspace-nav" aria-label="主导航">
         <div class="nav-group">
@@ -208,7 +231,7 @@ onUnmounted(() => {
       <span v-if="health?.version" class="version">v{{ health.version }}</span>
     </footer>
 
-    <AiPanel :key="store.currentTaskId" :open="store.aiPanelOpen"
+    <AiPanel v-if="aiPanelMounted" :key="store.currentTaskId" :open="store.aiPanelOpen"
              @update:open="v => v ? store.openAiPanel() : store.closeAiPanel()" />
   </div>
 </template>

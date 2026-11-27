@@ -42,6 +42,20 @@ def test_cleanup_preserves_reserved_inputs(client, db, make_task, tmp_path, monk
     assert db.get(type(survivor), survivor.id) is not None
 
 
+def test_resume_directories_count_toward_upload_usage(tmp_path, monkeypatch):
+    uploads = tmp_path / 'uploads'
+    resume = uploads / ('.resume-' + 'a' * 64)
+    resume.mkdir(parents=True)
+    (uploads / 'capture.pcap').write_bytes(bytes(1024**2))
+    (resume / 'manifest').write_bytes(b'{}')
+    (resume / '0').write_bytes(bytes(2 * 1024**2))
+    monkeypatch.setattr(settings, 'UPLOAD_DIR', uploads)
+    monkeypatch.setattr(settings, 'REBUILD_DIR', tmp_path / 'rebuilt')
+
+    usage = retention.total_disk_usage()
+    assert usage['uploads_mb'] == 3.0
+
+
 @pytest.mark.parametrize('failure,status', [
     (asyncio.CancelledError(), None), (OSError(errno.ENOSPC, 'disk full'), 500),
 ])
