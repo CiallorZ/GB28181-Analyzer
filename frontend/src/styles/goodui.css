@@ -22,11 +22,7 @@
   --ui-row-y:10px;
   --ui-inset:18px;
   --ui-gap:14px;
-  --radius-sm:7px;
-  --radius:10px;
-  --radius-lg:13px;
-  --radius-xl:16px;
-  --ui-focus:var(--info);
+  /* --radius-* tokens live in tokens.css (single source of truth). */
   --ui-layer:var(--surface);
   --ui-layer-raised:var(--surface-2);
   --ui-press:scale(.98);
@@ -62,7 +58,7 @@ body { font-family:var(--font-sans); font-variant-numeric:tabular-nums; }
   scale:.98;
   translate:0 1px;
 }
-:where(button,a,input,select,textarea,[tabindex]):focus-visible { outline:2px solid var(--ui-focus); outline-offset:2px; }
+/* Generic focus-visible rule lives in theme.css. */
 @media (prefers-reduced-motion:reduce) {
   :where(.btn,.btn-mini,.mini,.ai-btn,.station button,.upload-button,.sample-button):active:not(:disabled) {
     scale:1;
@@ -93,10 +89,6 @@ h1,h2,h3 { font-weight:650; letter-spacing:normal; }
   .page,.wrap { padding-inline:clamp(20px,1.6vw,48px); }
 }
 
-:where(button,a,input,textarea,select):focus-visible {
-  outline:2px solid var(--ui-focus);
-  outline-offset:2px;
-}
 @media (prefers-reduced-transparency: reduce) {
   :root[data-material] :is(.glass-panel,.card,.assist,.drawer) {
     backdrop-filter:none;

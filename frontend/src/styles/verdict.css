@@ -1,0 +1,152 @@
+/* 一眼结论（summary.verdict）：工作台 / 精度工作区 / 诊断页共用。
+   颜色一律走既有语义令牌，状态始终配文字标签和图标，不靠颜色单独传达。 */
+
+/* --- shared state theming: --v-tone / --v-soft 由状态类赋值 --- */
+.vd-status.vd-blocked,
+.vd-banner.vd-blocked,
+.vd-card.vd-blocked,
+.vd-strip.vd-blocked { --v-tone: var(--critical); --v-soft: var(--critical-soft); }
+.vd-status.vd-attention,
+.vd-banner.vd-attention,
+.vd-card.vd-attention,
+.vd-strip.vd-attention { --v-tone: var(--warning); --v-soft: var(--warning-soft); }
+.vd-status.vd-observation,
+.vd-banner.vd-observation,
+.vd-card.vd-observation,
+.vd-strip.vd-observation { --v-tone: var(--info); --v-soft: var(--info-soft); }
+.vd-status.vd-healthy,
+.vd-banner.vd-healthy,
+.vd-card.vd-healthy,
+.vd-strip.vd-healthy { --v-tone: var(--ok); --v-soft: var(--ok-soft); }
+
+.vd-status {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  padding: 3px 9px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 600; line-height: 1.5;
+  color: var(--v-tone); background: var(--v-soft);
+  border: 1px solid color-mix(in srgb, var(--v-tone) 28%, transparent);
+  white-space: nowrap;
+}
+.vd-status .app-icon { width: 1.15em; height: 1.15em; }
+
+.vd-headline { margin: 0; color: var(--text); font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; }
+.vd-meta { margin: 0; color: var(--text-3); font-size: 11px; line-height: 1.5; }
+.vd-actions { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
+.vd-actions li {
+  position: relative; padding-left: 20px;
+  color: var(--text-2); font-size: 12px; line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.vd-actions li::before {
+  content: attr(data-n);
+  position: absolute; left: 0; top: 1px;
+  display: grid; place-items: center;
+  width: 15px; height: 15px; border-radius: 50%;
+  font: 600 10px/1 var(--font-data);
+  color: var(--v-tone); background: var(--v-soft);
+  border: 1px solid color-mix(in srgb, var(--v-tone) 28%, transparent);
+}
+
+/* --- 工作台：优先排查区上方的紧凑条 --- */
+.vd-strip {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(100deg, var(--v-soft), var(--surface) 72%);
+  animation: vd-in var(--dur-lg) var(--ease-out) backwards;
+}
+.vd-strip .vd-headline { font-size: 13.5px; flex: 1 1 320px; min-width: 0; }
+.vd-strip .vd-action {
+  font-size: 12px; color: var(--brand-lt); white-space: nowrap;
+  text-underline-offset: 3px;
+}
+.vd-strip .vd-action:hover { color: var(--text); }
+
+/* --- 精度工作区：总览里的主视觉卡片 --- */
+.vd-card {
+  position: relative; isolation: isolate;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start; gap: 8px 20px;
+  margin: 10px 10px 0; padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--v-tone) 28%, var(--line));
+  border-left: 3px solid var(--v-tone);
+  border-radius: var(--radius);
+  background: linear-gradient(112deg, var(--v-soft), var(--surface) 72%);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 4%);
+  transition: border-color var(--dur) var(--ease), background-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+  animation: vd-in var(--dur-lg) var(--ease-out) backwards;
+}
+.vd-card:hover {
+  border-color: color-mix(in srgb, var(--v-tone) 48%, var(--line-2));
+  box-shadow: 0 2px 10px -6px color-mix(in srgb, var(--v-tone) 45%, transparent);
+}
+.vd-card-main { min-width: 0; }
+.vd-card .vd-headline { font-size: clamp(18px, 1.6vw, 23px); letter-spacing: -.2px; margin-top: 9px; }
+.vd-card .vd-meta { margin-top: 7px; }
+.vd-card .vd-actions { margin-top: 12px; max-width: 84ch; }
+.vd-card .vd-actions li { animation: vd-item-in var(--dur-lg) var(--ease-out) backwards; }
+.vd-card .vd-actions li:nth-child(1) { animation-delay: 60ms; }
+.vd-card .vd-actions li:nth-child(2) { animation-delay: 100ms; }
+.vd-card .vd-actions li:nth-child(3) { animation-delay: 140ms; }
+.vd-card .vd-actions li::before { top: 1px; }
+.vd-card-side {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+  padding-top: 1px;
+}
+/* finding-ai 来自 workstation.css：保留 DeepSeek 入口，在卡片内与依据按钮同宽 */
+.vd-card-side .finding-ai {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; padding: 6px 11px; margin: 0; white-space: nowrap;
+  color: var(--text); border-color: var(--ds-line); background: var(--ds-soft);
+}
+.vd-card-side .finding-ai:hover { border-color: var(--ds-lt); background: var(--ds-soft); }
+.vd-card-side .finding-ai img { width: 16px; height: 16px; }
+.vd-evidence {
+  white-space: nowrap; font-size: 12px;
+  color: var(--text); background: var(--surface);
+  border: 1px solid var(--line-2); border-radius: var(--radius-sm);
+  padding: 6px 11px; cursor: pointer;
+  transition: border-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.vd-evidence:hover { border-color: var(--v-tone); color: var(--v-tone); }
+.vd-evidence:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* --- 诊断页：顶部横幅 --- */
+.vd-banner {
+  display: flex; align-items: center; gap: 14px 20px; flex-wrap: wrap;
+  padding: 14px 18px; margin-bottom: 16px;
+  border: 1px solid color-mix(in srgb, var(--v-tone) 28%, var(--line));
+  border-left: 3px solid var(--v-tone);
+  border-radius: var(--radius);
+  background: linear-gradient(108deg, var(--v-soft), var(--surface) 72%);
+  transition: border-color var(--dur) var(--ease);
+  animation: vd-in var(--dur-lg) var(--ease-out) backwards;
+}
+.vd-banner:hover { border-color: color-mix(in srgb, var(--v-tone) 48%, var(--line-2)); }
+.vd-banner-main { flex: 1 1 340px; min-width: 0; }
+.vd-banner .vd-headline { font-size: clamp(15px, 1.3vw, 18px); margin-top: 7px; }
+.vd-banner .vd-meta { margin-top: 4px; }
+.vd-banner .vd-actions { flex: 1 1 300px; }
+
+@media (max-width: 720px) {
+  .vd-card { grid-template-columns: minmax(0, 1fr); }
+  .vd-card-side { flex-direction: row; align-items: center; }
+  .vd-banner { gap: 10px; }
+}
+
+@keyframes vd-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes vd-item-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vd-card, .vd-strip, .vd-banner, .vd-card .vd-actions li {
+    animation: none;
+    transform: none;
+  }
+  .vd-card, .vd-banner, .vd-evidence { transition: none; }
+}

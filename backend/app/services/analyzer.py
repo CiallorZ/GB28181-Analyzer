@@ -63,6 +63,23 @@ def _set_progress(db: Session, task: AnalysisTask, stage: str, pct: int):
         raise analysis_control.Cancelled()
 
 
+def _bulk_update_ids(db: Session, table, id_column, groups: dict, field: str,
+                     chunk: int = 500):
+    """按目标值分组批量 UPDATE，避免逐行执行语句。
+
+    groups: {目标值: [主键 id, ...]}；None/空分组会被跳过。
+    """
+    for value, ids in groups.items():
+        if value is None or not ids:
+            continue
+        for i in range(0, len(ids), chunk):
+            db.execute(
+                update(table)
+                .where(id_column.in_(ids[i:i + chunk]))
+                .values(**{field: value})
+            )
+
+
 # ===============================================================
 # 主入口
 # ===============================================================
@@ -219,13 +236,14 @@ def _run(db: Session, task: AnalysisTask):
         ep['count'] += 1
         ep['bytes'] += p['length']
 
+        proto = _top_protocol(p['protocols'])
         batch.append({
             'task_id': task_id, 'file_id': file_id,
             'packet_number': p['number'], 'timestamp': p['ts'],
             'source_ip': src_ip, 'destination_ip': dst_ip,
             'source_port': p['src_port'], 'destination_port': p['dst_port'],
-            'transport': transport, 'protocol': _top_protocol(p['protocols']),
-            'length': p['length'], 'summary': _packet_summary(p),
+            'transport': transport, 'protocol': proto,
+            'length': p['length'], 'summary': _packet_summary(p, proto),
         })
         if len(batch) >= 2000:
             analysis_control.checkpoint()
@@ -295,14 +313,13 @@ def _run(db: Session, task: AnalysisTask):
     callid_only = {d.call_id: dialog_map[d.key] for d in dialogs
                    if callid_counts[d.call_id] == 1}
 
+    dialog_groups: dict = {}
     for m in sip_msgs:
         did = _match_dialog_id(m['info'], dialog_map, callid_only)
         if did:
-            db.execute(
-                SipMessage.__table__.update()
-                .where(SipMessage.id == m['row'].id)
-                .values(dialog_id=did)
-            )
+            dialog_groups.setdefault(did, []).append(m['row'].id)
+    _bulk_update_ids(db, SipMessage.__table__, SipMessage.id,
+                     dialog_groups, 'dialog_id')
     db.commit()
 
     # 入库业务会话
@@ -341,15 +358,13 @@ def _run(db: Session, task: AnalysisTask):
         for cid in s.call_ids:
             cid_to_sid.setdefault(cid, sid)
 
+    session_groups: dict = {}
     for m in sip_msgs:
         sid = cid_to_sid.get(m['info'].call_id)
-        if sid is None:
-            continue
-        db.execute(
-            SipMessage.__table__.update()
-            .where(SipMessage.id == m['row'].id)
-            .values(session_id=sid)
-        )
+        if sid is not None:
+            session_groups.setdefault(sid, []).append(m['row'].id)
+    _bulk_update_ids(db, SipMessage.__table__, SipMessage.id,
+                     session_groups, 'session_id')
 
     for d in dialogs:
         sid = cid_to_sid.get(d.call_id)
@@ -904,15 +919,21 @@ def _save_stream(db: Session, task: AnalysisTask, st, key, transport,
     db.flush()
 
     # 指标时间序列（抽样入库，避免库膨胀）
-    for b in st.bitrate_series:
-        db.add(MediaMetric(stream_id=row.id, timestamp=st.start_time + b['t'],
-                           bitrate=b['kbps'], packet_count=b['packets']))
-    # 抖动序列
+    # 用一次批量 INSERT 代替逐条 ORM add：长流有数百个样本，逐条 add
+    # 会产生同样多的对象与 flush 开销。
+    metric_rows = [
+        {'stream_id': row.id, 'timestamp': st.start_time + b['t'],
+         'bitrate': b['kbps'], 'packet_count': b['packets']}
+        for b in st.bitrate_series
+    ]
     step = max(1, len(st.jitter_series) // 120)
-    for j in st.jitter_series[::step]:
-        db.add(MediaMetric(stream_id=row.id,
-                           timestamp=st.start_time + j['t'],
-                           jitter=j['j']))
+    metric_rows.extend(
+        {'stream_id': row.id, 'timestamp': st.start_time + j['t'],
+         'jitter': j['j']}
+        for j in st.jitter_series[::step]
+    )
+    if metric_rows:
+        db.execute(insert(MediaMetric), metric_rows)
     db.commit()
     return row
 
@@ -1105,10 +1126,12 @@ def _top_protocol(protocols: str) -> str:
     return parts[-1]
 
 
-def _packet_summary(p: dict) -> str:
+def _packet_summary(p: dict, proto: str | None = None) -> str:
     src = '%s:%s' % (p.get('src_ip') or '-', p.get('src_port') or '-')
     dst = '%s:%s' % (p.get('dst_ip') or '-', p.get('dst_port') or '-')
-    return '%s -> %s  %s' % (src, dst, _top_protocol(p.get('protocols') or ''))
+    if proto is None:
+        proto = _top_protocol(p.get('protocols') or '')
+    return '%s -> %s  %s' % (src, dst, proto)
 
 
 def _build_summary(task, session_rows, streams, diagnostics, stats,
@@ -1128,6 +1151,9 @@ def _build_summary(task, session_rows, streams, diagnostics, stats,
     for d in diagnostics:
         sev_count[d.severity] = sev_count.get(d.severity, 0) + 1
 
+    verdict = diag_engine.build_verdict(
+        diagnostics, sessions, streams, stats, limits)
+
     return {
         'packet_count': stats.get('count', 0),
         'session_count': total_sessions,
@@ -1146,6 +1172,7 @@ def _build_summary(task, session_rows, streams, diagnostics, stats,
         'avg_jitter_ms': (round(sum(jitters) / len(jitters), 2)
                           if jitters else None),
         'diagnostics': sev_count,
+        'verdict': verdict,
         'capture_warnings': len(limits),
         'analysis_scope': {
             'note': '本结果仅反映抓包点观察到的流量，'

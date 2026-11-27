@@ -209,7 +209,7 @@ onMounted(async () => {
       sub="运行环境与诊断规则说明"
       :crumbs="[{label:'工作台', to:'/'}, {label:'系统设置'}]" />
 
-    <div v-if="err" class="err-box">{{ err }}</div>
+    <div v-if="err" class="err-box mb-14">{{ err }}</div>
 
     <div class="settings-layout">
     <nav class="settings-tabs" role="tablist" aria-orientation="vertical" aria-label="设置分区">
@@ -412,8 +412,6 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.h1 { font-size: 20px; font-weight: 600; }
-.sub { font-size: 12.5px; color: var(--text-3); margin-top: 3px; }
 .dep-body { display: flex; flex-direction: column; gap: 11px; }
 .dep-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .dep-chip {
@@ -500,11 +498,6 @@ onMounted(async () => {
 }
 .limit-item p {
   font-size: 12.5px; color: var(--text-3); line-height: 1.75;
-}
-.err-box {
-  background: var(--critical-bg); border-left: 3px solid var(--critical);
-  border-radius: var(--radius); padding: 12px 14px; font-size: 13px;
-  color: var(--critical); margin-bottom: 14px;
 }
 .settings-layout { display:grid; grid-template-columns:155px minmax(0,1fr); gap:var(--space-4); align-items:start; }
 .settings-tabs { flex-direction:column; border:1px solid var(--line); padding:var(--space-1); border-radius:var(--radius); background:var(--surface); }

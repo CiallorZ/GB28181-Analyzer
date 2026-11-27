@@ -373,20 +373,19 @@ def _iter_nal_spans(data: bytes):
             yield data[previous[1]:], previous[0]
         return
 
-    i = 0
+    # 用 bytes.find 跳到下一个起始码，避免逐字节 Python 循环：
+    # 60 秒 / 256 MiB 的取样里这项曾是主要 CPU 开销。
     n = len(data)
     starts = []
-    while i < n - 3:
-        if data[i] == 0 and data[i + 1] == 0:
-            if data[i + 2] == 1:
-                starts.append((i, 3))
-                i += 3
-                continue
-            if i + 3 < n and data[i + 2] == 0 and data[i + 3] == 1:
-                starts.append((i, 4))
-                i += 4
-                continue
-        i += 1
+    pos = data.find(b'\x00\x00\x01')
+    while 0 <= pos < n - 3:
+        sc_len = 3
+        if pos > 0 and data[pos - 1] == 0:
+            # 4 字节起始码 00 00 00 01：把起点前移一位，避免把前导 00 算进 NAL
+            pos -= 1
+            sc_len = 4
+        starts.append((pos, sc_len))
+        pos = data.find(b'\x00\x00\x01', pos + sc_len)
 
     for idx, (off, sc_len) in enumerate(starts):
         begin = off + sc_len
@@ -441,7 +440,9 @@ def analyze_es(es: bytes, start_time: float = 0.0) -> VideoInfo:
     h265_score = 0
     sps_parsed = None
 
-    for nal in _iter_nal(es):
+    # 两阶段分析复用同一份 NAL 列表，避免对整段 ES 做两遍扫描。
+    nal_spans = list(_iter_nal_spans(es))
+    for nal, _off in nal_spans:
         if not nal:
             continue
         b0 = nal[0]
@@ -521,7 +522,7 @@ def analyze_es(es: bytes, start_time: float = 0.0) -> VideoInfo:
         else:
             info.p_frame_count += 1
 
-    for nal, nal_start in _iter_nal_spans(es):
+    for nal, nal_start in nal_spans:
         if not nal:
             continue
         size = len(nal) + 4

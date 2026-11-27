@@ -259,8 +259,6 @@ onMounted(loadStorage)
 </template>
 
 <style scoped>
-.h1 { font-size: 20px; font-weight: 600; }
-.sub { font-size: 12.5px; color: var(--text-3); margin-top: 3px; }
 .inp {
   height: 30px; padding: 0 10px; background: var(--bg-2);
   border: 1px solid var(--border); border-radius: var(--radius-sm);
@@ -305,11 +303,6 @@ onMounted(loadStorage)
   padding-top: 10px; border-top: 1px dashed var(--line);
 }
 
-.err-box {
-  background: var(--critical-bg); border-left: 3px solid var(--critical);
-  border-radius: var(--radius); padding: 12px 14px; font-size: 13px;
-  color: var(--critical); margin-bottom: 14px;
-}
  .task-list .tbl th { position:sticky; top:0; z-index:1; }
 .task-list .tbl td { height:36px; }
 .task-list .tbl th { white-space:nowrap; }

@@ -1,4 +1,7 @@
 :root {
+  /* Single source of truth for shared tokens (see main.js import order).
+     Responsive overrides live here too so they cannot be shadowed by
+     an earlier stylesheet defining the same custom property. */
   --app-header-height: 48px;
   --status-height: 28px;
   --brand: #d6232a;
@@ -29,10 +32,18 @@
   --space-8: 32px;
   --font-sans: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  --font-data: var(--font-mono);
+  --fs-xs: 11px;
   --ink-btn: var(--brand);
   --ink-btn-hover: var(--brand-hover);
   --ink-btn-text: white;
   --brand-soft: var(--bg-selected);
+}
+
+/* Responsive header height: keep here so it wins over the base value
+   regardless of stylesheet import order. */
+@media (max-width: 900px) {
+  :root { --app-header-height: 88px; }
 }
 
 :root[data-theme="light"] {

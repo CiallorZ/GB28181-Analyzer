@@ -175,7 +175,7 @@ onMounted(loadSessions)
           <button v-if="sessions.length < sessionTotal" class="btn sm" :disabled="sessionsLoading" @click="loadSessions">
             {{ sessionsLoading ? '加载中…' : '加载更多会话' }}
           </button>
-          <div v-if="!sessions.length && !sessionsLoading && !err" class="empty" style="padding:30px 12px">
+          <div v-if="!sessions.length && !sessionsLoading && !err" class="empty compact">
             无会话
           </div>
         </div>

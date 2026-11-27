@@ -57,6 +57,26 @@ const names = {
   insufficient: '证据不足'
 }
 const sum = computed(() => p.overview.summary || {})
+// 后端新增的 summary.verdict 是附加字段；旧任务没有时全部回退到原有结论逻辑。
+const verdict = computed(() => {
+  const v = sum.value.verdict
+  if (!v || typeof v !== 'object' || !v.status || !v.headline) return null
+  return {
+    ...v,
+    actions: Array.isArray(v.actions) ? v.actions.filter(Boolean).slice(0, 3) : [],
+    lead_rule_ids: Array.isArray(v.lead_rule_ids) ? v.lead_rule_ids : []
+  }
+})
+const VD_STATUS = {
+  blocked: { label: '存在阻断问题', icon: 'warning' },
+  attention: { label: '需关注', icon: 'warning' },
+  observation: { label: '待观察', icon: 'info' },
+  healthy: { label: '已确认正常', icon: 'check' }
+}
+const VD_CONFIDENCE = { confirmed: '已确认', suspected: '疑似', insufficient: '证据不足' }
+const verdictStatus = computed(() => VD_STATUS[verdict.value?.status] || VD_STATUS.observation)
+const verdictConfidence = computed(() => VD_CONFIDENCE[verdict.value?.confidence] || '')
+const verdictActions = computed(() => (verdict.value?.actions || []).slice(0, 3))
 const counts = computed(() => sum.value.diagnostics)
 const diagnosticTotal = computed(() =>
   Object.values(counts.value || {}).reduce((total, count) => total + (count || 0), 0))
@@ -214,6 +234,20 @@ async function closeEvidence() {
   await nextTick()
   if (evidenceTrigger?.isConnected) evidenceTrigger.focus()
 }
+// 从结论卡片跳到依据：优先展开首个主规则的事件证据，否则滚动到诊断事件面板。
+async function showVerdictEvidence() {
+  const leadId = verdict.value?.lead_rule_ids?.[0]
+  const lead = leadId && p.events.find(d => d.rule_id === leadId)
+  if (lead) {
+    await evidenceOf(lead, document.activeElement)
+    return
+  }
+  const target = document.getElementById('station-events')
+  target?.scrollIntoView({
+    block: 'start',
+    behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+  })
+}
 watch(filtered, (items) => {
   if (event.value && !items.some((d) => d.id === event.value.id)) event.value = null
 })
@@ -238,7 +272,27 @@ watch(filtered, (items) => {
             <h2>分析总览</h2>
             <button @click="$emit('expand')">{{ expanded ? '收起完整明细' : '完整分析明细' }}</button>
           </header>
-          <section class="finding" :class="headlineSeverity" aria-labelledby="finding-title">
+          <!-- 后端给出结构化结论时，一眼看到状态 / 结论 / 下一步；旧任务沿用原结论块 -->
+          <section v-if="verdict" class="vd-card" :class="'vd-' + verdict.status" aria-labelledby="verdict-title">
+            <div class="vd-card-main">
+              <span class="vd-status" :class="'vd-' + verdict.status" role="status"
+                :aria-label="`结论状态：${verdictStatus.label}`">
+                <AppIcon :name="verdictStatus.icon" />{{ verdictStatus.label }}
+              </span>
+              <h3 id="verdict-title" class="vd-headline">{{ verdict.headline }}</h3>
+              <p v-if="verdictConfidence" class="vd-meta">置信度 · {{ verdictConfidence }}</p>
+              <ol v-if="verdictActions.length" class="vd-actions">
+                <li v-for="(action, i) in verdictActions" :key="i" :data-n="i + 1">{{ action }}</li>
+              </ol>
+            </div>
+            <div class="vd-card-side">
+              <button type="button" class="vd-evidence" @click="showVerdictEvidence">查看依据 ↗</button>
+              <button type="button" class="finding-ai" data-cue="confirm" @click="store.openAiPanel()">
+                <img src="/brand/deepseek.svg" alt="" />DeepSeek 会诊
+              </button>
+            </div>
+          </section>
+          <section v-else class="finding" :class="headlineSeverity" aria-labelledby="finding-title">
             <AppIcon :name="headlineIcon" />
             <div class="finding-copy">
               <h3 id="finding-title">分析结论</h3>
@@ -509,3 +563,4 @@ watch(filtered, (items) => {
   </div>
 </template>
 <style src="../styles/workstation.css"></style>
+<style src="../styles/verdict.css"></style>

@@ -19,11 +19,7 @@ body { background: var(--bg); }
 .btn.xs { min-height: 24px; }
 .btn.lg { min-height: 40px; }
 .btn.icon { aspect-ratio: 1; }
-:is(.btn, .btn-mini, .ai-focus, .consult-action, .nav-setting):focus-visible,
-:where(a, button, input, textarea, select, summary, [tabindex]):focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
+/* Generic focus-visible rule lives in theme.css (uses --focus-ring). */
 @media (pointer: coarse) {
   .btn:not(.xs), .btn-mini { min-height: 36px; }
 }
@@ -51,8 +47,8 @@ body { background: var(--bg); }
 .route-surface :is(.card-head,.pane-head,.sec-head,.side-head,.instrument > header) {
   background:linear-gradient(105deg,var(--surface-2),var(--surface)); font-weight:650;
 }
-.route-surface :is(.kpi,.diagnostic-overview > div) { border-radius:var(--radius); box-shadow:var(--panel-shadow); }
-.route-surface :is(.kpi-value,.diagnostic-overview b) { font-variant-numeric:tabular-nums; letter-spacing:-.035em; }
+.route-surface .kpi { border-radius:var(--radius); box-shadow:var(--panel-shadow); }
+.route-surface .kpi-value { font-variant-numeric:tabular-nums; letter-spacing:-.035em; }
 .route-surface :is(.tbl,.pkt-tbl) th { font-size:12px; color:var(--text-2); font-weight:650; }
 .route-surface :is(.tbl,.pkt-tbl) td { border-bottom-color:color-mix(in srgb,var(--line) 75%,transparent); }
 .route-surface :is(.pkt-tbl tr.active,.tbl tr.selected) > td:first-child { box-shadow:inset 3px 0 var(--brand); }

@@ -30,6 +30,18 @@ from datetime import datetime
 from ..core import analysis_control, toolchain
 from . import rtp_analyzer
 
+# tshark 字段模式下 payload 通常是连续十六进制；仅在遇到异常格式时才回退到正则清理。
+_HEX_CLEAN_RE = re.compile(r'[^0-9a-fA-F]')
+
+
+def _payload_hex_to_bytes(value: str) -> bytes:
+    """把 tshark 的 hex 字段转为 bytes，快路径避免逐包正则扫描。"""
+    try:
+        return bytes.fromhex(value)
+    except (ValueError, TypeError):
+        return bytes.fromhex(_HEX_CLEAN_RE.sub('', value))
+
+
 # ---------------------------------------------------------------
 # 工具定位
 # ---------------------------------------------------------------
@@ -152,15 +164,9 @@ def inspect_file(path: str) -> FileInfo:
         else:
             info.warnings.append('capinfos 读取失败，文件可能损坏')
 
-    # IP / TCP / UDP 计数在报文索引阶段顺带计算，避免重复全量扫描。
-    # 这里再跑一次轻量协议分层检查；它只输出协议汇总，不导出每条报文，
-    # 用来在完全无法解析时尽早返回可读错误，而不是让索引阶段静默得到空表。
-    r = _run([TSHARK, '-r', path, '-q', '-z', 'io,phs'], 300, '协议分层统计')
-    if r.returncode != 0:
-        raise CaptureError('无法解析该抓包文件：%s' % ((r.stderr or '')[:300]))
-    if 'ip' not in (r.stdout or '').lower():
-        info.warnings.append('未发现 IP 层流量')
-
+    # 文件有效性由 capinfos 与后续报文索引阶段共同保证；"未发现 IP 层流量"
+    # 由 analyzer 在索引阶段按实际报文统计后给出。这里不再额外全量跑一遍
+    # tshark io,phs —— 那会让每次分析都多读一遍完整抓包（大文件可达数十秒）。
     # 抓包完整性判断
     if info.packet_count is not None and info.packet_count == 0:
         info.warnings.append('文件内没有任何报文')
@@ -437,7 +443,7 @@ def dump_tcp_segments(path: str) -> dict:
             continue
         try:
             seq = int(seq_s)
-            data = bytes.fromhex(re.sub(r'[^0-9a-fA-F]', '', hexpay))
+            data = _payload_hex_to_bytes(hexpay)
             ts = float(ts_s) if ts_s else 0.0
         except (ValueError, TypeError):
             continue
@@ -496,7 +502,7 @@ def extract_udp_rtp_and_rtcp(path: str) -> tuple[list, list]:
     ], 'udp.length>20'):
         r = (r + [''] * 8)[:8]
         try:
-            payload = bytes.fromhex(re.sub(r'[^0-9a-fA-F]', '', r[6]))
+            payload = _payload_hex_to_bytes(r[6])
         except (ValueError, TypeError):
             continue
         if len(payload) < 8 or (payload[0] >> 6) != 2:
