@@ -4,7 +4,7 @@
 
 平台返回了 SIP 200 OK，为什么预览仍然黑屏？GB28181 Analyzer 把点播信令、SDP 协商、实际捕获的媒体、重建画面和诊断证据放进同一个任务。现场工程师可以从异常结论回到具体报文，平台和设备开发人员可以对照两端抓包，交付人员可以导出可复核的报告。
 
-**[下载 v1.4.1 Windows x64 便携包](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v1.4.1/gb28181-analyzer-windows-x64-v1.4.1.zip)** · [SHA-256 校验文件](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v1.4.1/SHA256SUMS.txt) · [发行说明](https://github.com/CiallorZ/gb28181-analyzer/releases/tag/v1.4.1)
+**[下载 v1.4.2 Windows x64 便携包](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v1.4.2/gb28181-analyzer-windows-x64-v1.4.2.zip)** · [SHA-256 校验文件](https://github.com/CiallorZ/gb28181-analyzer/releases/download/v1.4.2/SHA256SUMS.txt) · [发行说明](https://github.com/CiallorZ/gb28181-analyzer/releases/tag/v1.4.2)
 
 ![浅色工作台：抓包导入、协议流程演示与最近任务](docs/screenshots/uiux/workbench-light.png)
 

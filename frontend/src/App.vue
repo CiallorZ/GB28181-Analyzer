@@ -7,6 +7,10 @@ import AiPanel from './components/AiPanel.vue'
 
 const store = useTaskStore()
 const route = useRoute()
+const aiFocusByPage = { sip: 'sip', media: 'media', packets: 'packet', diagnostics: 'field', 'session-detail': 'sip' }
+function openPageConsultation() {
+  store.openAiPanel(aiFocusByPage[route.name] || 'general')
+}
 
 const savedAppearance = document.documentElement.dataset.appearance
 const appearance = ref(['light', 'dark'].includes(savedAppearance) ? savedAppearance : 'system')
@@ -178,7 +182,7 @@ onUnmounted(() => {
           <span class="nav-heading">辅助分析</span>
           <router-link to="/compare" :class="{ current: route.path.startsWith('/compare/') }" title="双包对比"><AppIcon name="compare" /><span>双包对比</span></router-link>
           <button type="button" class="ai-nav" :class="{ current: store.aiPanelOpen }" title="AI 专家会诊"
-                  :aria-expanded="store.aiPanelOpen" data-cue="confirm" @click="store.openAiPanel()">
+                  :aria-expanded="store.aiPanelOpen" data-cue="confirm" @click="openPageConsultation">
             <img src="/brand/deepseek.svg" alt="" width="16" height="16"><span>DeepSeek 会诊</span>
           </button>
         </div>

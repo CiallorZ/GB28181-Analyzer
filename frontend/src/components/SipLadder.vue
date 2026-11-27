@@ -295,7 +295,8 @@ function onWheel(e) {
 
 <style scoped>
 .diagram-stage{position:relative}.flight{pointer-events:none;position:absolute;inset:0;width:100%;height:100%}
-.pulse{animation:signal-travel 1.5s linear infinite}
+.pulse{animation:signal-travel 1.5s cubic-bezier(.3,.05,.25,1) both}
+@media(prefers-reduced-motion: reduce){.pulse{display:none}}
 @keyframes signal-travel{from{stroke-dashoffset:2.5}to{stroke-dashoffset:-97.5}}
 
 .ladder-wrap {

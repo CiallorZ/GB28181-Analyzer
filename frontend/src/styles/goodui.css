@@ -16,7 +16,7 @@
 
 /* Color, material and density can be set independently. */
 :root {
-  --font-cjk:"Microsoft YaHei UI","PingFang SC","Noto Sans CJK SC",system-ui,sans-serif;
+  --font-cjk:"PingFang SC","Microsoft YaHei UI","Microsoft YaHei","Noto Sans CJK SC",system-ui,sans-serif;
   --font-sans:"goodui Sans",var(--font-cjk);
   --font-heading:"goodui Display",var(--font-cjk);
   --ui-row-y:10px;
