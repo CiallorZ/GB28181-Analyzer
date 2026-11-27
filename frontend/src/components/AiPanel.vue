@@ -49,6 +49,7 @@ const profiles = {
   general: ['综合研判', '串联信令、媒体与规则证据', ['第一处异常出现在哪里？', '哪些结论仍需补抓验证？']],
   sip: ['信令事务', '追踪请求、响应与重传', ['哪个事务缺少最终响应？', '重传与明确拒绝如何区分？']],
   media: ['媒体链路', '核对 SSRC、丢包与画面', ['协商和实际 SSRC 是否一致？', '画面重建失败有哪些可验证原因？']],
+  packet: ['报文取证', '从报文特征核对诊断结论', ['哪些报文编号能支撑当前结论？', '哪些协议字段或端点需要人工复核？']],
   field: ['现场排障', '制定两端复核步骤', ['平台侧先检查什么？', '下一次应在哪一端抓包？']]
 }
 const suggestedQuestions = computed(() => profiles[expert.value][2])
@@ -487,7 +488,7 @@ onUnmounted(unlockPageScroll)
                   autocomplete="off"
                   :placeholder="cfg.has_key ? '已配置 ' + cfg.key_hint + '，留空则不修改' : 'sk-…'"
                 />
-                <p class="ai-hint">在 DeepSeek 开放平台创建，写入本机数据目录。</p>
+                <p class="ai-hint">在 <a href="https://platform.deepseek.com/" target="_blank" rel="noopener noreferrer">DeepSeek 开放平台</a> 创建密钥，保存到本机数据目录。</p>
               </div>
 
               <div class="ai-field">
@@ -555,7 +556,8 @@ onUnmounted(unlockPageScroll)
                     </div>
                   </section>
                   <section class="ai-block">
-                    <h3 class="ai-block-title">本次会诊依据</h3>
+                    <h3 class="ai-block-title">发送给 DeepSeek 的证据</h3>
+                    <p class="ai-hint">证据来自当前任务的结构化摘要。抓包原始字节保留在本机。</p>
                     <dl class="ai-facts">
                       <div v-for="f in facts" :key="f.k">
                         <dt>{{ f.k }}</dt>
@@ -565,9 +567,9 @@ onUnmounted(unlockPageScroll)
                   </section>
                   <div class="ai-run">
                     <button type="button" class="btn primary lg" @click="previewOpen = true">
-                      查看发送内容 <AppIcon name="forward" />
+                      预览会诊请求 <AppIcon name="forward" />
                     </button>
-                    <span class="ai-hint">在本机预览摘要全文，确认后再发送。</span>
+                    <span class="ai-hint">预览会诊视角、证据摘要与接收地址后再确认发送。</span>
                   </div>
                 </div>
 
@@ -1123,7 +1125,10 @@ onUnmounted(unlockPageScroll)
   .consult-grid .ai-facts { grid-template-columns:repeat(3,minmax(0,1fr)); }
 }
 
-.ai-head { padding:16px 20px; background:linear-gradient(110deg,var(--bg-selected),var(--surface) 62%); }
+.ai-head { padding:16px 20px; background:linear-gradient(110deg,var(--ds-soft),var(--surface) 72%); border-top-color:var(--ds); }
+.ai-run > .btn.primary { color:#fff; background:var(--ds-dk); border-color:var(--ds-dk); }
+.ai-run > .btn.primary:hover { filter:brightness(1.12); }
+.ai-mark, .perspective-logo { background:var(--ds-soft); }
 .ai-head-text strong { font-size:18px; letter-spacing:-.025em; }
 .ai-mark { width:40px; height:40px; border-radius:12px; background:var(--surface); }
 .ai-mark img { width:26px; }

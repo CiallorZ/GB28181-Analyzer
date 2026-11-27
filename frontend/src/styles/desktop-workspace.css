@@ -108,3 +108,43 @@ body { background: var(--bg); }
   :root[data-material="swiss"] .btn { transition: transform 150ms ease-out, background-color 150ms ease-out; }
   :root[data-material="swiss"] .btn:enabled:active { transform: scale(.98); }
 }
+
+/* Give the capture entry a clear hierarchy in both appearance modes. */
+:root[data-material="swiss"] .capture-home .mast {
+  padding:clamp(18px, 2.8vw, 34px);
+  background:var(--card);
+}
+:root[data-material="swiss"] .capture-home .mast h1 {
+  font-size:clamp(27px, 3vw, 42px);
+  letter-spacing:-.045em;
+}
+:root[data-material="swiss"] .capture-home .signal-preview {
+  background:var(--muted);
+}
+:root[data-material="swiss"] .capture-home .intake-intro .btn {
+  min-height:42px;
+  padding-inline:18px;
+}
+:root[data-material="swiss"] .findings-layout .rule-group {
+  border-radius:12px;
+  overflow:hidden;
+}
+:root[data-material="swiss"] .findings-layout .diag-head[aria-expanded="true"] {
+  background:var(--bg-selected);
+  box-shadow:inset 3px 0 var(--primary);
+}
+:root[data-material="swiss"] .consult-grid .ai-block {
+  border-radius:12px;
+}
+:root[data-material="swiss"] .signal-preview li {
+  font-variant-numeric:tabular-nums;
+  letter-spacing:.035em;
+}
+:root[data-material="swiss"] :is(.diag-head,.intake-intro .btn):focus-visible {
+  outline:2px solid var(--primary);
+  outline-offset:-2px;
+}
+:root[data-material="swiss"] .signal-endpoints {
+  color:var(--text-3);
+  font-size:.85em;
+}

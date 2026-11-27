@@ -117,7 +117,23 @@ function drop(event) {
 <template>
   <div class="capture-home page-content-in" :class="{ dragging }" @dragover.prevent="dragging = true" @dragleave.self.prevent="dragging = false" @drop.prevent="drop">
     <header class="mast">
-      <h1>工作台</h1>
+      <div class="intake-intro">
+        <div>
+          <h1>工作台</h1>
+          <p>导入抓包，查看信令、媒体流与诊断证据。</p>
+          <button class="btn primary" :disabled="busy" @click="picker.click()"><AppIcon name="upload"/>{{ busy ? '正在导入 '+progress+'%' : dragging ? '松开以导入' : '导入抓包' }}</button>
+        </div>
+        <figure class="signal-preview">
+          <figcaption>SIP 点播与 RTP 媒体流示意</figcaption>
+          <div class="signal-endpoints"><span>平台</span><span>设备</span></div>
+          <ol>
+            <li>INVITE <span aria-label="平台到设备">→</span></li>
+            <li><span aria-label="设备到平台">←</span> 200 OK</li>
+            <li>ACK <span aria-label="平台到设备">→</span></li>
+            <li><span aria-label="设备到平台">←</span> RTP</li>
+          </ol>
+        </figure>
+      </div>
       <div class="metrics" aria-label="任务总数与最近完成任务指标">
         <MetricCard v-for="metric in metrics" :key="metric.label" v-bind="metric" />
       </div>
@@ -143,7 +159,6 @@ function drop(event) {
       <section class="panel actions">
         <h2>快捷操作</h2>
         <input ref="picker" type="file" accept=".pcap,.pcapng,.cap" hidden @change="pick">
-        <button class="btn primary" :disabled="busy" @click="picker.click()"><AppIcon name="upload"/>{{ busy ? '正在导入 '+progress+'%' : dragging ? '松开以导入' : '新建分析任务' }}</button>
         <button class="btn" :disabled="busy" @click="emit('sample')"><AppIcon name="file"/>导入示例抓包</button>
         <router-link class="btn" to="/compare"><AppIcon name="compare"/>双包对比</router-link>
         <button class="btn ai-entry" @click="store.openAiPanel()"><img src="/brand/deepseek.svg" alt="" width="18">DeepSeek 专家会诊</button>
@@ -195,7 +210,7 @@ function drop(event) {
 <style scoped>
 .capture-home { display:grid; gap:14px; padding-block:4px 24px; }
 .capture-home.dragging { outline:2px dashed var(--brand); outline-offset:4px; }
-.mast { padding:20px; border-radius:var(--radius-lg); background:url('/brand/tower-lines.svg') right center / auto 140% no-repeat,linear-gradient(106deg,var(--surface) 43%,var(--bg-selected)); border:1px solid var(--line); }
+.mast { padding:20px; border-radius:var(--radius-lg); background:var(--card); border:1px solid var(--line); }
 .mast h1 { margin:0 0 14px; }
 .metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; max-width:86%; }
 small,.axis { color:var(--text-3); font-size:12px; }
@@ -272,7 +287,6 @@ summary { cursor:pointer; }
 .paused .wire span { animation-play-state:paused; }
 .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 .capture-home .mast { position:relative; isolation:isolate; overflow:hidden; background:linear-gradient(105deg,var(--mast-start) 18%,var(--mast-end)); border:1px solid var(--mast-line); padding:clamp(18px,2vw,30px); }
-.mast::before { content:''; position:absolute; inset:0; z-index:-1; background:url('/brand/tower-lines.svg') right center / auto 130% no-repeat; filter:var(--tower-filter); opacity:var(--tower-opacity); }
 .capture-home .mast h1 { color:var(--text); font-size:clamp(24px,2.1vw,32px); font-weight:700; margin-bottom:15px; }
 .mast .metrics { gap:8px; max-width:89%; }
 .mast small { color:var(--text-2); }
@@ -281,4 +295,14 @@ summary { cursor:pointer; }
 .axis button { background:transparent; color:var(--text-3); border:0; border-radius:5px; padding:4px 6px; font:12px var(--font-mono); cursor:pointer; }
 .axis button[aria-pressed=true] { color:var(--brand-lt); background:var(--bg-selected); }
 @media(max-width:800px){.mast .metrics{max-width:100%}}
+
+.intake-intro { display:grid; grid-template-columns:minmax(0, 1fr) minmax(220px, .75fr); align-items:center; gap:24px; margin-bottom:20px; }
+.intake-intro p { margin:8px 0 16px; }
+.signal-preview { margin:0; padding:12px 16px; border:1px solid var(--line); border-radius:12px; background:var(--surface); }
+.signal-preview figcaption { font-weight:600; }
+.signal-endpoints { display:flex; justify-content:space-between; margin-top:6px; }
+.signal-preview ol { margin:4px 0 0; padding:0; list-style:none; text-align:center; font-family:var(--font-mono, monospace); }
+.signal-preview li { padding:2px 0; border-bottom:1px solid var(--line); }
+.signal-preview li:last-child { border-bottom:1px dashed var(--primary); color:var(--primary); }
+@media(max-width:720px) { .intake-intro { grid-template-columns:1fr; } }
 </style>

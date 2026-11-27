@@ -30,12 +30,12 @@ class ConfigIn(BaseModel):
 class ChatIn(BaseModel):
     question: str
     history: list = []
-    expert: Literal['general', 'sip', 'media', 'field'] = 'general'
+    expert: Literal['general', 'sip', 'media', 'field', 'packet'] = 'general'
     context_hash: str | None = None
 
 
 class AnalyzeIn(BaseModel):
-    expert: Literal['general', 'sip', 'media', 'field'] = 'general'
+    expert: Literal['general', 'sip', 'media', 'field', 'packet'] = 'general'
     context_hash: str | None = None
 
 
