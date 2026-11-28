@@ -37,6 +37,7 @@ from ..models.entities import (
 from ..parsers import (capture, rtcp_analyzer, rtp_analyzer, session_builder,
                        sip_parser)
 from . import diagnosis as diag_engine
+from . import root_cause
 
 log = logging.getLogger('gb28181.analyzer')
 
@@ -1159,7 +1160,7 @@ def _build_summary(task, session_rows, streams, diagnostics, stats,
     verdict = diag_engine.build_verdict(
         diagnostics, sessions, streams, stats, limits)
 
-    return {
+    summary = {
         'packet_count': stats.get('count', 0),
         'session_count': total_sessions,
         'signal_success': signal_ok,
@@ -1185,3 +1186,9 @@ def _build_summary(task, session_rows, streams, diagnostics, stats,
             'packet_count': stats.get('count', 0),
         },
     }
+    summary['root_cause'] = root_cause.build_root_cause(
+        diagnostics,
+        [_session_dict(s, sid) for s, sid in session_rows],
+        [{**_stream_dict(r), 'codec': r.codec} for r in streams],
+        stats, limits)
+    return summary

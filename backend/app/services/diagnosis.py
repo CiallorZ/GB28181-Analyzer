@@ -179,6 +179,24 @@ _VERDICT_GENERIC_ACTION = {
     'blocked': '优先处理已确认阻断项并复测业务',
 }
 
+# 分阶段结论：规则 ID -> 分析阶段（顺序固定，便于展示与引用）
+_MEDIA_STAGE_RULES = frozenset('MED-%03d' % n for n in (1, 2, 3, 4, 5, 6, 7, 9))
+_CODEC_STAGE_RULES = frozenset(('MED-008', 'MED-010'))
+_STAGE_DEFS = (
+    ('signal', '信令事务', lambda rid: rid.startswith('SIP-')),
+    ('negotiation', 'SDP 协商', lambda rid: rid.startswith('SDP-')),
+    ('media', '媒体链路', lambda rid: rid in _MEDIA_STAGE_RULES),
+    ('codec', '编码与画面', lambda rid: rid in _CODEC_STAGE_RULES),
+    ('capture', '抓包范围', lambda rid: rid == 'CAP-001'),
+)
+_STAGE_DEFAULT_HINT = {
+    'signal': '信令事务报文',
+    'negotiation': 'SDP 协商字段',
+    'media': 'RTP/RTCP 媒体统计',
+    'codec': '编码与关键帧统计',
+    'capture': '抓包范围与过滤条件',
+}
+
 
 def _verdict_field(obj, key: str, default=None):
     """同时兼容 Diagnostic dataclass、ORM 行与 dict。"""
@@ -195,6 +213,93 @@ def _verdict_rank(d):
         str(_verdict_field(d, 'rule_id') or ''),
         str(_verdict_field(d, 'title') or ''),
     )
+
+
+def build_stage_conclusions(diagnostics, sessions, streams, stats, limits) -> list[dict]:
+    """把诊断按分析阶段折叠成至多 5 条一眼可读的阶段结论。
+
+    顺序固定为 信令事务 / SDP 协商 / 媒体链路 / 编码与画面 / 抓包范围。
+    每条结论只引用本阶段规则，证据不足时绝不写成已确认；纯规则计算，
+    与 build_verdict 一样确定性、不修改传入数据。
+    """
+    items = [d for d in (diagnostics or []) if d is not None]
+    capture_limited = bool(limits) or any(
+        _verdict_field(d, 'rule_id') == 'CAP-001' for d in items)
+    empty_capture = isinstance(stats, dict) and stats.get('count') == 0
+
+    # 抓包局限（limits）即便没有对应诊断，也要在抓包阶段体现。
+    limit_titles = [str(lim.get('message') or '').strip() for lim in (limits or [])
+                    if isinstance(lim, dict) and str(lim.get('message') or '').strip()]
+    limit_hint = limit_titles[0][:80] if limit_titles else _STAGE_DEFAULT_HINT['capture']
+    has_sessions = bool(sessions)
+    has_streams = bool(streams)
+    data_available = {
+        'signal': has_sessions,
+        'negotiation': has_sessions,
+        'media': has_streams,
+        'codec': has_streams,
+        'capture': not empty_capture,
+    }
+
+    stages = []
+    for key, label, matches in _STAGE_DEFS:
+        group = [d for d in items
+                 if matches(str(_verdict_field(d, 'rule_id') or ''))]
+        if key == 'capture' and capture_limited and not group:
+            group = [{'severity': WARNING if not empty_capture else UNKNOWN,
+                      'evidence_level': INSUFFICIENT,
+                      'rule_id': 'CAP-001',
+                      'title': limit_hint}]
+        group.sort(key=_verdict_rank)
+
+        if not group:
+            status = 'ok'
+            summary_text = ('未观察到相关数据' if not data_available[key]
+                            else '未发现可确认异常')
+            hint = _STAGE_DEFAULT_HINT[key]
+            rule_ids = []
+        else:
+            leading = group[0]
+            # blocked 只认 confirmed critical；attention 需要 warning/critical
+            # 且至少是 suspected；info 或 insufficient 一律只作观察。
+            problems = [d for d in group
+                        if _severity_rank(str(_verdict_field(d, 'severity') or ''))
+                        <= _severity_rank(WARNING)
+                        and _verdict_field(d, 'evidence_level') != INSUFFICIENT]
+            if any(_verdict_field(d, 'severity') == CRITICAL
+                   and _verdict_field(d, 'evidence_level') == CONFIRMED
+                   for d in problems):
+                status = 'blocked'
+            elif problems:
+                status = 'attention'
+            else:
+                status = 'observation'
+
+            title = str(_verdict_field(leading, 'title') or '').strip()
+            evidence = str(_verdict_field(leading, 'evidence_level') or '')
+            # 证据不足/疑似时只写"疑似"，绝不声称已确认。
+            subject = ('疑似' + title if title and evidence != CONFIRMED
+                       else title)
+            if status == 'observation' and evidence != CONFIRMED:
+                summary_text = '证据不足，%s，需复核' % (subject or _STAGE_DEFAULT_HINT[key])
+            elif subject:
+                summary_text = subject
+            else:
+                summary_text = ('仅观察到相关信息，需复核'
+                                if status == 'observation' else '未发现可确认异常')
+            hint = subject or _STAGE_DEFAULT_HINT[key]
+            rule_ids = [str(_verdict_field(d, 'rule_id'))
+                        for d in group if _verdict_field(d, 'rule_id')][:3]
+
+        stages.append({
+            'key': key,
+            'label': label,
+            'status': status,
+            'summary': summary_text,
+            'rule_ids': rule_ids,
+            'evidence_hint': hint,
+        })
+    return stages
 
 
 def build_verdict(diagnostics, sessions, streams, stats, limits) -> dict:
@@ -294,6 +399,8 @@ def build_verdict(diagnostics, sessions, streams, stats, limits) -> dict:
         'confidence': confidence,
         'lead_rule_ids': lead_rule_ids,
         'actions': actions,
+        'stages': build_stage_conclusions(
+            diagnostics, sessions, streams, stats, limits),
     }
 
 

@@ -7,7 +7,7 @@ it('首页独立于上次打开的任务', () => {
   expect(resolveTaskContext({name:'workbench'}, tasks)).toBeUndefined()
   expect(tasks.setCurrent).not.toHaveBeenCalled()
 })
-it.each(['sip', 'media', 'diagnostics', 'packets'])('%s 保留来源任务和已有定位参数', name => {
+it.each(['sip', 'media', 'diagnostics', 'packets', 'insight'])('%s 保留来源任务和已有定位参数', name => {
   const route = {name, path:'/'+name, query:{number:'24'}, hash:'#detail'}
   expect(resolveTaskContext(route, store(17))).toEqual({
     path:route.path, query:{number:'24',task:17}, hash:route.hash

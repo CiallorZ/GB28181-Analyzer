@@ -8,6 +8,45 @@ def test_context_does_not_claim_video_reconstruction_is_unimplemented(db, make_t
     assert '视频重建结果不等于客户端实际播放成功' in context
 
 
+def test_context_includes_verdict_and_stages_when_present(db, make_task):
+    task = make_task()
+    task.summary = {
+        'verdict': {
+            'status': 'blocked',
+            'headline': '发现 1 项已确认问题，优先核对 RTP 序号缺口',
+            'confidence': 'confirmed',
+            'lead_rule_ids': ['MED-002'],
+            'actions': ['核对 RTCP 报告', '在发送端补抓包'],
+            'stages': [
+                {'key': 'signal', 'label': '信令事务', 'status': 'ok',
+                 'summary': '未发现可确认异常', 'rule_ids': [], 'evidence_hint': '信令事务报文'},
+                {'key': 'media', 'label': '媒体链路', 'status': 'blocked',
+                 'summary': 'RTP 序号缺口', 'rule_ids': ['MED-002'],
+                 'evidence_hint': 'RTP 序号缺口'},
+            ],
+        }
+    }
+    db.commit()
+    context = ai.build_context(db, task.id)
+    # 结构化结论块在最前面，且完整包含 headline / 阶段 / 动作。
+    assert context.index('本地结论') < context.index('抓包基本信息')
+    assert '发现 1 项已确认问题，优先核对 RTP 序号缺口' in context
+    assert '[blocked] 媒体链路：RTP 序号缺口（规则：MED-002）' in context
+    assert '信令事务' in context
+    assert '核对 RTCP 报告' in context
+    assert '不能无证据推翻或重写' in context
+
+
+def test_context_without_verdict_still_works(db, make_task):
+    task = make_task()
+    task.summary = {'session_count': 2}
+    db.commit()
+    context = ai.build_context(db, task.id)
+    assert '本地结论' not in context
+    assert '## 总体统计' in context
+    assert '视频重建结果不等于客户端实际播放成功' in context
+
+
 def test_connection_accepts_environment_key(monkeypatch):
     monkeypatch.setenv('DEEPSEEK_API_KEY', 'test-key')
     monkeypatch.setattr(ai, 'load_config', lambda: {})

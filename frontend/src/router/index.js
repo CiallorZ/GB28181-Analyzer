@@ -13,6 +13,7 @@ const routes = [
   { path: '/sip', name: 'sip', component: () => import('../views/SipView.vue') },
   { path: '/media', name: 'media', component: () => import('../views/MediaView.vue') },
   { path: '/diagnostics', name: 'diagnostics', component: () => import('../views/DiagnosticsView.vue') },
+  { path: '/insight', name: 'insight', component: () => import('../views/InsightView.vue') },
   { path: '/packets', name: 'packets', component: () => import('../views/PacketsView.vue') },
   { path: '/sessions/:id', name: 'session-detail', component: () => import('../views/SessionDetailView.vue') },
   // 历史任务深链接：/tasks/:id 打开对应任务的分析结果（由全局守卫设置当前任务）

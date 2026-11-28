@@ -106,6 +106,33 @@ def build_context(db, task_id: int) -> str:
     cf = task.files[0] if task.files else None
 
     lines = []
+
+    # 本地规则引擎已经给出的结论：AI 必须引用并核验，不得凭空覆盖。
+    # 只取结论字段，不发送原始诊断描述或自由文本。
+    verdict = s.get('verdict') or {}
+    if isinstance(verdict, dict) and verdict:
+        lines.append('## 本地结论（机器生成，需引用并核验）')
+        lines.append('- 总判定：%s' % verdict.get('status', '未知'))
+        lines.append('- 一句话结论：%s' % verdict.get('headline', '无'))
+        lines.append('- 置信度：%s' % verdict.get('confidence', '未知'))
+        stages = verdict.get('stages') or []
+        if isinstance(stages, list) and stages:
+            lines.append('- 分阶段结论（引用时按阶段标注）：')
+            for stage in stages[:5]:
+                if not isinstance(stage, dict):
+                    continue
+                rule_ids = stage.get('rule_ids') or []
+                lines.append('  - [%s] %s：%s（规则：%s）' % (
+                    stage.get('status', '未知'), stage.get('label', '未知阶段'),
+                    stage.get('summary', '无'), ','.join(str(r) for r in rule_ids[:3]) or '无'))
+        actions = verdict.get('actions') or []
+        if isinstance(actions, list) and actions:
+            lines.append('- 建议动作（优先核对，不超过 3 条）：')
+            for action in actions[:3]:
+                lines.append('  - %s' % action)
+        lines.append('- 以上为本地规则结论，AI 应引用并对照数据核验，不能无证据推翻或重写。')
+        lines.append('')
+
     lines.append('## 抓包基本信息')
     if cf:
         lines.append('- 文件名：已隐藏')

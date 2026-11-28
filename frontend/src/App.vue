@@ -12,7 +12,7 @@ watch(() => store.aiPanelOpen, (open) => {
   // 首次打开才下载会诊面板；之后保留组件，关闭抽屉不丢失报告和追问。
   if (open) aiPanelMounted.value = true
 }, { immediate: true })
-const aiFocusByPage = { sip: 'sip', media: 'media', packets: 'packet', diagnostics: 'field', 'session-detail': 'sip' }
+const aiFocusByPage = { sip: 'sip', media: 'media', packets: 'packet', diagnostics: 'field', insight: 'general', 'session-detail': 'sip' }
 function openPageConsultation() {
   store.openAiPanel(aiFocusByPage[route.name] || 'general')
 }
@@ -192,6 +192,12 @@ onUnmounted(() => {
         </div>
         <div class="nav-group">
           <span class="nav-heading">当前任务</span>
+          <router-link v-if="store.currentTaskId" :to="{ name: 'insight', query: { task: store.currentTaskId } }"
+                       :class="{ current: route.name === 'insight' }"
+                       title="智能洞察" aria-label="智能洞察"><AppIcon name="codec" /><span>智能洞察</span></router-link>
+          <span v-else class="nav-disabled" aria-disabled="true" title="智能洞察 · 请先选择分析任务">
+            <AppIcon name="codec" /><span>智能洞察</span>
+          </span>
           <template v-for="[name, icon, label] in taskLinks" :key="name">
             <router-link v-if="store.currentTaskId" :to="{ name, query: { task: store.currentTaskId } }"
                          :class="{ current: route.name === name || (name === 'sip' && route.name === 'session-detail') }"
