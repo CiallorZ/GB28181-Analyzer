@@ -16,6 +16,7 @@ const sevFilter = ref('')
 const ruleFilter = ref('')
 const err = ref('')
 const expanded = ref({})
+const selectedId = ref(null)
 
 const total = ref(0)
 const page = ref(0)
@@ -30,6 +31,7 @@ async function load(append = false) {
   if (!append) {
     items.value = []
     expanded.value = {}
+    selectedId.value = null
     total.value = 0
     page.value = 0
     ruleStats.value = null
@@ -81,6 +83,7 @@ const groups = computed(() => {
 })
 
 const highlighted = computed(() => sorted.value[0])
+const selectedFinding = computed(() => items.value.find(item => item.id === selectedId.value) || highlighted.value)
 const firstRule = computed(() => groups.value.keys().next().value ?? null)
 
 function topSeverity(events) {
@@ -91,7 +94,10 @@ function topSeverity(events) {
 const EV_LABEL = { confirmed: '已确认', suspected: '疑似', insufficient: '证据不足' }
 const EV_CLS = { confirmed: 'ok', suspected: 'warning', insufficient: 'unknown' }
 
-function toggle(id) { expanded.value[id] = !expanded.value[id] }
+function toggle(id) {
+  expanded.value[id] = !expanded.value[id]
+  selectedId.value = expanded.value[id] ? id : null
+}
 function goSession(sid) { if (sid) router.push(`/sessions/${sid}`) }
 function goPacket(taskId, num) {
   router.push({ name: 'packets', query: { task: taskId, number: num } })
@@ -225,11 +231,12 @@ watch([() => store.currentTaskId, sevFilter, ruleFilter], () => load(), { immedi
           </div>
         </details>
       </div>
-      <aside v-if="highlighted" class="reason-panel card">
-        <div class="card-head">根因分析</div><div class="card-body">
-          <strong>{{ EV_LABEL[highlighted.evidence_level] || '待核实' }} · {{ highlighted.rule_id }}</strong>
-          <h3>可能原因</h3><ul v-if="highlighted.possible_causes?.length"><li v-for="cause in highlighted.possible_causes" :key="cause">{{ cause }}</li></ul><p v-else>该规则未提供原因说明。</p>
-          <h3>处置建议</h3><ul v-if="highlighted.recommendations?.length"><li v-for="action in highlighted.recommendations" :key="action">{{ action }}</li></ul><p v-else>请结合关联报文核实。</p>
+      <aside v-if="selectedFinding" class="reason-panel card">
+        <div class="card-head">所选事件 · 排查依据</div><div class="card-body">
+          <h3>{{ selectedFinding.title }}</h3>
+          <strong>{{ EV_LABEL[selectedFinding.evidence_level] || '待核实' }} · {{ selectedFinding.rule_id }}</strong>
+          <h3>可能原因</h3><ul v-if="selectedFinding.possible_causes?.length"><li v-for="cause in selectedFinding.possible_causes" :key="cause">{{ cause }}</li></ul><p v-else>该规则未提供原因说明。</p>
+          <h3>处置建议</h3><ul v-if="selectedFinding.recommendations?.length"><li v-for="action in selectedFinding.recommendations" :key="action">{{ action }}</li></ul><p v-else>请结合关联报文核实。</p>
         </div>
       </aside>
       </div>
@@ -348,4 +355,6 @@ watch([() => store.currentTaskId, sevFilter, ruleFilter], () => load(), { immedi
   color: var(--critical); margin-bottom: 14px;
 }
 .diagnostic-overview { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:var(--space-3); margin-bottom:var(--space-4); }
+.reason-panel { position:sticky; top:12px; }
+@media(max-width:980px) { .reason-panel { position:static; } }
 </style>

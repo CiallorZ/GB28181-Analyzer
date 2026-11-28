@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections import Counter, defaultdict
 
 from sqlalchemy import delete, insert, select, update
 from sqlalchemy.orm import Session
@@ -440,7 +441,10 @@ def _run(db: Session, task: AnalysisTask):
     }
     diagnostics = diag_engine.diagnose(task_payload)
 
+    counts_by_session = defaultdict(Counter)
     for d in diagnostics:
+        if d.session_id is not None:
+            counts_by_session[d.session_id][d.severity] += 1
         db.add(DiagnosticEvent(
             task_id=task.id, session_id=d.session_id, stream_id=d.stream_id,
             rule_id=d.rule_id, severity=d.severity,
@@ -451,15 +455,16 @@ def _run(db: Session, task: AnalysisTask):
             related_packet_ids=d.related_packet_ids,
             device_id=d.device_id,
         ))
-    db.commit()
-
-    # 统计回写会话
-    for s, sid in session_rows:
-        evs = [d for d in diagnostics if d.session_id == sid]
-        row = db.get(BusinessSession, sid)
-        row.diagnostic_count = len(evs)
-        row.critical_count = sum(1 for d in evs if d.severity == 'critical')
-        row.warning_count = sum(1 for d in evs if d.severity == 'warning')
+    # Write events and session totals atomically. Only sessions with findings
+    # need updates because the session rows were created with zero totals.
+    counts = [
+        {'id': sid, 'diagnostic_count': sum(levels.values()),
+         'critical_count': levels['critical'], 'warning_count': levels['warning']}
+        for _, sid in session_rows
+        if (levels := counts_by_session.get(sid))
+    ]
+    if counts:
+        db.execute(update(BusinessSession), counts)
     db.commit()
 
     # ---------------- 8. 汇总 ----------------
