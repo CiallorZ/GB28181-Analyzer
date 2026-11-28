@@ -153,6 +153,150 @@ def _severity_rank(s: str) -> int:
     return {CRITICAL: 0, WARNING: 1, INFO: 2, UNKNOWN: 3}.get(s, 4)
 
 
+# ---------------------------------------------------------------
+# 一句话结论（纯本地规则，不调用 AI）
+# ---------------------------------------------------------------
+_EVIDENCE_RANK = {CONFIRMED: 0, SUSPECTED: 1, INSUFFICIENT: 2}
+
+#  headlines 中用于"优先核对/复核"的短焦点，避免把整条 description 塞进来。
+_VERDICT_FOCUS = {
+    'SIP-001': 'INVITE 是否收到最终响应',
+    'SIP-002': 'REGISTER 是否收到响应',
+    'SIP-003': 'SIP 失败响应与业务结果',
+    'SIP-005': '请求与响应是否同属一个事务',
+    'SDP-001': 'SDP 媒体地址配置',
+    'SDP-002': 'SDP 与实际媒体地址',
+    'MED-001': '媒体链路是否真正建立',
+    'MED-002': 'RTP 序号缺口与丢包位置',
+    'MED-009': '下游链路与接收端丢包',
+    'CAP-001': '抓包范围与过滤条件',
+}
+
+_VERDICT_GENERIC_ACTION = {
+    'healthy': '保留本次抓包作为基线，无需额外处置',
+    'observation': '补充覆盖信令与媒体路径的抓包后再复核',
+    'attention': '按诊断证据逐项核对关联报文与端点',
+    'blocked': '优先处理已确认阻断项并复测业务',
+}
+
+
+def _verdict_field(obj, key: str, default=None):
+    """同时兼容 Diagnostic dataclass、ORM 行与 dict。"""
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _verdict_rank(d):
+    """严重级别优先，同级按证据强度；rule_id/title 只做稳定排序用。"""
+    return (
+        _severity_rank(str(_verdict_field(d, 'severity') or '')),
+        _EVIDENCE_RANK.get(str(_verdict_field(d, 'evidence_level') or ''), 3),
+        str(_verdict_field(d, 'rule_id') or ''),
+        str(_verdict_field(d, 'title') or ''),
+    )
+
+
+def build_verdict(diagnostics, sessions, streams, stats, limits) -> dict:
+    """从已有诊断生成一个一眼可读的结论。
+
+    严格保守：
+    - 只有 critical + confirmed 才判为 blocked；
+    - 只有 suspected/insufficient 时 headline 一定带"疑似/需复核"；
+    - 有 warning/critical 时绝不输出"无问题"；
+    - 存在抓包局限（CAP-001 或 limits）时明确声明结论仅反映抓包点。
+    纯规则计算，不使用 AI，也不修改传入数据。
+    """
+    items = [d for d in (diagnostics or []) if d is not None]
+    capture_limited = bool(limits) or any(
+        _verdict_field(d, 'rule_id') == 'CAP-001' for d in items)
+    empty_capture = isinstance(stats, dict) and stats.get('count') == 0
+
+    problems = [d for d in items
+                if _severity_rank(str(_verdict_field(d, 'severity') or ''))
+                <= _severity_rank(WARNING)]
+    confirmed_problems = [d for d in problems
+                          if _verdict_field(d, 'evidence_level') == CONFIRMED]
+    hard_blocker = any(
+        _verdict_field(d, 'severity') == CRITICAL
+        and _verdict_field(d, 'evidence_level') == CONFIRMED
+        for d in items)
+
+    if hard_blocker:
+        status = 'blocked'
+    elif problems:
+        status = 'attention'
+    elif items or capture_limited or empty_capture:
+        status = 'observation'
+    else:
+        status = 'healthy'
+
+    # 排序：严重级别 -> 证据强度 -> rule_id/title（确定性）。
+    leads = sorted(items, key=_verdict_rank)[:3]
+    best = min((_EVIDENCE_RANK.get(
+        str(_verdict_field(d, 'evidence_level') or ''), 3) for d in leads),
+        default=3)
+    confidence = {0: CONFIRMED, 1: SUSPECTED, 2: INSUFFICIENT}.get(
+        best, INSUFFICIENT)
+    lead_rule_ids = [str(_verdict_field(d, 'rule_id'))
+                     for d in leads if _verdict_field(d, 'rule_id')]
+
+    top_evidence = str(_verdict_field(leads[0], 'evidence_level') or '') if leads else ''
+    needs_caution = (confidence != CONFIRMED
+                     or (status != 'healthy' and top_evidence != CONFIRMED))
+
+    lead_rule = lead_rule_ids[0] if lead_rule_ids else ''
+    if status == 'healthy':
+        headline = '本次抓包未发现可确认的问题'
+    elif empty_capture and not problems:
+        headline = '抓包中没有可分析的报文，无法判断业务状态'
+    elif status == 'observation':
+        headline = '仅有观察项或证据不足，暂不能判定根因'
+    elif lead_rule == 'MED-001':
+        headline = '点播未建立媒体链路：信令成功但抓包点未捕获 RTP'
+        if needs_caution:
+            headline += '，仍需复核媒体路径'
+    else:
+        title = str(_verdict_field(leads[0], 'title') or '') if leads else ''
+        focus = _VERDICT_FOCUS.get(lead_rule) or RULES.get(lead_rule) or title or '诊断证据'
+        if status == 'attention' and needs_caution:
+            headline = '存在疑似问题，优先复核 %s' % focus
+        elif status == 'blocked' and needs_caution:
+            headline = '疑似 %s，需复核后再处置' % focus
+        else:
+            count = max(len(confirmed_problems), 1)
+            headline = '发现 %d 项已确认问题，优先核对 %s' % (count, focus)
+
+    if capture_limited:
+        headline += '，结论仅反映抓包点'
+
+    actions: list[str] = []
+    for d in leads:
+        for rec in (_verdict_field(d, 'recommendations') or []):
+            if not isinstance(rec, str):
+                continue
+            text = rec.strip()
+            if text and text not in actions:
+                actions.append(text)
+                if len(actions) == 3:
+                    break
+        if len(actions) == 3:
+            break
+    if not actions:
+        if status == 'observation' and capture_limited:
+            actions = ['在信令与媒体都经过的节点补抓包后再复核']
+        else:
+            actions = [_VERDICT_GENERIC_ACTION[status]]
+
+    return {
+        'status': status,
+        'headline': headline,
+        'confidence': confidence,
+        'lead_rule_ids': lead_rule_ids,
+        'actions': actions,
+    }
+
+
 def _packets_of(messages: list, call_ids: list, predicate, limit: int = 5
                 ) -> list[int]:
     """取满足条件的报文号，用于 related_packet_ids"""

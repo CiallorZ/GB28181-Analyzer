@@ -1,8 +1,8 @@
 /**
  * 首屏 JS 预算检查
  *
- * 只统计入口的「静态」依赖图：动态 import 的 chunk（图表库）不在首屏关键路径上。
- * 阈值 110 KB（gzip）——当前约 94 KB，留出余量；echarts 回到静态依赖会立刻超标。
+ * 只统计入口的「静态」依赖图；动态 import 的图表和路由 chunk 不计入，
+ * 仍需结合构建输出单独检查。阈值 110 KB（gzip），echarts 回到静态依赖会立刻超标。
  */
 import { readFileSync } from 'node:fs'
 import { gzipSync } from 'node:zlib'

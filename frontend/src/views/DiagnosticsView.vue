@@ -94,6 +94,22 @@ function topSeverity(events) {
 const EV_LABEL = { confirmed: '已确认', suspected: '疑似', insufficient: '证据不足' }
 const EV_CLS = { confirmed: 'ok', suspected: 'warning', insufficient: 'unknown' }
 
+// 结构化结论为附加字段：缺失时完全回退，规则表 / 筛选行为不变。
+const verdict = computed(() => {
+  const v = store.task?.summary?.verdict
+  return v && typeof v === 'object' && v.status && v.headline ? v : null
+})
+const VD_STATUS = {
+  blocked: { label: '存在阻断问题', icon: 'warning' },
+  attention: { label: '需关注', icon: 'warning' },
+  observation: { label: '待观察', icon: 'info' },
+  healthy: { label: '已确认正常', icon: 'check' }
+}
+const VD_CONFIDENCE = { confirmed: '已确认', suspected: '疑似', insufficient: '证据不足' }
+const verdictStatus = computed(() => VD_STATUS[verdict.value?.status] || VD_STATUS.observation)
+const verdictConfidence = computed(() => VD_CONFIDENCE[verdict.value?.confidence] || '')
+const verdictActions = computed(() => (verdict.value?.actions || []).slice(0, 3))
+
 function toggle(id) {
   expanded.value[id] = !expanded.value[id]
   selectedId.value = expanded.value[id] ? id : null
@@ -128,13 +144,27 @@ watch([() => store.currentTaskId, sevFilter, ruleFilter], () => load(), { immedi
       </template>
     </PageNav>
 
-    <section v-if="store.task?.status === 'completed'" class="diagnostic-overview" aria-label="任务汇总">
+    <section v-if="store.task?.status === 'completed'" class="kpis" aria-label="任务汇总">
       <MetricCard label="报文数" icon="file" :value="store.task.summary?.packet_count" />
       <MetricCard label="业务会话" icon="signal" :value="store.task.summary?.session_count" />
       <MetricCard label="媒体流" icon="wave" :value="store.task.summary?.total_streams" />
       <MetricCard label="诊断事件" icon="warning" :value="ruleStats?.total" />
     </section>
-    <div v-if="err" class="err-box" role="alert">{{ err }} <button class="btn" @click="load(page > 0)">重试</button></div>
+    <div v-if="err" class="err-box flat" role="alert">{{ err }} <button class="btn" @click="load(page > 0)">重试</button></div>
+
+    <section v-if="verdict" class="vd-banner" :class="'vd-' + verdict.status" aria-labelledby="verdict-banner-title">
+      <div class="vd-banner-main">
+        <span class="vd-status" :class="'vd-' + verdict.status" role="status"
+          :aria-label="`结论状态：${verdictStatus.label}`">
+          <AppIcon :name="verdictStatus.icon" />{{ verdictStatus.label }}
+        </span>
+        <h2 id="verdict-banner-title" class="vd-headline">{{ verdict.headline }}</h2>
+        <p v-if="verdictConfidence" class="vd-meta">置信度 · {{ verdictConfidence }}</p>
+      </div>
+      <ol v-if="verdictActions.length" class="vd-actions">
+        <li v-for="(action, i) in verdictActions" :key="i" :data-n="i + 1">{{ action }}</li>
+      </ol>
+    </section>
 
     <div v-if="!store.currentTaskId" class="card">
       <div class="empty">
@@ -349,12 +379,7 @@ watch([() => store.currentTaskId, sevFilter, ruleFilter], () => load(), { immedi
   border-bottom: 1px solid var(--line-2);
 }
 .pkt-link:hover { color: var(--text); border-bottom-color: currentColor; }
-.err-box {
-  background: var(--critical-soft); border-left: 2px solid var(--critical);
-  border-radius: 0; padding: 10px 12px; font-size: 12.5px;
-  color: var(--critical); margin-bottom: 14px;
-}
-.diagnostic-overview { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:var(--space-3); margin-bottom:var(--space-4); }
 .reason-panel { position:sticky; top:12px; }
 @media(max-width:980px) { .reason-panel { position:static; } }
 </style>
+<style src="../styles/verdict.css"></style>

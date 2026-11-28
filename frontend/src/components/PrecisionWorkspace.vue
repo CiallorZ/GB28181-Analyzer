@@ -57,8 +57,56 @@ const names = {
   insufficient: '证据不足'
 }
 const sum = computed(() => p.overview.summary || {})
+// 后端新增的 summary.verdict 是附加字段；旧任务没有时全部回退到原有结论逻辑。
+const verdict = computed(() => {
+  const v = sum.value.verdict
+  if (!v || typeof v !== 'object' || !v.status || !v.headline) return null
+  return {
+    ...v,
+    actions: Array.isArray(v.actions) ? v.actions.filter(Boolean).slice(0, 3) : [],
+    lead_rule_ids: Array.isArray(v.lead_rule_ids) ? v.lead_rule_ids : []
+  }
+})
+const VD_STATUS = {
+  blocked: { label: '存在阻断问题', icon: 'warning' },
+  attention: { label: '需关注', icon: 'warning' },
+  observation: { label: '待观察', icon: 'info' },
+  healthy: { label: '已确认正常', icon: 'check' }
+}
+const VD_CONFIDENCE = { confirmed: '已确认', suspected: '疑似', insufficient: '证据不足' }
+const verdictStatus = computed(() => VD_STATUS[verdict.value?.status] || VD_STATUS.observation)
+const verdictConfidence = computed(() => VD_CONFIDENCE[verdict.value?.confidence] || '')
+const verdictActions = computed(() => (verdict.value?.actions || []).slice(0, 3))
 const counts = computed(() => sum.value.diagnostics)
-const first = computed(() => p.events[0])
+const diagnosticTotal = computed(() =>
+  Object.values(counts.value || {}).reduce((total, count) => total + (count || 0), 0))
+const priorityDiagnosticTotal = computed(() =>
+  (counts.value?.critical || 0) + (counts.value?.warning || 0))
+const diagnosticsTruncated = computed(() => p.events.length < diagnosticTotal.value)
+const first = computed(() => {
+  // 不用低等级事件代替汇总里尚未载入的最高等级事件。
+  if (counts.value?.critical)
+    return p.events.find(event => event.severity === 'critical') || null
+  if (counts.value?.warning)
+    return p.events.find(event => event.severity === 'warning') || null
+  return p.events.find(event => ['critical', 'warning'].includes(event.severity)) || p.events[0]
+})
+const headline = computed(() => {
+  if (first.value) return first.value.title
+  if (priorityDiagnosticTotal.value)
+    return `任务汇总记录 ${priorityDiagnosticTotal.value} 条严重或警告事件`
+  if (diagnosticTotal.value) return `任务汇总记录 ${diagnosticTotal.value} 条诊断事件`
+  return '本次抓包未命中异常规则'
+})
+const headlineSeverity = computed(() => {
+  if (counts.value?.critical) return 'critical'
+  if (counts.value?.warning) return 'warning'
+  return first.value?.severity
+})
+const headlineIcon = computed(() => {
+  if (['critical', 'warning'].includes(headlineSeverity.value)) return 'warning'
+  return diagnosticTotal.value ? 'info' : 'check'
+})
 const extraMetric = ref(null)
 const extraPending = ref(false)
 const extraError = ref(false)
@@ -186,6 +234,20 @@ async function closeEvidence() {
   await nextTick()
   if (evidenceTrigger?.isConnected) evidenceTrigger.focus()
 }
+// 从结论卡片跳到依据：优先展开首个主规则的事件证据，否则滚动到诊断事件面板。
+async function showVerdictEvidence() {
+  const leadId = verdict.value?.lead_rule_ids?.[0]
+  const lead = leadId && p.events.find(d => d.rule_id === leadId)
+  if (lead) {
+    await evidenceOf(lead, document.activeElement)
+    return
+  }
+  const target = document.getElementById('station-events')
+  target?.scrollIntoView({
+    block: 'start',
+    behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+  })
+}
 watch(filtered, (items) => {
   if (event.value && !items.some((d) => d.id === event.value.id)) event.value = null
 })
@@ -210,16 +272,41 @@ watch(filtered, (items) => {
             <h2>分析总览</h2>
             <button @click="$emit('expand')">{{ expanded ? '收起完整明细' : '完整分析明细' }}</button>
           </header>
-          <section class="finding" :class="first?.severity" aria-labelledby="finding-title">
-            <AppIcon :name="!first ? 'check' : ['critical', 'warning'].includes(first.severity) ? 'warning' : 'info'" />
+          <!-- 后端给出结构化结论时，一眼看到状态 / 结论 / 下一步；旧任务沿用原结论块 -->
+          <section v-if="verdict" class="vd-card" :class="'vd-' + verdict.status" aria-labelledby="verdict-title">
+            <div class="vd-card-main">
+              <span class="vd-status" :class="'vd-' + verdict.status" role="status"
+                :aria-label="`结论状态：${verdictStatus.label}`">
+                <AppIcon :name="verdictStatus.icon" />{{ verdictStatus.label }}
+              </span>
+              <h3 id="verdict-title" class="vd-headline">{{ verdict.headline }}</h3>
+              <p v-if="verdictConfidence" class="vd-meta">置信度 · {{ verdictConfidence }}</p>
+              <ol v-if="verdictActions.length" class="vd-actions">
+                <li v-for="(action, i) in verdictActions" :key="i" :data-n="i + 1">{{ action }}</li>
+              </ol>
+            </div>
+            <div class="vd-card-side">
+              <button type="button" class="vd-evidence" @click="showVerdictEvidence">查看依据 ↗</button>
+              <button type="button" class="finding-ai" data-cue="confirm" @click="store.openAiPanel()">
+                <img src="/brand/deepseek.svg" alt="" />DeepSeek 会诊
+              </button>
+            </div>
+          </section>
+          <section v-else class="finding" :class="headlineSeverity" aria-labelledby="finding-title">
+            <AppIcon :name="headlineIcon" />
             <div class="finding-copy">
               <h3 id="finding-title">分析结论</h3>
-              <strong>{{ first?.title || '本次抓包未命中异常规则' }}</strong>
+              <strong>{{ headline }}</strong>
               <small v-if="first">{{ first.rule_id }} · {{ names[first.evidence_level] }} · {{ first.description }}</small>
-              <small v-else>结论覆盖本次抓包的可见范围和现有诊断规则。</small>
+              <small v-else-if="!diagnosticTotal">结论覆盖本次抓包的可见范围和现有诊断规则。</small>
+              <small v-if="diagnosticsTruncated">
+                当前仅载入 {{ events.length }} / {{ diagnosticTotal }} 条诊断；任务汇总包含
+                {{ counts?.critical || 0 }} 条严重、{{ counts?.warning || 0 }} 条警告。完整事件见“全部”。
+              </small>
             </div>
             <div class="finding-actions">
               <button v-if="first" @click="evidenceOf(first, $event.currentTarget)">查看证据 ›</button>
+              <router-link v-else-if="diagnosticTotal" to="/diagnostics">查看全部诊断 ›</router-link>
               <button type="button" class="finding-ai" data-cue="confirm" @click="store.openAiPanel()">
                 <img src="/brand/deepseek.svg" alt="" />DeepSeek 会诊
               </button>
@@ -428,10 +515,12 @@ watch(filtered, (items) => {
 
         <section>
           <h3>规则结论</h3>
-          <strong>{{ first?.title || '未发现规则命中异常' }}</strong>
-          <p>
-            {{ first ? names[first.evidence_level] + ' · ' + first.rule_id : '当前抓包范围内的规则结果。' }}
+          <strong>{{ headline }}</strong>
+          <p v-if="first">{{ names[first.evidence_level] }} · {{ first.rule_id }}</p>
+          <p v-else-if="diagnosticsTruncated">
+            当前仅载入 {{ events.length }} / {{ diagnosticTotal }} 条诊断，请查看完整诊断列表。
           </p>
+          <p v-else>当前抓包范围内的规则结果。</p>
           <button v-if="first" @click="evidenceOf(first, $event.currentTarget)">查看规则依据 ↗</button>
         </section>
 
@@ -474,3 +563,4 @@ watch(filtered, (items) => {
   </div>
 </template>
 <style src="../styles/workstation.css"></style>
+<style src="../styles/verdict.css"></style>

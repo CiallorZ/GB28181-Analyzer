@@ -269,6 +269,118 @@ def test_unexpected_error_sets_failed_and_propagates_original(db, make_task,
     assert t.stage == '分析异常'
 
 
+@pytest.mark.parametrize('transport', ['udp', 'tcp'])
+def test_media_extraction_capture_error_fails_task(db, make_task, monkeypatch, transport):
+    from app.parsers import capture
+
+    task = make_task(path=__file__)
+
+    def fail_extraction(_path):
+        raise capture.CaptureError('%s extraction failed' % transport)
+
+    if transport == 'udp':
+        monkeypatch.setattr(capture, 'extract_udp_rtp_and_rtcp', fail_extraction)
+    else:
+        monkeypatch.setattr(capture, 'extract_udp_rtp_and_rtcp', lambda _path: ([], []))
+        monkeypatch.setattr(capture, 'dump_tcp_segments', fail_extraction)
+    monkeypatch.setattr(analyzer, '_run',
+                        lambda session, row: analyzer._analyze_rtp(session, row, 'ignored.pcap'))
+
+    with pytest.raises(capture.CaptureError, match='%s extraction failed' % transport):
+        analyzer.run_analysis(db, task.id)
+
+    db.expire_all()
+    saved = db.get(AnalysisTask, task.id)
+    assert saved.status == TaskStatus.FAILED
+    assert saved.stage == '解析失败'
+    assert '%s extraction failed' % transport in saved.error_message
+
+
+def test_worker_prepipeline_exception_marks_task_failed(client, db, make_task,
+                                                        monkeypatch):
+    """进入 analyzer.run_analysis 之前的异常也要兜底写失败，不能永远挂着。"""
+    from app.api import tasks as tasks_api
+
+    task = make_task(path=__file__)
+    endpoint = f'/api/v1/tasks/{task.id}'
+    started = threading.Event()
+
+    def boom(_db, _task_id):
+        started.set()
+        raise RuntimeError('pipeline 启动前炸了')
+
+    monkeypatch.setattr(analyzer, 'run_analysis', boom)
+    assert client.post(endpoint + '/analyze').status_code == 200
+    assert started.wait(5)
+    assert _wait_until(lambda: not _running_has(task.id)), 'worker 未退出'
+
+    db.expire_all()
+    saved = db.get(AnalysisTask, task.id)
+    assert saved.status == TaskStatus.FAILED
+    assert saved.stage == '工作线程异常'
+    assert 'RuntimeError: pipeline 启动前炸了' in saved.error_message
+    assert task.id not in tasks_api._running
+
+
+def test_worker_failure_does_not_overwrite_cancelled(client, db, make_task,
+                                                     monkeypatch):
+    from app.api import tasks as tasks_api
+    from app.core.db import SessionLocal
+
+    task = make_task(path=__file__)
+    endpoint = f'/api/v1/tasks/{task.id}'
+    started = threading.Event()
+
+    def cancel_then_boom(_db, task_id):
+        s = SessionLocal()
+        try:
+            row = s.get(AnalysisTask, task_id)
+            row.status = TaskStatus.CANCELLED
+            row.stage = '已取消'
+            s.commit()
+        finally:
+            s.close()
+        started.set()
+        raise RuntimeError('取消之后才炸')
+
+    monkeypatch.setattr(analyzer, 'run_analysis', cancel_then_boom)
+    assert client.post(endpoint + '/analyze').status_code == 200
+    assert started.wait(5)
+    assert _wait_until(lambda: not _running_has(task.id))
+
+    db.expire_all()
+    saved = db.get(AnalysisTask, task.id)
+    assert saved.status == TaskStatus.CANCELLED
+    assert saved.stage == '已取消'
+    assert task.id not in tasks_api._running
+
+
+def test_thread_start_failure_marks_task_failed(client, db, make_task, monkeypatch):
+    from types import SimpleNamespace
+    from app.api import tasks as tasks_api
+
+    task = make_task(path=__file__)
+
+    class BrokenThread:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            raise RuntimeError('no worker threads available')
+
+    monkeypatch.setattr(tasks_api, 'threading', SimpleNamespace(Thread=BrokenThread))
+    with pytest.raises(RuntimeError, match='no worker threads available'):
+        client.post('/api/v1/tasks/%d/analyze' % task.id)
+
+    db.expire_all()
+    saved = db.get(AnalysisTask, task.id)
+    assert saved.status == TaskStatus.FAILED
+    assert saved.stage == '启动失败'
+    assert 'RuntimeError: no worker threads available' in saved.error_message
+    assert task.id not in tasks_api._running
+    assert client.get('/api/v1/tasks/active-count').json() == {'count': 0}
+
+
 def test_cancelled_status_not_overwritten_by_completion(db, make_task,
                                                         monkeypatch):
     """用户点了取消，worker 跑完不能把状态改回 completed"""

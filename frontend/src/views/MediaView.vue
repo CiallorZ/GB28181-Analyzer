@@ -410,8 +410,6 @@ watch([activeMetric, streams, loading], async () => {
 </template>
 
 <style scoped>
-.h1 { font-size: 19px; font-weight: 600; }
-.sub { font-size: 12px; color: var(--text-3); margin-top: 3px; }
 .trend-panel {overflow:hidden}
 .trend-head {display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 18px;background:var(--surface-2);border-bottom:1px solid var(--line)}
 .trend-head h2 {font-size:16px;font-weight:650}

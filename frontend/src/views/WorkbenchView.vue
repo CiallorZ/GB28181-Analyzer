@@ -622,8 +622,26 @@ const spyList = computed(() => {
 const EV = { confirmed: '已确认', suspected: '疑似', insufficient: '证据不足' }
 const EV_CLS = { confirmed: 'ok', suspected: 'warning', insufficient: 'unknown' }
 const SEV_CLS = { critical: 'critical', warning: 'warning', info: 'info', unknown: 'unknown' }
+// 后端 summary.verdict 为附加字段；旧任务缺失时整个结论条不渲染，优先排查列表保持原样。
+const verdict = computed(() => {
+  const v = summary.value.verdict
+  return v && typeof v === 'object' && v.status && v.headline ? v : null
+})
+const VD_STATUS = {
+  blocked: { label: '存在阻断问题', icon: 'warning' },
+  attention: { label: '需关注', icon: 'warning' },
+  observation: { label: '待观察', icon: 'info' },
+  healthy: { label: '已确认正常', icon: 'check' }
+}
+const verdictStatus = computed(() => VD_STATUS[verdict.value?.status] || VD_STATUS.observation)
+const verdictAction = computed(() => verdict.value?.actions?.[0] || '')
 const priorityFindings = computed(() => diagnostics.value
   .filter(d => d.severity === 'critical' || d.severity === 'warning').slice(0, 3))
+const priorityFindingTotal = computed(() => {
+  const d = summary.value.diagnostics || {}
+  return (d.critical || 0) + (d.warning || 0)
+})
+const diagnosticsTruncated = computed(() => diagnostics.value.length < diagTotal.value)
 const flowStages = computed(() => {
   const s = summary.value
   const d = s.diagnostics || {}
@@ -699,12 +717,17 @@ onUnmounted(() => {
   scrollObs?.disconnect()
   window.removeEventListener('alma-theme-changed', onThemeChange)
 })
-watch(() => route.name === 'task' ? Number(route.params.id) : null, async (tid) => {
-  clearResults()
-  if (!tid) return
+async function loadTaskAndPoll() {
+  const tid = store.currentTaskId
   await loadAll()
   if (tid === store.currentTaskId &&
       (task.value?.status === 'analyzing' || task.value?.stage === '排队中')) startPoll()
+}
+
+watch(() => route.name === 'task' ? Number(route.params.id) : null, async (tid) => {
+  clearResults()
+  if (!tid) return
+  await loadTaskAndPoll()
 }, { immediate: true })
 watch(spyList, setupScrollSpy, { flush: 'post' })
 watch(openSections, () => nextTick(renderCharts), { deep: true })
@@ -719,7 +742,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
     <div v-if="!task && loadingResults" class="fail-wrap" role="status">正在读取任务…</div>
     <div v-else-if="!task && route.name === 'task'" class="fail-wrap">
       <p class="err-box" role="alert">{{ err || '无法读取任务' }}</p>
-      <button class="btn" @click="loadAll">重试</button>
+      <button class="btn" @click="loadTaskAndPoll">重试</button>
     </div>
     <CaptureIntake v-else-if="!task" :busy="uploading || loadingSample" :progress="uploadPct" :error="err"
                    @recorded="id => router.push({name: 'task', params:{id}})" @file="handleFile" @sample="loadSample" />
@@ -793,7 +816,7 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
       <p v-if="loadingResults" role="status">正在读取分析结果…</p>
       <template v-else>
         <p class="err-box" role="alert">{{ err || '无法读取分析结果。' }}</p>
-        <button class="btn mt-14" @click="loadAll">重试</button>
+        <button class="btn mt-14" @click="loadTaskAndPoll">重试</button>
         <button class="btn mt-14" @click="reset">新建分析</button>
       </template>
     </div>
@@ -834,13 +857,28 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
       <CaptureFlow v-if="overview && !loadingResults" :stages="flowStages" :filename="task.file?.filename || task.name"
                    :has-sessions="sessions.length > 0" @navigate="scrollTo" />
       <CaptureEvidence v-if="overview && !loadingResults" :key="task.id" :task-id="task.id" :streams="streams" />
-      <section v-if="priorityFindings.length" class="sec mb-20 findings" aria-labelledby="findings-title">
+      <section v-if="priorityFindingTotal" class="sec mb-20 findings" aria-labelledby="findings-title">
         <div class="sec-head">
           <h2 id="findings-title" class="sec-title">优先排查</h2>
           <span class="spacer"></span>
           <router-link to="/diagnostics" class="btn-mini">全部诊断 <AppIcon name="forward" /></router-link>
         </div>
-        <ul>
+        <div v-if="verdict" class="vd-strip" :class="'vd-' + verdict.status">
+          <span class="vd-status" :class="'vd-' + verdict.status" role="status"
+            :aria-label="`结论状态：${verdictStatus.label}`">
+            <AppIcon :name="verdictStatus.icon" />{{ verdictStatus.label }}
+          </span>
+          <strong class="vd-headline">{{ verdict.headline }}</strong>
+          <router-link v-if="verdictAction" to="/diagnostics" class="vd-action">
+            下一步 · {{ verdictAction }} <AppIcon name="forward" />
+          </router-link>
+        </div>
+        <p v-if="diagnosticsTruncated" class="findings-empty">
+          当前仅载入 {{ diagnostics.length }} / {{ diagTotal }} 条诊断；任务汇总包含
+          {{ summary.diagnostics?.critical || 0 }} 条严重、{{ summary.diagnostics?.warning || 0 }} 条警告。
+          以下仅覆盖已载入事件，完整结果请查看全部诊断。
+        </p>
+        <ul v-if="priorityFindings.length">
           <li v-for="d in priorityFindings" :key="d.id">
             <span class="badge" :class="SEV_CLS[d.severity]">{{ d.severity === 'critical' ? '严重' : '警告' }}</span>
             <div>
@@ -855,6 +893,9 @@ watch(openSections, () => nextTick(renderCharts), { deep: true })
             <router-link v-else-if="d.session_id" :to="`/sessions/${d.session_id}`">查看会话 <AppIcon name="forward" /></router-link>
           </li>
         </ul>
+        <p v-else class="findings-empty">
+          已载入事件中没有严重或警告项；任务汇总记录 {{ priorityFindingTotal }} 条，请打开全部诊断查看。
+        </p>
       </section>
       <section v-else-if="!loadingResults && !err" class="sec mb-20 findings" aria-labelledby="findings-empty-title">
         <div class="sec-head">
@@ -1675,18 +1716,18 @@ section.rise:nth-of-type(7) { animation-delay: .30s; }
   margin-bottom: 12px;
 }
 .sc-ssrc { font-size: 12px; color: var(--brand-lt); font-weight: 600; }
-.sc-link { font-size: 10px; padding: 1px 6px; margin-left: auto; cursor: help; }
+.sc-link { font-size: var(--fs-xs); padding: 1px 6px; margin-left: auto; cursor: help; }
 .sc-metrics {
   display: grid; grid-template-columns: repeat(4, 1fr);
   gap: 8px;
 }
 .sc-metrics > div { display: flex; flex-direction: column; gap: 2px; }
-.sc-metrics i { font-size: 10px; color: var(--text-4); font-style: normal; }
+.sc-metrics i { font-size: var(--fs-xs); color: var(--text-4); font-style: normal; }
 .sc-metrics b {
   font-size: 14px; font-weight: 650;
   color: var(--text); font-variant-numeric: tabular-nums;
 }
-.sc-metrics b span { font-size: 9.5px; color: var(--text-4); font-weight: 400; margin-left: 1px; }
+.sc-metrics b span { font-size: var(--fs-xs); color: var(--text-4); font-weight: 400; margin-left: 1px; }
 .sc-rtcp {
   display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
   margin-top: 10px; padding-top: 8px;
@@ -1775,3 +1816,4 @@ section.rise:nth-of-type(7) { animation-delay: .30s; }
 }
 .foot-note strong { color: var(--text-2); }
 </style>
+<style src="../styles/verdict.css"></style>

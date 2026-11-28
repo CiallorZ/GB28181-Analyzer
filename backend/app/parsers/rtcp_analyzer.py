@@ -187,6 +187,12 @@ def summarize(events: list[dict]) -> dict:
         return {}
 
     srs = [p for p in packets if p.pt == PT_SR]
+    # LSR 候选按 (ssrc, middle32) 索引；每个列表沿用 packets 的到达顺序，
+    # 取最后一个满足 arrival <= 报告时间的即为最近 SR，避免逐报告全量扫描。
+    sr_by_lsr: dict[tuple, list] = {}
+    for sr in srs:
+        if sr.middle32 and sr.ssrc is not None:
+            sr_by_lsr.setdefault((sr.ssrc, sr.middle32), []).append(sr)
     summary: dict = {}
 
     for p in srs:
@@ -218,12 +224,11 @@ def summarize(events: list[dict]) -> dict:
             if block.lsr:
                 # RTCP 的 LSR 是 SR NTP 的中间 32 位。只使用我们确实抓到、
                 # 且发送端 SSRC 与报告对象一致的 SR，不靠本机绝对时钟猜。
-                candidates = [sr for sr in srs
-                              if sr.ssrc == block.ssrc
-                              and sr.middle32 == block.lsr
-                              and sr.arrival <= p.arrival]
+                candidates = [sr for sr in sr_by_lsr.get((block.ssrc, block.lsr), ())
+                              if sr.arrival <= p.arrival]
                 if candidates:
-                    sr = max(candidates, key=lambda s: s.arrival)
+                    # packets 按到达顺序排列，列表中最后一个满足条件的即最近 SR
+                    sr = candidates[-1]
                     rtt = (p.arrival - sr.arrival) - block.dlsr_seconds
                     if rtt >= 0:
                         item['_rtts'].append(rtt * 1000)

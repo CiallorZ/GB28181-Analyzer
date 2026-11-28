@@ -81,7 +81,7 @@ function create() {
 
         <p v-if="busy" class="hint" role="status">正在读取数据…</p>
         <p v-else-if="tasks.length < 2" class="hint">至少需要两个已完成的任务才能创建对比。</p>
-        <p v-if="error" class="err-box" role="alert">{{ error }}</p>
+        <p v-if="error" class="err-box mt-14" role="alert">{{ error }}</p>
 
         <div class="form-actions">
           <button class="btn primary" :disabled="busy || !form.task_a_id || !form.task_b_id">
@@ -155,11 +155,6 @@ label .inp { width: 100%; }
 @media (max-width: 560px) {
   .history-list a { flex-wrap: wrap; gap: 4px 10px; }
   .history-list time { margin-left: 0; }
-}
-.err-box {
-  background: var(--critical-bg); border-left: 3px solid var(--critical);
-  border-radius: var(--radius); padding: 10px 12px; font-size: 12.5px;
-  color: var(--critical); margin-top: 12px;
 }
  .g2 > * { min-width:0; padding:var(--space-3); border:1px solid var(--line); border-radius:var(--radius); background:var(--surface-2); }
 fieldset.paired { border-color:color-mix(in srgb,var(--brand) 40%,var(--line)); background:linear-gradient(125deg,var(--bg-selected),var(--surface) 65%); }

@@ -6,7 +6,7 @@ import PageNav from '../components/PageNav.vue'
 import InterfaceState from '../components/InterfaceState.vue'
 import { feedback } from '../stores/interface'
 import { useTaskStore } from '../stores/task'
-import { clearTask } from '../utils/taskCache'
+import { clearAll, clearTask } from '../utils/taskCache'
 
 const router = useRouter()
 const route = useRoute()
@@ -29,12 +29,22 @@ async function loadStorage() {
 }
 
 async function purge(keep) {
+  const message = keep === 0
+    ? '将删除所有已完成任务的上传抓包、报文索引和重建视频，只保留任务记录与统计数据；分析中的任务不受影响。此操作不可撤销，继续？'
+    : `将按当前保留策略清理上传抓包、报文索引和重建视频，最多保留最近 ${keep} 个任务的这些文件，其他任务只保留记录与统计数据。此操作不可撤销，继续？`
+  if (!confirm(message)) return
   purging.value = true
   purgeMsg.value = ''
   try {
     const r = await api.storagePurge(keep)
-    purgeMsg.value = `已清理 ${r.actions?.length || 0} 个任务，当前占用 ${r.usage?.total_mb ?? 0} MB`
-    await Promise.all([load(), loadStorage()])
+    const actions = r.actions || []
+    for (const action of actions) clearTask(action.task_id)
+    const currentPurged = actions.some(action => action.task_id === store.currentTaskId)
+    const reloadCurrent = currentPurged
+      ? store.loadTask(store.currentTaskId).catch(() => {})
+      : Promise.resolve()
+    purgeMsg.value = `已清理 ${actions.length} 个任务，当前占用 ${r.usage?.total_mb ?? 0} MB`
+    await Promise.all([load(), loadStorage(), reloadCurrent])
   } catch (e) {
     purgeMsg.value = '清理失败：' + e.message
   } finally {
@@ -43,13 +53,17 @@ async function purge(keep) {
 }
 
 async function purgeAll() {
-  if (!confirm('将删除所有任务的上传文件与视频，只保留统计数据。继续？')) return
+  if (!confirm('将删除所有可清理任务的上传抓包、报文索引和重建视频，只保留任务记录与统计数据；分析中的任务不受影响。此操作不可撤销，继续？')) return
   purging.value = true
   purgeMsg.value = ''
   try {
     const r = await api.storagePurgeAll()
-    purgeMsg.value = `已清空 ${r.tasks} 个任务的媒体文件，释放 ${r.freed_mb} MB`
-    await Promise.all([load(), loadStorage()])
+    clearAll()
+    const reloadCurrent = store.currentTaskId
+      ? store.loadTask(store.currentTaskId).catch(() => {})
+      : Promise.resolve()
+    purgeMsg.value = `已清空 ${r.tasks} 个任务的任务文件，释放 ${r.freed_mb} MB`
+    await Promise.all([load(), loadStorage(), reloadCurrent])
   } catch (e) {
     purgeMsg.value = '清空失败：' + e.message
   } finally {
@@ -182,7 +196,7 @@ onMounted(loadStorage)
           只留最近 5 个
         </button>
         <button class="btn sm" :disabled="purging" @click="purge(0)">
-          清空所有媒体
+          清空所有任务文件
         </button>
         <button class="btn sm danger" :disabled="purging" @click="purgeAll">
           彻底清理
@@ -245,8 +259,6 @@ onMounted(loadStorage)
 </template>
 
 <style scoped>
-.h1 { font-size: 20px; font-weight: 600; }
-.sub { font-size: 12.5px; color: var(--text-3); margin-top: 3px; }
 .inp {
   height: 30px; padding: 0 10px; background: var(--bg-2);
   border: 1px solid var(--border); border-radius: var(--radius-sm);
@@ -291,11 +303,6 @@ onMounted(loadStorage)
   padding-top: 10px; border-top: 1px dashed var(--line);
 }
 
-.err-box {
-  background: var(--critical-bg); border-left: 3px solid var(--critical);
-  border-radius: var(--radius); padding: 12px 14px; font-size: 13px;
-  color: var(--critical); margin-bottom: 14px;
-}
  .task-list .tbl th { position:sticky; top:0; z-index:1; }
 .task-list .tbl td { height:36px; }
 .task-list .tbl th { white-space:nowrap; }

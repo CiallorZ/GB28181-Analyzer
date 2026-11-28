@@ -23,12 +23,7 @@
   color: var(--info);
   font-size: 12px;
 }
-.station button:focus-visible,
-.station a:focus-visible,
-.station summary:focus-visible {
-  outline: 2px solid var(--info);
-  outline-offset: 2px;
-}
+/* Generic focus-visible rule lives in theme.css. */
 .context,
 .station-footer {
   display: flex;

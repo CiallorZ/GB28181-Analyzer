@@ -25,6 +25,15 @@ def test_compose_has_both_services():
     assert './data:/app/data' in text
 
 
+def test_compose_publishes_only_loopback_frontend():
+    text = (ROOT / 'docker-compose.yml').read_text(encoding='utf-8')
+    backend = text.split('\n  frontend:', 1)[0]
+    assert 'ports:' not in backend
+    assert '- "127.0.0.1:8080:80"' in text
+    assert '- "8080:80"' not in text
+    assert '- "8788:8788"' not in text
+
+
 def test_nginx_proxies_api_and_keeps_sse_unbuffered():
     text = (ROOT / 'frontend/nginx.conf').read_text(encoding='utf-8')
     assert 'location /api/' in text

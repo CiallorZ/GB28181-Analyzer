@@ -77,8 +77,8 @@ def ensure_columns() -> list[str]:
                 if not nullable:
                     sql += ' NOT NULL'
                 if default is not None:
-                    literal = str(default).replace("'", "''")
-                    sql += " DEFAULT '%s'" % literal
+                    literal = column.type.literal_processor(engine.dialect)(default)
+                    sql += ' DEFAULT %s' % literal
                 connection.execute(text(sql))
                 changed.append('%s.%s' % (table.name, column.name))
     return changed

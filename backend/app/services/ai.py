@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import ssl
+import threading
 import urllib.error
 import urllib.request
 
@@ -294,7 +295,16 @@ MAX_HISTORY = 12
 # ---------------------------------------------------------------
 # 调用
 # ---------------------------------------------------------------
-def _post(body: dict, on_delta=None) -> str:
+def _post(body: dict, on_delta=None, cancel_event: threading.Event | None = None) -> str:
+    """向模型网关发送请求。
+
+    cancel_event 由调用方（SSE 生成器）持有：一旦客户端断开就置位，
+    这里在发送请求前和流式读取的每个分块处检查，尽快终止上游请求，
+    避免断开后仍持续消耗 token。
+    """
+    if cancel_event is not None and cancel_event.is_set():
+        raise RuntimeError('请求已取消')
+
     cfg = load_config()
     key = _api_key(cfg)
     if not key:
@@ -311,6 +321,9 @@ def _post(body: dict, on_delta=None) -> str:
     req.add_header('Content-Type', 'application/json')
     req.add_header('Authorization', 'Bearer ' + key)
     req.add_header('Accept', 'text/event-stream' if on_delta else 'application/json')
+
+    if cancel_event is not None and cancel_event.is_set():
+        raise RuntimeError('请求已取消')
 
     try:
         opener = urllib.request.build_opener(
@@ -347,6 +360,11 @@ def _post(body: dict, on_delta=None) -> str:
     completed = False
     try:
         for raw in resp:
+            # 客户端断开后立即停止读取，由 finally 关闭上游连接。
+            # 注意 urllib 的迭代会先取下一块再进入循环体；这里在消费当前块
+            # 之前再检查一次，保证取消后不会把后续内容交给调用方。
+            if cancel_event is not None and cancel_event.is_set():
+                break
             line = raw.decode('utf-8', 'replace').strip()
             if not line.startswith('data:'):
                 continue
@@ -361,6 +379,8 @@ def _post(body: dict, on_delta=None) -> str:
                 # 流式分块可能被截断，跳过坏块继续读是正确行为
                 continue
             if delta:
+                if cancel_event is not None and cancel_event.is_set():
+                    break
                 parts.append(delta)
                 try:
                     on_delta(delta)
@@ -369,6 +389,8 @@ def _post(body: dict, on_delta=None) -> str:
     finally:
         resp.close()
 
+    if cancel_event is not None and cancel_event.is_set():
+        raise RuntimeError('请求已取消')
     if not completed:
         raise RuntimeError('模型连接中断，响应不完整，请重试')
     text = ''.join(parts)
@@ -386,7 +408,8 @@ EXPERTS = {
 }
 
 
-def analyze(db, task_id: int, on_delta=None, context=None, expert='general') -> str:
+def analyze(db, task_id: int, on_delta=None, context=None, expert='general',
+            cancel_event: threading.Event | None = None) -> str:
     cfg = load_config()
     ctx = context if context is not None else build_context(db, task_id)
     if not ctx.strip():
@@ -406,10 +429,13 @@ def analyze(db, task_id: int, on_delta=None, context=None, expert='general') -> 
         # 注意 thinking 模式不支持 temperature 等采样参数，故不传。
         'thinking': {'type': 'disabled'},
     }
-    return _post(body, on_delta)
+    if cancel_event is None:
+        return _post(body, on_delta)
+    return _post(body, on_delta, cancel_event=cancel_event)
 
 
-def chat(db, task_id: int, history: list, question: str, on_delta=None, context=None, expert='general') -> str:
+def chat(db, task_id: int, history: list, question: str, on_delta=None, context=None, expert='general',
+         cancel_event: threading.Event | None = None) -> str:
     if not (question or '').strip():
         raise RuntimeError('问题不能为空')
 
@@ -437,7 +463,9 @@ def chat(db, task_id: int, history: list, question: str, on_delta=None, context=
         'stream': bool(on_delta),
         'thinking': {'type': 'disabled'},
     }
-    return _post(body, on_delta)
+    if cancel_event is None:
+        return _post(body, on_delta)
+    return _post(body, on_delta, cancel_event=cancel_event)
 
 
 def test_connection() -> str:

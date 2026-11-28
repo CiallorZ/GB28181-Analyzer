@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import hashlib
 import os
+import queue
 import re
 import subprocess
 import tempfile
+import threading
 import time
 from contextlib import closing
 from dataclasses import dataclass, field
@@ -27,6 +29,18 @@ from datetime import datetime
 
 from ..core import analysis_control, toolchain
 from . import rtp_analyzer
+
+# tshark 字段模式下 payload 通常是连续十六进制；仅在遇到异常格式时才回退到正则清理。
+_HEX_CLEAN_RE = re.compile(r'[^0-9a-fA-F]')
+
+
+def _payload_hex_to_bytes(value: str) -> bytes:
+    """把 tshark 的 hex 字段转为 bytes，快路径避免逐包正则扫描。"""
+    try:
+        return bytes.fromhex(value)
+    except (ValueError, TypeError):
+        return bytes.fromhex(_HEX_CLEAN_RE.sub('', value))
+
 
 # ---------------------------------------------------------------
 # 工具定位
@@ -150,15 +164,9 @@ def inspect_file(path: str) -> FileInfo:
         else:
             info.warnings.append('capinfos 读取失败，文件可能损坏')
 
-    # IP / TCP / UDP 计数在报文索引阶段顺带计算，避免重复全量扫描。
-    # 这里再跑一次轻量协议分层检查；它只输出协议汇总，不导出每条报文，
-    # 用来在完全无法解析时尽早返回可读错误，而不是让索引阶段静默得到空表。
-    r = _run([TSHARK, '-r', path, '-q', '-z', 'io,phs'], 300, '协议分层统计')
-    if r.returncode != 0:
-        raise CaptureError('无法解析该抓包文件：%s' % ((r.stderr or '')[:300]))
-    if 'ip' not in (r.stdout or '').lower():
-        info.warnings.append('未发现 IP 层流量')
-
+    # 文件有效性由 capinfos 与后续报文索引阶段共同保证；"未发现 IP 层流量"
+    # 由 analyzer 在索引阶段按实际报文统计后给出。这里不再额外全量跑一遍
+    # tshark io,phs —— 那会让每次分析都多读一遍完整抓包（大文件可达数十秒）。
     # 抓包完整性判断
     if info.packet_count is not None and info.packet_count == 0:
         info.warnings.append('文件内没有任何报文')
@@ -231,19 +239,46 @@ def _tshark_lines(cmd, timeout: float = TSHARK_TIMEOUT):
     #
     # 流式读取后不再有 subprocess.run(timeout=...)，但外部进程仍必须有
     # 时限：tshark 卡在坏抓包或失效的网络盘上时，不能把分析线程永久挂住。
-    # 这里在逐行读取的同时检查已用时间，超时就杀掉并抛可读错误。
+    # 关键：``for line in proc.stdout`` 可能在进程一行都不输出时无限阻塞，
+    # 所以把阻塞读放进后台线程，主线程按 deadline 有界地取队列，确保
+    # "一行不出" 和 "输出中途卡住" 两种情况都会超时。
     with tempfile.TemporaryFile() as stderr:
         proc = subprocess.Popen(
             cmd, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
             stdout=subprocess.PIPE, stderr=stderr, text=True, errors='replace',
             bufsize=1 << 20)
         started = time.monotonic()
+        lines: queue.Queue = queue.Queue()
+        reader_error: list[BaseException] = []
+
+        def _read_stdout():
+            try:
+                for line in proc.stdout:
+                    lines.put(line)
+            except BaseException as exc:      # 让读错误在主线程可见
+                reader_error.append(exc)
+            finally:
+                lines.put(None)                # EOF 哨兵：与真实输出行(None 不会出现)区分
+
+        thread = threading.Thread(target=_read_stdout, daemon=True)
+        thread.start()
         try:
             with analysis_control.track(proc):
-                for line in proc.stdout:
-                    if time.monotonic() - started > timeout:
-                        raise CaptureError('tshark 读取超时（%d 秒）' % timeout)
+                while True:
+                    remaining = timeout - (time.monotonic() - started)
+                    if remaining <= 0:
+                        raise CaptureError('tshark 读取超时（%g 秒）' % timeout)
+                    try:
+                        # 有界等待：stdout 阻塞时仍能检查 deadline
+                        line = lines.get(timeout=min(remaining, 0.5))
+                    except queue.Empty:
+                        analysis_control.checkpoint()
+                        continue
+                    if line is None:
+                        break
                     yield line
+                if reader_error:
+                    raise reader_error[0]
                 try:
                     status = proc.wait(timeout=10)
                 except subprocess.TimeoutExpired as exc:
@@ -261,8 +296,15 @@ def _tshark_lines(cmd, timeout: float = TSHARK_TIMEOUT):
         finally:
             if proc.poll() is None:
                 proc.kill()
-                proc.wait()
-            proc.stdout.close()
+                # 不让 wait() 无限挂住：短等后仍未退出就再 kill 并直接回收，
+                # 避免坏进程/假进程把分析线程钉死在 finally 里。
+                try:
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+            if proc.stdout:
+                proc.stdout.close()           # 读线程若有阻塞读，会随之退出
 
 
 def iter_packets(path: str, display_filter: str | None = None,
@@ -401,7 +443,7 @@ def dump_tcp_segments(path: str) -> dict:
             continue
         try:
             seq = int(seq_s)
-            data = bytes.fromhex(re.sub(r'[^0-9a-fA-F]', '', hexpay))
+            data = _payload_hex_to_bytes(hexpay)
             ts = float(ts_s) if ts_s else 0.0
         except (ValueError, TypeError):
             continue
@@ -460,7 +502,7 @@ def extract_udp_rtp_and_rtcp(path: str) -> tuple[list, list]:
     ], 'udp.length>20'):
         r = (r + [''] * 8)[:8]
         try:
-            payload = bytes.fromhex(re.sub(r'[^0-9a-fA-F]', '', r[6]))
+            payload = _payload_hex_to_bytes(r[6])
         except (ValueError, TypeError):
             continue
         if len(payload) < 8 or (payload[0] >> 6) != 2:

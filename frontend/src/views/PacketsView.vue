@@ -196,7 +196,7 @@ if(props.embedded && items.value[0])openPacket(items.value[0])
     </PageNav>
 
     <form v-if="embedded" class="packet-filters" @submit.prevent="page=1;load()"><input class="inp sm" v-model="ipFilter" placeholder="源或目的 IP" aria-label="IP 过滤"><input class="inp sm" v-model="protoFilter" placeholder="协议" aria-label="协议过滤"><button>查询</button><small v-if="range">捕获时间选区已应用</small></form>
-    <div v-if="err" role="alert" class="err-box">{{ err }}</div>
+    <div v-if="err" role="alert" class="err-box flat">{{ err }}</div>
 
     <div v-if="!store.currentTaskId" class="card">
       <div class="empty">尚未选择分析任务</div>
@@ -276,7 +276,7 @@ if(props.embedded && items.value[0])openPacket(items.value[0])
       <div v-panel-change="detail?.id" class="pane pane-info">
         <div class="pane-head">原始字节 · HEX / ASCII</div>
         <div class="pane-body scroll">
-          <div v-if="!detail" class="empty">—</div>
+          <div v-if="!detail" class="empty left">—</div>
                       <div v-if="detail && !detailLoading" ref="hexView" class="hex-view">
               <div class="hex-head">
                 <span class="ho">偏移</span>
@@ -371,7 +371,6 @@ if(props.embedded && items.value[0])openPacket(items.value[0])
 .pkt-tbl tbody tr.active td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
 .pkt-tbl tbody tr:focus-visible { outline:2px solid var(--brand); outline-offset:-2px; }
 .pkt-tbl td.num { text-align: right; font-variant-numeric: tabular-nums; }
-.pane-info .empty { text-align: left; padding: 14px 12px; }
 
 
 
@@ -409,11 +408,6 @@ if(props.embedded && items.value[0])openPacket(items.value[0])
 .info-row b { color: var(--text-2); font-weight: 500; word-break: break-all; }
 .info-row.full { flex-direction: column; gap: 3px; }
 
-.err-box {
-  background: var(--critical-soft); border-left: 2px solid var(--critical);
-  border-radius: 0; padding: 10px 12px; font-size: 12.5px;
-  color: var(--critical); margin-bottom: 14px;
-}
 .packets-page.embedded{padding:0;height:auto;max-width:none}.embedded .tri-pane{grid-template-columns:minmax(0,1.45fr) minmax(0,.95fr) minmax(0,1.05fr);height:190px;min-height:0;border:0}.embedded .pane{min-height:0}.pane-body{overflow:auto}.packet-filters{display:flex;align-items:center;gap:8px;padding:6px 12px}.packet-filters input{width:125px}.pane-list td:last-child{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.layer summary{cursor:pointer}
 @media(max-width:850px){.embedded .tri-pane{grid-template-columns:minmax(0,1fr);height:auto}.embedded .pane{height:220px}}
 @media(max-width:650px){.packets-page:not(.embedded){padding:16px}.packet-filters{flex-wrap:wrap}.packet-filters input{width:min(125px,100%)}}

@@ -178,7 +178,7 @@ onUnmounted(() => {
       :sub="session ? `${session.device_id || '未知设备'} · ${session.session_type === 'live' ? '实时点播' : '回放'} · ${session.start_time?.toFixed(2)}s 开始` : ''"
       :crumbs="[{label:'工作台', to:'/'}, {label:session ? '任务 #'+session.task_id : '历史任务', to:session ? '/tasks/'+session.task_id : '/tasks'}, {label:`会话 #${sid}`}]" />
 
-    <div v-if="err" class="err-box">{{ err }}</div>
+    <div v-if="err" class="err-box mb-14">{{ err }}</div>
 
     <template v-if="session">
       <!-- 会话摘要 -->
@@ -477,8 +477,6 @@ onUnmounted(() => {
 .event-content { min-width: 0; overflow-wrap: anywhere; }
 .event-content p { color: var(--text-2); font-size: 12px; }
 @media (max-width: 600px) { .event-timeline li { grid-template-columns: 62px 8px minmax(0,1fr); gap: 8px; } .event-timeline button { grid-column: 3; justify-self: start; } }
-.h1 { font-size: 19px; font-weight: 600; }
-.sub { font-size: 12px; color: var(--text-3); margin-top: 3px; }
 .sep { color: var(--text-4); margin: 0 5px; }
 
 
@@ -580,12 +578,6 @@ onUnmounted(() => {
   white-space: pre-wrap; word-break: break-all; line-height: 1.65;
 }
 
-.err-box {
-  background: var(--critical-bg); border: 1px solid rgba(240,69,58,.35);
-  border-left: 3px solid var(--critical); border-radius: var(--radius);
-  padding: 14px 16px; font-size: 13px; color: var(--critical);
-  margin-bottom: 16px;
-}
  .sdp-block { background:var(--surface-2); border:1px solid var(--line); border-radius:var(--radius); padding:var(--space-3); }
 .sdp-grid b { overflow-wrap:anywhere; }
 </style>

@@ -3,7 +3,7 @@
 ## 环境
 
 - Python 3.10+
-- Node.js 18+
+- Node.js 20+
 - tshark（Wireshark 自带）
 - ffmpeg（可选，用于视频重建）
 
